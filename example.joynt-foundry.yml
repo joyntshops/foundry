@@ -1,0 +1,89 @@
+# Joynt Foundry — Example Configuration
+# Copy to .joynt-foundry.yml in your repo root and customize.
+
+# GitHub repository (required)
+repo: "your-org/your-repo"
+
+# Label names used by Foundry
+labels:
+  ready: "state:ready"
+  in_progress: "state:in-progress"
+  done: "state:done"
+  ready_for_review: "state:ready-for-human-review"
+  spec_changed: "spec:changed"
+
+# Branch naming — {issue} = number, {slug} = slugified title
+branch_template: "feature/{issue}-{slug}"
+
+# Worktree base directory (relative to repo root)
+worktree_base: "./wts"
+
+# tmux session naming — {issue} = number
+tmux_template: "foundry-{issue}"
+
+# Concurrency limits
+max_sessions: 4
+max_verify_parallel: 1
+
+# Verification commands (run in worktree before PR creation)
+verify:
+  - "npm run lint"
+  - "npm run typecheck"
+  - "npm run build"
+  - "npm test"
+
+# Command run after merging into integration (via foundry review)
+integration_rebuild: "npm run build"
+
+# Comment triggers
+comment_triggers:
+  replan: "@foundry replan"
+  restart: "@foundry restart"
+
+# Unified monorepo versioning
+# List ALL package.json files that share one version.
+# First entry = primary (version is read from here for tagging).
+version_sources:
+  - "package.json"
+  # - "packages/api/package.json"
+  # - "packages/web/package.json"
+
+# Release tag prefix
+tag_prefix: "v"
+
+# Polling interval
+poll_interval_seconds: 30
+
+# Default agent backend (used when no label match)
+default_agent_backend: "claude-code"
+
+# Agent backend definitions
+agent_backends:
+  claude-code:
+    type: command
+    command: >-
+      claude --dangerously-skip-permissions
+      -p "You are working on issue #{issue_number}: {title}.
+      The issue is at {issue_url}. Read the issue body and implement the task.
+      When done, create a commit with your changes."
+      --output-format stream-json 2>&1 | tee {log_dir}/agent.log
+
+  # Example: generic command backend
+  command:
+    type: command
+    command: "echo 'Replace this with your agent command'"
+
+  # Example: aider backend
+  # aider:
+  #   type: command
+  #   command: >-
+  #     aider --yes --message "Implement issue #{issue_number}: {title}. See {issue_url}"
+  #     2>&1 | tee {log_dir}/agent.log
+  #   env:
+  #     AIDER_MODEL: "claude-3-5-sonnet-20241022"
+
+# Optional: map issue labels to specific backends
+agent_label_map:
+  "agent:claude": "claude-code"
+  # "agent:cursor": "cursor"
+  # "agent:aider": "aider"

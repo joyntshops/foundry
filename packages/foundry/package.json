@@ -1,0 +1,39 @@
+{
+  "name": "@joynt/foundry",
+  "version": "0.1.0",
+  "description": "Developer automation: GitHub Issues → agent sessions → validated PRs",
+  "license": "UNLICENSED",
+  "bin": {
+    "foundry": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "dev": "tsc --watch"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joyntshops/foundry.git",
+    "directory": "packages/foundry"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "yaml": "^2.6.1",
+    "chalk": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.7.0"
+  }
+}

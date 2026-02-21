@@ -1,0 +1,119 @@
+/**
+ * Joynt Foundry — Core type definitions
+ */
+
+// ── Configuration (.joynt-foundry.yml) ──────────────────────────────────
+
+export interface AgentBackendDef {
+  type: 'command';
+  command: string;
+  env?: Record<string, string>;
+}
+
+export interface FoundryConfig {
+  repo: string;                         // e.g. "joyntshops/foundry"
+
+  labels: {
+    ready: string;                      // default "state:ready"
+    in_progress: string;                // default "state:in-progress"
+    done: string;                       // default "state:done"
+    ready_for_review: string;           // default "state:ready-for-human-review"
+    spec_changed: string;               // default "spec:changed"
+  };
+
+  branch_template: string;              // default "feature/{issue}-{slug}"
+  worktree_base: string;                // default "../wts"
+  tmux_template: string;               // default "foundry-{issue}"
+
+  max_sessions: number;                 // default 4
+  max_verify_parallel: number;          // default 1
+
+  verify: string[];                     // e.g. ["npm run lint", "npm run build", "npm test"]
+  integration_rebuild: string;          // e.g. "npm run build"
+
+  comment_triggers: {
+    replan: string;                     // default "@foundry replan"
+    restart: string;                    // default "@foundry restart"
+  };
+
+  version_sources: string[];            // ordered list of package.json paths
+  tag_prefix: string;                   // default "v"
+
+  default_agent_backend: string;        // default "command"
+  agent_backends: Record<string, AgentBackendDef>;
+
+  agent_label_map?: Record<string, string>;   // label → backend name
+  poll_interval_seconds: number;              // default 30
+}
+
+// ── Local State (~/.joynt-foundry/) ─────────────────────────────────────
+
+export type TaskStatus =
+  | 'claimed'
+  | 'agent-running'
+  | 'verifying'
+  | 'pr-open'
+  | 'reviewing'
+  | 'done'
+  | 'failed'
+  | 'stopped';
+
+export interface TaskState {
+  issue: number;
+  title: string;
+  repo: string;
+  branch: string;
+  worktree: string;
+  tmux_session: string;
+  pr_url?: string;
+  agent_backend: string;
+  agent_command: string;
+  status: TaskStatus;
+  claimed_at: string;
+  updated_at: string;
+  runner_id: string;
+}
+
+export interface RunnerState {
+  runner_id: string;
+  repo: string;
+  tasks: Record<number, TaskState>;     // keyed by issue number
+}
+
+// ── Agent Backend Interface ─────────────────────────────────────────────
+
+export interface AgentLaunchParams {
+  worktree: string;
+  issue_url: string;
+  issue_number: number;
+  repo: string;
+  title: string;
+  body: string;
+  labels: string[];
+  log_dir: string;
+  state_dir: string;
+}
+
+export interface AgentBackend {
+  name: string;
+  resolveCommand(params: AgentLaunchParams): string;
+  resolveEnv(params: AgentLaunchParams): Record<string, string>;
+}
+
+// ── GitHub Types ────────────────────────────────────────────────────────
+
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  body: string | null;
+  labels: Array<{ name: string }>;
+  html_url: string;
+  state: string;
+}
+
+export interface GitHubComment {
+  id: number;
+  body: string;
+  user: { login: string } | null;
+  created_at: string;
+}
