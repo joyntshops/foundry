@@ -37,7 +37,7 @@ Developer automation system. GitHub Issues become the task control plane; Foundr
 ## Quick Start
 
 ```bash
-npm install -g @joynt/foundry
+npm install -g @joyntshops/foundry
 cd your-repo
 foundry init
 foundry run
@@ -72,4 +72,4 @@ foundry run
 
 ## Package
 
-Published to GitHub Packages as `@joynt/foundry`. See [installation docs](docs/foundry/installation.md) for authentication setup.
+Published to GitHub Packages as `@joyntshops/foundry`. See [installation docs](docs/foundry/installation.md) for authentication setup.

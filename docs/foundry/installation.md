@@ -6,38 +6,38 @@
 - **npm** ≥ 8
 - **git** ≥ 2.20
 - **tmux** ≥ 3.0
-- **GitHub CLI** (`gh`) — authenticated with repo access
+- **GitHub CLI** (`gh`) — authenticated via `gh auth login`
+- **SSH keys** configured for GitHub access
 
 ## Install from GitHub Packages
 
-### 1. Authenticate with GitHub Packages
+### 1. Create a GitHub Personal Access Token
 
-Create or use an existing personal access token (PAT) with `read:packages` scope.
+1. Go to **GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)**
+   — direct link: https://github.com/settings/tokens
+2. Click **"Generate new token (classic)"**
+3. Give it a name (e.g., `foundry-packages`)
+4. Select the **`read:packages`** scope
+5. Click **Generate token** and copy it immediately — you won't see it again
+
+### 2. Authenticate with GitHub Packages
 
 ```bash
-npm login --registry=https://npm.pkg.github.com --scope=@joynt
+npm login --registry=https://npm.pkg.github.com --scope=@joyntshops
 # Username: your-github-username
-# Password: your-PAT
-# Email: your-email
+# Password: <paste your token>
 ```
 
-Or add to `~/.npmrc`:
-
-```
-@joynt:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=YOUR_PAT
-```
-
-### 2. Install globally
+### 3. Install globally
 
 ```bash
-npm install -g @joynt/foundry
+npm install -g @joyntshops/foundry
 ```
 
-### 3. Or use via npx
+### 4. Or use via npx
 
 ```bash
-npx @joynt/foundry --help
+npx @joyntshops/foundry --help
 ```
 
 ## Verify Installation
@@ -50,7 +50,7 @@ foundry --help
 ## Upgrade
 
 ```bash
-npm update -g @joynt/foundry
+npm update -g @joyntshops/foundry
 ```
 
 ## Dependencies Check

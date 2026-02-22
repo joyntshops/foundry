@@ -1,38 +1,23 @@
 /**
  * Unified monorepo versioning — bump ALL version_sources together.
+ *
+ * Uses `npm version` under the hood for standard semver bumping.
  */
-import * as fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
-import * as semver from 'node:module';
 
 export type BumpType = 'patch' | 'minor' | 'major';
 
-export function readVersion(pkgPath: string): string {
-  const raw = fs.readFileSync(pkgPath, 'utf-8');
-  const pkg = JSON.parse(raw);
-  return pkg.version ?? '0.0.0';
-}
-
-export function bumpVersion(current: string, type: BumpType): string {
-  const parts = current.split('.').map(Number);
-  if (parts.length !== 3 || parts.some(isNaN)) {
-    throw new Error(`Invalid version: ${current}`);
-  }
-  switch (type) {
-    case 'major':
-      return `${parts[0] + 1}.0.0`;
-    case 'minor':
-      return `${parts[0]}.${parts[1] + 1}.0`;
-    case 'patch':
-      return `${parts[0]}.${parts[1]}.${parts[2] + 1}`;
-  }
-}
-
-export function setVersion(pkgPath: string, version: string): void {
-  const raw = fs.readFileSync(pkgPath, 'utf-8');
-  const pkg = JSON.parse(raw);
-  pkg.version = version;
-  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+/**
+ * Bump a package.json using `npm version`. Returns the new version string.
+ * The `target` can be a bump type (patch/minor/major) or an exact version.
+ */
+function npmVersion(target: string, pkgDir: string): string {
+  return execFileSync('npm', ['version', target, '--no-git-tag-version'], {
+    cwd: pkgDir,
+    encoding: 'utf-8',
+    timeout: 30_000,
+  }).trim().replace(/^v/, '');
 }
 
 export function bumpAllVersionSources(
@@ -44,15 +29,16 @@ export function bumpAllVersionSources(
     throw new Error('No version_sources configured in .joynt-foundry.yml');
   }
 
-  // Read primary version
+  // Bump primary source to get the new version
   const primaryPath = path.resolve(repoRoot, versionSources[0]);
-  const current = readVersion(primaryPath);
-  const next = bumpVersion(current, type);
+  const next = npmVersion(type, path.dirname(primaryPath));
 
-  const files: string[] = [];
-  for (const src of versionSources) {
+  const files: string[] = [primaryPath];
+
+  // Set remaining sources to the same exact version
+  for (const src of versionSources.slice(1)) {
     const fullPath = path.resolve(repoRoot, src);
-    setVersion(fullPath, next);
+    npmVersion(next, path.dirname(fullPath));
     files.push(fullPath);
   }
 

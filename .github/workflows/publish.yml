@@ -1,0 +1,65 @@
+name: Publish to GitHub Packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/foundry/**"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: packages/foundry
+
+      - name: Build
+        run: npm run build
+        working-directory: packages/foundry
+
+      - name: Check if version already published
+        id: version-check
+        working-directory: packages/foundry
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          if npm view "@joyntshops/foundry@$LOCAL" version 2>/dev/null; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump patch version
+        if: steps.version-check.outputs.published == 'true'
+        working-directory: packages/foundry
+        run: npm version patch --no-git-tag-version
+
+      - name: Commit and tag release
+        working-directory: packages/foundry
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "release: v$VERSION"
+          git tag "v$VERSION"
+          git push origin main --tags
+
+      - name: Publish
+        run: npm publish
+        working-directory: packages/foundry
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
