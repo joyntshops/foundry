@@ -29,6 +29,7 @@ program
   .command('init')
   .description('Scaffold .joynt-foundry.yml and create required GitHub labels')
   .option('--skip-labels', 'Skip creating GitHub labels')
+  .option('--clean-labels', 'Remove non-Foundry labels before creating Foundry labels')
   .action(async (opts) => {
     const { runInit } = await import('./commands/init.js');
     await runInit(opts);

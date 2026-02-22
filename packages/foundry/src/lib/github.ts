@@ -83,6 +83,21 @@ export function hasLabel(issue: GitHubIssue, label: string): boolean {
 
 // ── Labels ──────────────────────────────────────────────────────────────
 
+export function listLabels(repo: string): string[] {
+  const raw = gh([
+    'label', 'list',
+    '--repo', repo,
+    '--json', 'name',
+    '--limit', '100',
+  ]);
+  const labels = JSON.parse(raw) as Array<{ name: string }>;
+  return labels.map(l => l.name);
+}
+
+export function deleteLabel(repo: string, name: string): void {
+  gh(['label', 'delete', name, '--repo', repo, '--yes']);
+}
+
 export function ensureLabel(repo: string, name: string, color: string, description: string): void {
   try {
     gh(['label', 'create', name, '--repo', repo, '--color', color, '--description', description, '--force']);

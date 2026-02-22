@@ -80,7 +80,7 @@ const DEFAULT_CONFIG = {
   },
 };
 
-export async function runInit(opts: { skipLabels?: boolean }): Promise<void> {
+export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolean }): Promise<void> {
   const configPath = path.join(process.cwd(), CONFIG_FILENAME);
 
   if (fs.existsSync(configPath)) {
@@ -94,8 +94,25 @@ export async function runInit(opts: { skipLabels?: boolean }): Promise<void> {
   }
 
   if (!opts.skipLabels) {
-    log.info('Creating GitHub labels...');
     const repo = detectRepo();
+
+    if (opts.cleanLabels) {
+      log.info('Removing non-Foundry labels...');
+      const foundryNames = new Set(LABEL_DEFS.map(l => l.name));
+      const existing = github.listLabels(repo);
+      for (const name of existing) {
+        if (!foundryNames.has(name)) {
+          try {
+            github.deleteLabel(repo, name);
+            log.success(`  Deleted label: ${name}`);
+          } catch (err) {
+            log.warn(`  Failed to delete label ${name}: ${err}`);
+          }
+        }
+      }
+    }
+
+    log.info('Creating GitHub labels...');
     for (const label of LABEL_DEFS) {
       try {
         github.ensureLabel(repo, label.name, label.color, label.description);
