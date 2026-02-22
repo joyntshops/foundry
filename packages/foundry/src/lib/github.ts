@@ -146,3 +146,53 @@ export function isPRMergeable(repo: string, pr: string | number): boolean {
     return false;
   }
 }
+
+// ── PR Reviews ─────────────────────────────────────────────────────────
+
+export interface PRReview {
+  author: { login: string };
+  state: string; // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
+  body: string;
+  submittedAt: string;
+}
+
+export interface PRReviewComment {
+  author: { login: string };
+  body: string;
+  createdAt: string;
+  path: string;
+  line: number | null;
+}
+
+export function getPRReviews(repo: string, prNumber: number): { reviews: PRReview[]; comments: PRReviewComment[] } {
+  const raw = gh([
+    'pr', 'view', String(prNumber),
+    '--repo', repo,
+    '--json', 'reviews,reviewComments',
+  ]);
+  const data = JSON.parse(raw);
+  return {
+    reviews: (data.reviews ?? []).map((r: any) => ({
+      author: r.author ?? { login: 'unknown' },
+      state: r.state,
+      body: r.body ?? '',
+      submittedAt: r.submittedAt,
+    })),
+    comments: (data.reviewComments ?? []).map((c: any) => ({
+      author: c.author ?? { login: 'unknown' },
+      body: c.body ?? '',
+      createdAt: c.createdAt,
+      path: c.path ?? '',
+      line: c.line ?? null,
+    })),
+  };
+}
+
+export function commentOnPR(repo: string, prNumber: number, body: string): void {
+  gh(['pr', 'comment', String(prNumber), '--repo', repo, '--body', body]);
+}
+
+export function extractPRNumber(prUrl: string): number | null {
+  const match = prUrl.match(/\/pull\/(\d+)/);
+  return match ? Number(match[1]) : null;
+}

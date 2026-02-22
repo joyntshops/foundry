@@ -15,6 +15,7 @@ const LABEL_DEFS: Array<{ name: string; color: string; description: string }> = 
   { name: 'state:done', color: '5319e7', description: 'Task completed by Foundry' },
   { name: 'state:ready-for-human-review', color: '1d76db', description: 'Ready for human review' },
   { name: 'spec:changed', color: 'd93f0b', description: 'Specification changed — replan needed' },
+  { name: 'state:waiting-for-input', color: 'e4e669', description: 'Agent needs human input to proceed' },
   { name: 'agent:claude', color: 'c5def5', description: 'Use Claude Code agent backend' },
   { name: 'agent:cursor', color: 'c5def5', description: 'Use Cursor agent backend' },
 ];

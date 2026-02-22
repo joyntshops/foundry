@@ -19,6 +19,7 @@ export interface FoundryConfig {
     done: string;                       // default "state:done"
     ready_for_review: string;           // default "state:ready-for-human-review"
     spec_changed: string;               // default "spec:changed"
+    waiting_for_input: string;          // default "state:waiting-for-input"
   };
 
   branch_template: string;              // default "feature/{issue}-{slug}"
@@ -27,6 +28,7 @@ export interface FoundryConfig {
 
   max_sessions: number;                 // default 4
   max_verify_parallel: number;          // default 1
+  max_input_rounds: number;             // default 3
 
   verify: string[];                     // e.g. ["npm run lint", "npm run build", "npm test"]
   integration_rebuild: string;          // e.g. "npm run build"
@@ -54,6 +56,9 @@ export type TaskStatus =
   | 'verifying'
   | 'pr-open'
   | 'reviewing'
+  | 'waiting-for-input'
+  | 'resuming'
+  | 'pr-changes-requested'
   | 'done'
   | 'failed'
   | 'stopped';
@@ -66,12 +71,16 @@ export interface TaskState {
   worktree: string;
   tmux_session: string;
   pr_url?: string;
+  pr_number?: number;
   agent_backend: string;
   agent_command: string;
   status: TaskStatus;
   claimed_at: string;
   updated_at: string;
   runner_id: string;
+  session_id?: string;
+  input_request_count?: number;
+  last_agent_message?: string;
 }
 
 export interface RunnerState {
@@ -116,4 +125,26 @@ export interface GitHubComment {
   body: string;
   user: { login: string } | null;
   created_at: string;
+}
+
+// ── Agent Outcome ────────────────────────────────────────────────────────
+
+export type AgentOutcomeType = 'completed' | 'needs-input' | 'errored' | 'indeterminate';
+
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface AskUserQuestionData {
+  question: string;
+  options: AskUserQuestionOption[];
+  multiSelect: boolean;
+}
+
+export interface AgentOutcome {
+  type: AgentOutcomeType;
+  session_id: string | null;
+  final_message: string | null;
+  ask_user_questions: AskUserQuestionData[] | null;
 }

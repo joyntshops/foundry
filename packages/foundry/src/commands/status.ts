@@ -42,6 +42,17 @@ export async function runStatus(): Promise<void> {
     if (task.pr_url) {
       console.log(`    PR:       ${task.pr_url}`);
     }
+    if (['waiting-for-input', 'pr-changes-requested'].includes(task.status)) {
+      if (task.input_request_count) {
+        console.log(`    Input rounds: ${task.input_request_count}`);
+      }
+      if (task.last_agent_message) {
+        const truncated = task.last_agent_message.length > 200
+          ? task.last_agent_message.slice(0, 200) + '...'
+          : task.last_agent_message;
+        console.log(`    Agent msg: ${truncated}`);
+      }
+    }
     console.log(`    Claimed:  ${task.claimed_at}`);
     console.log('');
   }
