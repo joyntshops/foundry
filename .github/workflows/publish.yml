@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "packages/foundry/**"
+      - ".github/workflows/publish.yml"
 
 jobs:
   publish:
