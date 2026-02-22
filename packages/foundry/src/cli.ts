@@ -4,15 +4,19 @@
  *
  * Developer automation: GitHub Issues → agent sessions → validated PRs.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { Command } from 'commander';
 import { setVerbose } from './lib/log.js';
+
+const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
 
 const program = new Command();
 
 program
   .name('foundry')
   .description('Joynt Foundry — developer automation via GitHub Issues and pluggable coding agents')
-  .version('0.1.0')
+  .version(pkg.version)
   .option('-v, --verbose', 'Enable verbose/debug output')
   .hook('preAction', (thisCommand) => {
     const opts = thisCommand.opts();
