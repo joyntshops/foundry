@@ -9,7 +9,7 @@ cd your-repo
 foundry init
 ```
 
-This creates `.joynt-foundry.yml` and sets up GitHub labels.
+This creates `.joynt-foundry.yml`, sets up GitHub labels, and creates the `integration` branch.
 
 ## 2. Configure
 
@@ -44,18 +44,11 @@ agent_backends:
       --output-format stream-json 2>&1 | tee {log_dir}/agent.log
 ```
 
-## 3. Create the Integration Branch
-
-```bash
-git checkout -b integration
-git push -u origin integration
-```
-
-## 4. Create a Task
+## 3. Create a Task
 
 Create a GitHub Issue and add the label `state:ready`.
 
-## 5. Run Foundry
+## 4. Run Foundry
 
 ```bash
 foundry run
@@ -63,7 +56,7 @@ foundry run
 
 Foundry will claim the issue, create a worktree, launch the agent, verify the output, and open a PR.
 
-## 6. Monitor
+## 5. Monitor
 
 ```bash
 # In another terminal:

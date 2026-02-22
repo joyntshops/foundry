@@ -93,6 +93,22 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     log.success(`Created ${CONFIG_FILENAME}`);
   }
 
+  // Create integration branch if it doesn't exist
+  if (!git.remoteBranchExists('integration') && !git.branchExists('integration')) {
+    log.info('Creating integration branch...');
+    try {
+      const prev = git.currentBranch();
+      git.createBranch('integration', 'HEAD');
+      git.push('integration');
+      git.checkout(prev);
+      log.success('Created and pushed integration branch');
+    } catch (err) {
+      log.warn(`Failed to create integration branch: ${err}`);
+    }
+  } else {
+    log.info('Integration branch already exists.');
+  }
+
   if (!opts.skipLabels) {
     const repo = detectRepo();
 
@@ -126,9 +142,8 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
   log.info('');
   log.info('Next steps:');
   log.info('  1. Review and edit .joynt-foundry.yml');
-  log.info('  2. Configure version_sources with paths to your package.json files');
-  log.info('  3. Configure agent_backends for your preferred coding agent');
-  log.info('  4. Run `foundry run` to start the runner loop');
+  log.info('  2. Configure version_sources and agent_backends');
+  log.info('  3. Run `foundry run` to start the runner loop');
   log.info('');
   log.info('Docs: docs/foundry/overview.md');
 }
