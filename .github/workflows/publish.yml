@@ -42,19 +42,15 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Bump patch version
+      - name: Bump patch version, commit, and tag
         if: steps.version-check.outputs.published == 'true'
         working-directory: packages/foundry
-        run: npm version patch --no-git-tag-version
-
-      - name: Commit and tag release
-        working-directory: packages/foundry
         run: |
+          npm version patch --no-git-tag-version
           VERSION=$(node -p "require('./package.json').version")
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
-          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git add package.json
           git commit -m "release: v$VERSION"
           git tag "v$VERSION"
           git push origin main --tags
