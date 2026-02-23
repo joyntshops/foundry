@@ -11,6 +11,8 @@ foundry init
 
 This creates `.joynt-foundry.yml`, sets up GitHub labels, and creates the `integration` branch.
 
+Foundry auto-detects your project type (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`) and populates sensible defaults for `verify`, `integration_rebuild`, and `version_sources`. If the repo has zero commits, Foundry creates an initial commit automatically so the integration branch can be set up.
+
 ## 2. Configure
 
 Edit `.joynt-foundry.yml`:
@@ -18,13 +20,14 @@ Edit `.joynt-foundry.yml`:
 ```yaml
 repo: your-org/your-repo
 
-# List ALL package.json files that share a unified version
+# List ALL version files that share a unified version
+# Supported: package.json, Cargo.toml, pyproject.toml
 version_sources:
   - package.json
   - packages/api/package.json
   - packages/web/package.json
 
-# Verify commands to run before opening PRs
+# Verify commands to run before opening PRs (auto-detected from project type)
 verify:
   - npm run lint
   - npm run typecheck

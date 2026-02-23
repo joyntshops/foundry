@@ -34,6 +34,63 @@ function detectRepo(): string {
   }
 }
 
+// ── Project type detection ──────────────────────────────────────────────
+
+interface ProjectDefaults {
+  verify: string[];
+  integration_rebuild: string;
+  version_sources: string[];
+}
+
+function detectProjectDefaults(): ProjectDefaults & { detected: string } {
+  const cwd = process.cwd();
+
+  if (fs.existsSync(path.join(cwd, 'package.json'))) {
+    return {
+      detected: 'Node.js',
+      verify: ['npm run lint', 'npm run typecheck', 'npm run build', 'npm test'],
+      integration_rebuild: 'npm run build',
+      version_sources: ['package.json'],
+    };
+  }
+
+  if (fs.existsSync(path.join(cwd, 'pyproject.toml'))) {
+    return {
+      detected: 'Python',
+      verify: ['python -m pytest'],
+      integration_rebuild: '',
+      version_sources: ['pyproject.toml'],
+    };
+  }
+
+  if (fs.existsSync(path.join(cwd, 'Cargo.toml'))) {
+    return {
+      detected: 'Rust',
+      verify: ['cargo check', 'cargo test'],
+      integration_rebuild: 'cargo build --release',
+      version_sources: ['Cargo.toml'],
+    };
+  }
+
+  if (fs.existsSync(path.join(cwd, 'go.mod'))) {
+    return {
+      detected: 'Go',
+      verify: ['go vet ./...', 'go test ./...'],
+      integration_rebuild: 'go build ./...',
+      version_sources: [],
+    };
+  }
+
+  return {
+    detected: 'unknown',
+    verify: [],
+    integration_rebuild: '',
+    version_sources: [],
+  };
+}
+
+// ── Default config (language-agnostic) ──────────────────────────────────
+
 const DEFAULT_CONFIG = {
   repo: '',
   labels: {
@@ -48,20 +105,13 @@ const DEFAULT_CONFIG = {
   tmux_template: 'foundry-{issue}',
   max_sessions: 4,
   max_verify_parallel: 1,
-  verify: [
-    'npm run lint',
-    'npm run typecheck',
-    'npm run build',
-    'npm test',
-  ],
-  integration_rebuild: 'npm run build',
+  verify: [] as string[],
+  integration_rebuild: '',
   comment_triggers: {
     replan: '@foundry replan',
     restart: '@foundry restart',
   },
-  version_sources: [
-    'package.json',
-  ],
+  version_sources: [] as string[],
   tag_prefix: 'v',
   poll_interval_seconds: 30,
   default_agent_backend: 'claude-code',
@@ -87,10 +137,26 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     log.warn(`${CONFIG_FILENAME} already exists. Skipping scaffold.`);
   } else {
     const repo = detectRepo();
-    const config = { ...DEFAULT_CONFIG, repo };
+    const projectDefaults = detectProjectDefaults();
+
+    if (projectDefaults.detected !== 'unknown') {
+      log.info(`Detected ${projectDefaults.detected} project`);
+    } else {
+      log.info('No recognized project marker found — using empty defaults');
+    }
+
+    const { detected: _, ...defaults } = projectDefaults;
+    const config = { ...DEFAULT_CONFIG, ...defaults, repo };
     const yaml = toYaml(config, { lineWidth: 120 });
     fs.writeFileSync(configPath, yaml, 'utf-8');
     log.success(`Created ${CONFIG_FILENAME}`);
+  }
+
+  // Auto-commit on empty repo so we have a HEAD for branch creation
+  if (!git.hasCommits()) {
+    log.info('Empty repository detected — creating initial commit...');
+    git.commitAll('chore: initialize foundry config');
+    log.success('Created initial commit with .joynt-foundry.yml');
   }
 
   // Create integration branch if it doesn't exist

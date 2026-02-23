@@ -38,7 +38,7 @@ export interface FoundryConfig {
     restart: string;                    // default "@foundry restart"
   };
 
-  version_sources: string[];            // ordered list of package.json paths
+  version_sources: string[];            // ordered list of version file paths (package.json, Cargo.toml, pyproject.toml)
   tag_prefix: string;                   // default "v"
 
   default_agent_backend: string;        // default "command"

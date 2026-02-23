@@ -47,9 +47,9 @@ comment_triggers:
 
 # ── Versioning ───────────────────────────────────────────────────────
 
-version_sources:                        # Ordered list of package.json paths
+version_sources:                        # Ordered list of version file paths
   - "package.json"                      # First = primary (version read from here)
-  - "packages/api/package.json"
+  - "packages/api/package.json"         # Supported: package.json, Cargo.toml, pyproject.toml
   - "packages/web/package.json"
 
 tag_prefix: "v"                         # Release tag prefix (e.g. v1.2.3)
@@ -114,7 +114,7 @@ Shell command run after merging into integration (via `foundry review`).
 Strings matched in issue comments to trigger replan or restart.
 
 ### `version_sources`
-**Ordered** list of `package.json` file paths (relative to repo root). All are bumped to the same version on `foundry release`. The first entry is the primary version source.
+**Ordered** list of version file paths (relative to repo root). All are bumped to the same version on `foundry release`. The first entry is the primary version source. Supported file types: `package.json`, `Cargo.toml`, `pyproject.toml`.
 
 ### `tag_prefix`
 Prefix for release tags. Default `v` produces tags like `v1.2.3`.

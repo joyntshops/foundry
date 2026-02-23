@@ -22,6 +22,10 @@ function gitSafe(args: string[], cwd?: string): string | null {
   }
 }
 
+export function hasCommits(cwd?: string): boolean {
+  return gitSafe(['rev-list', '--count', 'HEAD'], cwd) !== null;
+}
+
 // ── Branch operations ───────────────────────────────────────────────────
 
 export function currentBranch(cwd?: string): string {
