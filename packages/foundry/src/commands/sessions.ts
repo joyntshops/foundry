@@ -40,23 +40,27 @@ export async function runSessions(opts?: { all?: boolean; local?: boolean }): Pr
 
   // Header
   console.log('');
-  console.log(`  ${'Issue'.padEnd(40)} ${'Status'.padEnd(22)} ${'tmux'.padEnd(8)} ${'Worktree'.padEnd(9)} ${'PR'.padEnd(10)} ${opts?.local ? '' : 'Labels'}`);
-  console.log(`  ${'─'.repeat(40)} ${'─'.repeat(22)} ${'─'.repeat(8)} ${'─'.repeat(9)} ${'─'.repeat(10)} ${opts?.local ? '' : '─'.repeat(30)}`);
+  console.log(`  ${'#'.padEnd(6)} ${'Title'.padEnd(32)} ${'Status'.padEnd(22)} ${'Session'.padEnd(16)} ${'Worktree'.padEnd(9)} ${'PR'.padEnd(10)} ${opts?.local ? '' : 'Labels'}`);
+  console.log(`  ${'─'.repeat(6)} ${'─'.repeat(32)} ${'─'.repeat(22)} ${'─'.repeat(16)} ${'─'.repeat(9)} ${'─'.repeat(10)} ${opts?.local ? '' : '─'.repeat(30)}`);
 
   for (const task of filtered) {
-    // Issue column
-    const titleTrunc = task.title.length > 30 ? task.title.slice(0, 27) + '...' : task.title;
-    const issueCol = `#${task.issue} ${titleTrunc}`.padEnd(40);
+    // Issue # column (the identifier for foundry attach/stop/reset)
+    const issueId = String(task.issue).padEnd(6);
+
+    // Title column
+    const titleTrunc = (task.title.length > 30 ? task.title.slice(0, 27) + '...' : task.title).padEnd(32);
 
     // Status column
     const statusCol = task.status.padEnd(22);
 
-    // tmux column
-    let tmuxCol = '—';
+    // Session column — tmux session name + alive/dead status
+    let sessionStatus: string;
     try {
-      tmuxCol = tmux.sessionExists(task.tmux_session) ? 'alive' : 'dead';
-    } catch {}
-    tmuxCol = tmuxCol.padEnd(8);
+      sessionStatus = tmux.sessionExists(task.tmux_session) ? 'alive' : 'dead';
+    } catch {
+      sessionStatus = '—';
+    }
+    const sessionCol = `${task.tmux_session} (${sessionStatus})`.padEnd(16);
 
     // Worktree column
     let wtCol = '—';
@@ -95,8 +99,10 @@ export async function runSessions(opts?: { all?: boolean; local?: boolean }): Pr
       }
     }
 
-    console.log(`  ${issueCol} ${statusCol} ${tmuxCol} ${wtCol} ${prCol} ${labelsCol}`);
+    console.log(`  ${issueId} ${titleTrunc} ${statusCol} ${sessionCol} ${wtCol} ${prCol} ${labelsCol}`);
   }
+  console.log('');
+  console.log('  Commands: foundry attach <#> | foundry stop <#> | foundry reset <#>');
   console.log('');
 }
 

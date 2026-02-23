@@ -78,7 +78,7 @@ program
 
 program
   .command('attach <target>')
-  .description('Attach to a Foundry tmux session (Ctrl+b d to detach)')
+  .description('Attach to a Foundry agent session (issue number or session name)')
   .action(async (target) => {
     const { runAttach } = await import('./commands/sessions.js');
     await runAttach(target);
@@ -88,7 +88,7 @@ program
 
 program
   .command('stop <target>')
-  .description('Stop a Foundry session safely (issue number or session name)')
+  .description('Stop a Foundry agent session (issue number or session name)')
   .option('--ready', 'Restore the state:ready label so the runner re-claims immediately')
   .action(async (target, opts) => {
     const { runStop } = await import('./commands/sessions.js');
