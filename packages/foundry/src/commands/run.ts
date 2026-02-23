@@ -210,8 +210,9 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
     tmux.sendKeys(tmuxSession, `export ${k}="${v}"`);
   }
 
-  // Launch agent
-  tmux.sendKeys(tmuxSession, agentCommand);
+  // Launch agent — `; exit` ensures the shell (and tmux session) closes
+  // when the agent finishes, so checkCompletedAgents detects completion.
+  tmux.sendKeys(tmuxSession, `${agentCommand}; exit`);
 
   // Save state
   const taskState: TaskState = {
@@ -542,7 +543,7 @@ async function resumeAgent(config: FoundryConfig, task: TaskState, humanResponse
 
   // Create new tmux session in the existing worktree
   tmux.createSession(task.tmux_session, task.worktree);
-  tmux.sendKeys(task.tmux_session, command);
+  tmux.sendKeys(task.tmux_session, `${command}; exit`);
 
   state.updateTaskStatus(config.repo, task.issue, 'agent-running');
   log.success(`Resumed agent for #${task.issue} in ${task.tmux_session}`);
@@ -676,7 +677,7 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
 
   // Create new tmux session in the existing worktree
   tmux.createSession(task.tmux_session, task.worktree);
-  tmux.sendKeys(task.tmux_session, command);
+  tmux.sendKeys(task.tmux_session, `${command}; exit`);
 
   state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
     input_request_count: inputRound,
