@@ -16,8 +16,8 @@ import * as claim from '../lib/claim.js';
 import * as log from '../lib/log.js';
 import * as verify from '../lib/verify.js';
 import * as agentOutput from '../lib/agent-output.js';
-import { resolveBackendForIssue } from '../backends/index.js';
-import type { FoundryConfig, GitHubIssue, TaskState, AgentLaunchParams, AgentOutcome } from '../types.js';
+import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
+import type { FoundryConfig, GitHubIssue, TaskState, AgentLaunchParams, AgentOutcome, ResumeParams } from '../types.js';
 
 let running = true;
 
@@ -473,13 +473,6 @@ function getPRComments(repo: string, prNumber: number): Array<{ body: string; us
 }
 
 async function resumeAgent(config: FoundryConfig, task: TaskState, humanResponse: string, repoDir: string): Promise<void> {
-  const sessionId = task.session_id;
-  if (!sessionId) {
-    log.error(`No session_id for #${task.issue}. Cannot resume. Marking failed.`);
-    state.updateTaskStatus(config.repo, task.issue, 'failed');
-    return;
-  }
-
   // Remove waiting label
   try {
     github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input);
@@ -490,14 +483,47 @@ async function resumeAgent(config: FoundryConfig, task: TaskState, humanResponse
   // Kill old tmux session if somehow still alive
   tmux.killSession(task.tmux_session);
 
-  // Build resume command
+  const backend = resolveBackend(config, task.agent_backend);
   const logDir = state.getLogDir(config.repo, task.issue);
-  const escapedResponse = humanResponse.replace(/'/g, "'\\''");
-  const resumeCommand = `claude --dangerously-skip-permissions -p '${escapedResponse}' --resume "${sessionId}" --output-format stream-json 2>&1 | tee ${logDir}/agent.log`;
+  const stateDir = state.getTaskStateDir(config.repo, task.issue);
+
+  const launchParams: AgentLaunchParams = {
+    worktree: task.worktree,
+    issue_url: `https://github.com/${task.repo}/issues/${task.issue}`,
+    issue_number: task.issue,
+    repo: task.repo,
+    title: task.title,
+    body: humanResponse,
+    labels: [],
+    log_dir: logDir,
+    state_dir: stateDir,
+  };
+
+  let command: string;
+
+  if (task.session_id) {
+    const resumeParams: ResumeParams = {
+      ...launchParams,
+      session_id: task.session_id,
+      prompt: humanResponse.replace(/'/g, "'\\''"),
+    };
+    const resumeCmd = backend.resolveResumeCommand(resumeParams);
+    if (resumeCmd) {
+      command = resumeCmd;
+    } else {
+      // Backend doesn't support resume — re-launch with feedback in prompt
+      log.warn(`Backend "${backend.name}" has no resume_command. Re-launching with feedback.`);
+      command = backend.resolveCommand(launchParams);
+    }
+  } else {
+    // No session_id — re-launch with feedback in prompt
+    log.warn(`No session_id for #${task.issue}. Re-launching agent with feedback.`);
+    command = backend.resolveCommand(launchParams);
+  }
 
   // Create new tmux session in the existing worktree
   tmux.createSession(task.tmux_session, task.worktree);
-  tmux.sendKeys(task.tmux_session, resumeCommand);
+  tmux.sendKeys(task.tmux_session, command);
 
   state.updateTaskStatus(config.repo, task.issue, 'agent-running');
   log.success(`Resumed agent for #${task.issue} in ${task.tmux_session}`);
@@ -572,13 +598,6 @@ function findPRFeedback(config: FoundryConfig, prNumber: number, task: TaskState
 }
 
 async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback: string, repoDir: string): Promise<void> {
-  const sessionId = task.session_id;
-  if (!sessionId) {
-    log.error(`No session_id for #${task.issue}. Cannot resume for PR feedback. Marking pr-changes-requested.`);
-    // Leave it in pr-changes-requested so it's visible
-    return;
-  }
-
   // Safety valve
   const inputRound = (task.input_request_count ?? 0) + 1;
   if (inputRound > config.max_input_rounds) {
@@ -599,14 +618,45 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
   // Kill old tmux session if somehow still alive
   tmux.killSession(task.tmux_session);
 
-  // Build resume command
+  const backend = resolveBackend(config, task.agent_backend);
   const logDir = state.getLogDir(config.repo, task.issue);
-  const escapedFeedback = feedback.replace(/'/g, "'\\''");
-  const resumeCommand = `claude --dangerously-skip-permissions -p '${escapedFeedback}' --resume "${sessionId}" --output-format stream-json 2>&1 | tee ${logDir}/agent.log`;
+  const stateDir = state.getTaskStateDir(config.repo, task.issue);
+
+  const launchParams: AgentLaunchParams = {
+    worktree: task.worktree,
+    issue_url: `https://github.com/${task.repo}/issues/${task.issue}`,
+    issue_number: task.issue,
+    repo: task.repo,
+    title: task.title,
+    body: feedback,
+    labels: [],
+    log_dir: logDir,
+    state_dir: stateDir,
+  };
+
+  let command: string;
+
+  if (task.session_id) {
+    const resumeParams: ResumeParams = {
+      ...launchParams,
+      session_id: task.session_id,
+      prompt: feedback.replace(/'/g, "'\\''"),
+    };
+    const resumeCmd = backend.resolveResumeCommand(resumeParams);
+    if (resumeCmd) {
+      command = resumeCmd;
+    } else {
+      log.warn(`Backend "${backend.name}" has no resume_command. Re-launching with feedback.`);
+      command = backend.resolveCommand(launchParams);
+    }
+  } else {
+    log.warn(`No session_id for #${task.issue}. Re-launching agent with PR feedback.`);
+    command = backend.resolveCommand(launchParams);
+  }
 
   // Create new tmux session in the existing worktree
   tmux.createSession(task.tmux_session, task.worktree);
-  tmux.sendKeys(task.tmux_session, resumeCommand);
+  tmux.sendKeys(task.tmux_session, command);
 
   state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
     input_request_count: inputRound,

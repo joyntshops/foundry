@@ -7,6 +7,7 @@
 export interface AgentBackendDef {
   type: 'command';
   command: string;
+  resume_command?: string;   // template with {session_id}, {prompt}, {log_dir}
   env?: Record<string, string>;
 }
 
@@ -103,9 +104,15 @@ export interface AgentLaunchParams {
   state_dir: string;
 }
 
+export interface ResumeParams extends AgentLaunchParams {
+  session_id: string;
+  prompt: string;
+}
+
 export interface AgentBackend {
   name: string;
   resolveCommand(params: AgentLaunchParams): string;
+  resolveResumeCommand(params: ResumeParams): string | null;
   resolveEnv(params: AgentLaunchParams): Record<string, string>;
 }
 

@@ -70,7 +70,7 @@ program
 
 program
   .command('attach <target>')
-  .description('Attach to a Foundry tmux session (issue number or session name)')
+  .description('Attach to a Foundry tmux session (Ctrl+b d to detach)')
   .action(async (target) => {
     const { runAttach } = await import('./commands/sessions.js');
     await runAttach(target);

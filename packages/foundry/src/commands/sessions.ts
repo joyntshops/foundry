@@ -63,6 +63,7 @@ export async function runAttach(target: string): Promise<void> {
   }
 
   log.info(`Attaching to ${sessionName}...`);
+  log.info('Tip: Press Ctrl+b then d to detach and return to your shell.');
   tmux.attachSession(sessionName);
 }
 

@@ -2,7 +2,7 @@
  * Command agent backend — runs an arbitrary configured command.
  * Template variables: {worktree}, {issue_url}, {issue_number}, {repo}, {title}, {log_dir}, {state_dir}
  */
-import type { AgentBackend, AgentBackendDef, AgentLaunchParams } from '../types.js';
+import type { AgentBackend, AgentBackendDef, AgentLaunchParams, ResumeParams } from '../types.js';
 
 function interpolate(template: string, params: AgentLaunchParams): string {
   return template
@@ -16,11 +16,25 @@ function interpolate(template: string, params: AgentLaunchParams): string {
     .replace(/\{state_dir\}/g, params.state_dir);
 }
 
+function interpolateResume(template: string, params: ResumeParams): string {
+  // First apply all standard AgentLaunchParams placeholders
+  let result = interpolate(template, params);
+  // Then apply resume-specific placeholders
+  result = result
+    .replace(/\{session_id\}/g, params.session_id)
+    .replace(/\{prompt\}/g, params.prompt);
+  return result;
+}
+
 export function createCommandBackend(name: string, def: AgentBackendDef): AgentBackend {
   return {
     name,
     resolveCommand(params: AgentLaunchParams): string {
       return interpolate(def.command, params);
+    },
+    resolveResumeCommand(params: ResumeParams): string | null {
+      if (!def.resume_command) return null;
+      return interpolateResume(def.resume_command, params);
     },
     resolveEnv(params: AgentLaunchParams): Record<string, string> {
       const env: Record<string, string> = {};
@@ -39,6 +53,7 @@ export function createCommandBackend(name: string, def: AgentBackendDef): AgentB
  */
 export const CLAUDE_CODE_PRESET: AgentBackendDef = {
   type: 'command',
-  command: 'claude --dangerously-skip-permissions -p "You are working on issue #{issue_number}: {title}. The issue is at {issue_url}. Read the issue body and implement the task. When done, create a commit with your changes." --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
+  command: 'claude --dangerously-skip-permissions -p "You are working on issue #{issue_number}: {title}. The issue is at {issue_url}. Read the issue body and implement the task. When done, create a commit with your changes." --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
+  resume_command: 'claude --dangerously-skip-permissions -p "{prompt}" --resume "{session_id}" --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
   env: {},
 };
