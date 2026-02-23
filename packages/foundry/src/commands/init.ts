@@ -21,15 +21,10 @@ const LABEL_DEFS: Array<{ name: string; color: string; description: string }> = 
   { name: 'agent:cursor', color: 'c5def5', description: 'Use Cursor agent backend' },
 ];
 
-function detectRepo(): string {
+async function detectRepo(): Promise<string> {
   try {
-    const remoteUrl = git.repoRoot(); // just to verify we're in a git repo
-    const { execFileSync } = require('node:child_process');
-    const remote = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {
-      encoding: 'utf-8',
-      timeout: 10_000,
-    }).trim();
-    return remote;
+    git.repoRoot(); // just to verify we're in a git repo
+    return await github.getRepoSlug();
   } catch {
     return 'OWNER/REPO';
   }
@@ -132,6 +127,7 @@ const DEFAULT_CONFIG = {
   agent_label_map: {
     'agent:claude': 'claude-code',
   },
+  github_backend: 'gh-cli' as const,
 };
 
 export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolean }): Promise<void> {
@@ -140,7 +136,7 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
   if (fs.existsSync(configPath)) {
     log.warn(`${CONFIG_FILENAME} already exists. Skipping scaffold.`);
   } else {
-    const repo = detectRepo();
+    const repo = await detectRepo();
     const projectDefaults = detectProjectDefaults();
 
     if (projectDefaults.detected !== 'unknown') {
@@ -180,16 +176,16 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
   }
 
   if (!opts.skipLabels) {
-    const repo = detectRepo();
+    const repo = await detectRepo();
 
     if (opts.cleanLabels) {
       log.info('Removing non-Foundry labels...');
       const foundryNames = new Set(LABEL_DEFS.map(l => l.name));
-      const existing = github.listLabels(repo);
+      const existing = await github.listLabels(repo);
       for (const name of existing) {
         if (!foundryNames.has(name)) {
           try {
-            github.deleteLabel(repo, name);
+            await github.deleteLabel(repo, name);
             log.success(`  Deleted label: ${name}`);
           } catch (err) {
             log.warn(`  Failed to delete label ${name}: ${err}`);
@@ -201,7 +197,7 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     log.info('Creating GitHub labels...');
     for (const label of LABEL_DEFS) {
       try {
-        github.ensureLabel(repo, label.name, label.color, label.description);
+        await github.ensureLabel(repo, label.name, label.color, label.description);
         log.success(`  Label: ${label.name}`);
       } catch (err) {
         log.warn(`  Failed to create label ${label.name}: ${err}`);

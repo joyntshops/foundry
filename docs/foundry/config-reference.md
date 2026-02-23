@@ -17,6 +17,8 @@ labels:
   done: "state:done"                    # Task completed
   ready_for_review: "state:ready-for-human-review"  # Awaiting human review
   spec_changed: "spec:changed"          # Spec changed, replan needed
+  waiting_for_input: "state:waiting-for-input"  # Agent needs human input
+  failed: "state:failed"              # Task failed
 
 # ── Branching & Worktrees ────────────────────────────────────────────
 
@@ -57,6 +59,12 @@ tag_prefix: "v"                         # Release tag prefix (e.g. v1.2.3)
 # ── Polling ──────────────────────────────────────────────────────────
 
 poll_interval_seconds: 30               # Seconds between issue polls
+
+# ── GitHub Backend ──────────────────────────────────────────────────
+
+github_backend: "gh-cli"               # "gh-cli" (default) or "octokit"
+                                        # Override with FOUNDRY_GITHUB_BACKEND env var
+                                        # or --github-backend CLI flag
 
 # ── Agent Backends ───────────────────────────────────────────────────
 
@@ -133,3 +141,12 @@ Map of backend definitions. Each backend has:
 
 ### `agent_label_map`
 Optional mapping from issue label names to backend names. When an issue has a matching label, that backend is used instead of the default.
+
+### `github_backend`
+Which GitHub API backend to use. Options:
+- `gh-cli` (default) — uses the `gh` CLI. Zero config if `gh` is installed and authenticated.
+- `octokit` — uses `@octokit/rest`. Better for CI/containers or when you want to avoid process spawns.
+
+Override priority: `--github-backend` CLI flag > `FOUNDRY_GITHUB_BACKEND` env var > config file.
+
+See [GitHub Backends](github-backends.md) for detailed setup.

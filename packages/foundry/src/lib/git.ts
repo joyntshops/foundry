@@ -62,6 +62,10 @@ export function deleteBranch(branch: string, cwd?: string): void {
   gitSafe(['branch', '-D', branch], cwd);
 }
 
+export function deleteRemoteBranch(branch: string, cwd?: string): void {
+  gitSafe(['push', 'origin', '--delete', branch], cwd);
+}
+
 export function rebase(onto: string, cwd?: string): void {
   git(['rebase', onto], cwd);
 }

@@ -43,7 +43,7 @@ export async function runRunner(opts: { once?: boolean }): Promise<void> {
   });
 
   // Reconcile on startup
-  reconcile(config);
+  await reconcile(config);
 
   // Main loop
   while (running) {
@@ -62,7 +62,7 @@ export async function runRunner(opts: { once?: boolean }): Promise<void> {
   log.info('Runner stopped.');
 }
 
-function reconcile(config: FoundryConfig): void {
+async function reconcile(config: FoundryConfig): Promise<void> {
   log.info('Reconciling state...');
   const tasks = state.getAllTasks(config.repo);
 
@@ -83,13 +83,16 @@ function reconcile(config: FoundryConfig): void {
     if (!tmux.sessionExists(task.tmux_session)) {
       log.warn(`Session ${task.tmux_session} for #${task.issue} is dead. Marking stopped.`);
       state.updateTaskStatus(config.repo, task.issue, 'stopped');
-      claim.markFailed(config, task.issue);
-      try { github.addComment(config.repo, task.issue, `**Foundry: Session Died**\n\ntmux session \`${task.tmux_session}\` exited unexpectedly during reconciliation.`); } catch {}
+      await claim.markFailed(config, task.issue);
+      try { await github.addComment(config.repo, task.issue, `**Foundry: Session Died**\n\ntmux session \`${task.tmux_session}\` exited unexpectedly during reconciliation.`); } catch {}
     }
   }
 }
 
 async function poll(config: FoundryConfig, repoDir: string): Promise<void> {
+  // Check for merged PRs (done = PR merged)
+  await checkMergedPRs(config, repoDir);
+
   // Check for human responses to waiting tasks
   await checkWaitingTasks(config, repoDir);
 
@@ -105,7 +108,7 @@ async function poll(config: FoundryConfig, repoDir: string): Promise<void> {
   }
 
   log.debug('Polling for ready issues...');
-  const issues = github.listIssuesByLabel(config.repo, config.labels.ready);
+  const issues = await github.listIssuesByLabel(config.repo, config.labels.ready);
 
   if (issues.length === 0) {
     log.debug('No ready issues found.');
@@ -234,6 +237,44 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
   log.success(`Agent launched in ${tmuxSession}`);
 }
 
+// ── Merged PR Detection ──────────────────────────────────────────────────
+
+async function checkMergedPRs(config: FoundryConfig, repoDir: string): Promise<void> {
+  const tasks = state.getAllTasks(config.repo);
+  const prOpenTasks = tasks.filter(t => t.status === 'pr-open');
+
+  for (const task of prOpenTasks) {
+    if (!running) break;
+
+    try {
+      const prStatus = await github.getPRStatus(config.repo, task.branch);
+      if (!prStatus) continue;
+
+      if (prStatus.state === 'MERGED' || prStatus.state === 'closed' && prStatus.url === task.pr_url) {
+        // Double-check: for octokit backend, state may be 'closed' for merged PRs.
+        // gh CLI returns 'MERGED' directly. Check both.
+        const isMerged = prStatus.state === 'MERGED';
+        if (!isMerged) continue;
+
+        log.success(`PR for #${task.issue} has been merged. Completing task.`);
+
+        // Add done label and close the issue
+        try { await github.addLabel(config.repo, task.issue, config.labels.done); } catch {}
+        try { await github.closeIssue(config.repo, task.issue); } catch {}
+
+        // Auto-cleanup: worktree, local branch, remove from state
+        try { git.removeWorktree(task.worktree, repoDir); } catch {}
+        try { git.deleteBranch(task.branch, repoDir); } catch {}
+        state.removeTask(config.repo, task.issue);
+
+        log.success(`Auto-cleaned resources for #${task.issue}.`);
+      }
+    } catch (err: any) {
+      log.error(`Error checking merged PR for #${task.issue}: ${err.message}`);
+    }
+  }
+}
+
 // ── Completed Agent Handling ─────────────────────────────────────────────
 
 async function checkCompletedAgents(config: FoundryConfig, repoDir: string): Promise<void> {
@@ -272,10 +313,10 @@ async function checkCompletedAgents(config: FoundryConfig, repoDir: string): Pro
           state.updateTaskStatus(config.repo, task.issue, 'failed', {
             last_agent_message: outcome.final_message ?? undefined,
           });
-          claim.markFailed(config, task.issue);
+          await claim.markFailed(config, task.issue);
           if (outcome.final_message) {
             try {
-              github.addComment(config.repo, task.issue, [
+              await github.addComment(config.repo, task.issue, [
                 '**Foundry Agent Error**',
                 '',
                 outcome.final_message.slice(-2000),
@@ -306,8 +347,8 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
     } catch (err: any) {
       log.error(`Push failed for #${task.issue}: ${err.message}`);
       state.updateTaskStatus(config.repo, task.issue, 'failed');
-      claim.markFailed(config, task.issue);
-      try { github.addComment(config.repo, task.issue, `**Foundry: Push Failed**\n\n${err.message}`); } catch {}
+      await claim.markFailed(config, task.issue);
+      try { await github.addComment(config.repo, task.issue, `**Foundry: Push Failed**\n\n${err.message}`); } catch {}
       return;
     }
 
@@ -316,10 +357,10 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
       // PR already exists (resumed agent pushed updates) — just update status
       log.success(`PR already exists for #${task.issue}: ${task.pr_url}`);
       state.updateTaskStatus(config.repo, task.issue, 'pr-open');
-      github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
+      await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
     } else {
       try {
-        const prUrl = github.createPR(config.repo, {
+        const prUrl = await github.createPR(config.repo, {
           title: `#${task.issue}: ${task.title}`,
           body: `Closes #${task.issue}\n\nAutomated by Foundry (${task.agent_backend})`,
           head: task.branch,
@@ -331,13 +372,12 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
           pr_url: prUrl,
           pr_number: prNumber ?? undefined,
         });
-        github.addLabel(config.repo, task.issue, config.labels.done);
-        github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
+        await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
       } catch (err: any) {
         log.error(`PR creation failed for #${task.issue}: ${err.message}`);
         state.updateTaskStatus(config.repo, task.issue, 'failed');
-        claim.markFailed(config, task.issue);
-        try { github.addComment(config.repo, task.issue, `**Foundry: PR Creation Failed**\n\n${err.message}`); } catch {}
+        await claim.markFailed(config, task.issue);
+        try { await github.addComment(config.repo, task.issue, `**Foundry: PR Creation Failed**\n\n${err.message}`); } catch {}
       }
     }
   } else {
@@ -349,7 +389,7 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
       }
     }
     state.updateTaskStatus(config.repo, task.issue, 'failed');
-    claim.markFailed(config, task.issue);
+    await claim.markFailed(config, task.issue);
 
     // Comment on issue with failure details
     const failureComment = [
@@ -366,7 +406,7 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
     ].join('\n');
 
     try {
-      github.addComment(config.repo, task.issue, failureComment);
+      await github.addComment(config.repo, task.issue, failureComment);
     } catch {
       // best effort
     }
@@ -385,11 +425,10 @@ async function handleNeedsInput(config: FoundryConfig, task: TaskState, outcome:
       input_request_count: inputRound,
       last_agent_message: outcome.final_message ?? undefined,
     });
-    claim.markFailed(config, task.issue);
+    await claim.markFailed(config, task.issue);
     try {
-      const target = task.pr_url ? 'PR' : 'issue';
       const body = `**Foundry Agent — Giving Up** (exceeded ${config.max_input_rounds} input rounds)\n\nThe agent has been unable to complete this task after multiple rounds of input. Manual intervention required.`;
-      postToConversationTarget(config, task, body);
+      await postToConversationTarget(config, task, body);
     } catch {
       // best effort
     }
@@ -401,14 +440,14 @@ async function handleNeedsInput(config: FoundryConfig, task: TaskState, outcome:
   const comment = agentOutput.formatInputRequestComment(outcome, inputRound);
 
   try {
-    postToConversationTarget(config, task, comment);
+    await postToConversationTarget(config, task, comment);
   } catch (err: any) {
     log.error(`Failed to post input request for #${task.issue}: ${err.message}`);
   }
 
   // Add waiting label, update state
   try {
-    github.addLabel(config.repo, task.issue, config.labels.waiting_for_input);
+    await github.addLabel(config.repo, task.issue, config.labels.waiting_for_input);
   } catch {
     // best effort
   }
@@ -420,18 +459,18 @@ async function handleNeedsInput(config: FoundryConfig, task: TaskState, outcome:
   });
 }
 
-function postToConversationTarget(config: FoundryConfig, task: TaskState, body: string): void {
+async function postToConversationTarget(config: FoundryConfig, task: TaskState, body: string): Promise<void> {
   if (task.pr_number) {
-    github.commentOnPR(config.repo, task.pr_number, body);
+    await github.commentOnPR(config.repo, task.pr_number, body);
   } else if (task.pr_url) {
     const prNumber = github.extractPRNumber(task.pr_url);
     if (prNumber) {
-      github.commentOnPR(config.repo, prNumber, body);
+      await github.commentOnPR(config.repo, prNumber, body);
     } else {
-      github.addComment(config.repo, task.issue, body);
+      await github.addComment(config.repo, task.issue, body);
     }
   } else {
-    github.addComment(config.repo, task.issue, body);
+    await github.addComment(config.repo, task.issue, body);
   }
 }
 
@@ -445,7 +484,7 @@ async function checkWaitingTasks(config: FoundryConfig, repoDir: string): Promis
     if (!running) break;
 
     try {
-      const humanResponse = findHumanResponse(config, task);
+      const humanResponse = await findHumanResponse(config, task);
       if (humanResponse) {
         log.info(`Human response found for #${task.issue}. Resuming agent...`);
         await resumeAgent(config, task, humanResponse, repoDir);
@@ -456,11 +495,11 @@ async function checkWaitingTasks(config: FoundryConfig, repoDir: string): Promis
   }
 }
 
-function findHumanResponse(config: FoundryConfig, task: TaskState): string | null {
+async function findHumanResponse(config: FoundryConfig, task: TaskState): Promise<string | null> {
   // Determine where to look for the response
   const comments = task.pr_number
-    ? getPRComments(config.repo, task.pr_number)
-    : github.getComments(config.repo, task.issue);
+    ? await getPRComments(config.repo, task.pr_number)
+    : await github.getComments(config.repo, task.issue);
 
   // Find the last foundry input request marker
   let lastRequestIndex = -1;
@@ -487,7 +526,7 @@ function findHumanResponse(config: FoundryConfig, task: TaskState): string | nul
   return humanReplies.map(c => c.body).join('\n\n');
 }
 
-function getPRComments(repo: string, prNumber: number): Array<{ body: string; user: { login: string } | null; created_at: string }> {
+async function getPRComments(repo: string, prNumber: number): Promise<Array<{ body: string; user: { login: string } | null; created_at: string }>> {
   // PR comments come from the issues endpoint (PRs are issues in GitHub)
   return github.getComments(repo, prNumber);
 }
@@ -495,7 +534,7 @@ function getPRComments(repo: string, prNumber: number): Array<{ body: string; us
 async function resumeAgent(config: FoundryConfig, task: TaskState, humanResponse: string, repoDir: string): Promise<void> {
   // Remove waiting label
   try {
-    github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input);
+    await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input);
   } catch {
     // best effort
   }
@@ -567,7 +606,7 @@ async function checkPRFeedback(config: FoundryConfig, repoDir: string): Promise<
     }
 
     try {
-      const feedback = findPRFeedback(config, prNumber, task);
+      const feedback = await findPRFeedback(config, prNumber, task);
       if (feedback) {
         log.info(`PR review feedback found for #${task.issue}. Resuming agent...`);
         state.updateTaskStatus(config.repo, task.issue, 'pr-changes-requested', {
@@ -581,8 +620,8 @@ async function checkPRFeedback(config: FoundryConfig, repoDir: string): Promise<
   }
 }
 
-function findPRFeedback(config: FoundryConfig, prNumber: number, task: TaskState): string | null {
-  const { reviews, comments } = github.getPRReviews(config.repo, prNumber);
+async function findPRFeedback(config: FoundryConfig, prNumber: number, task: TaskState): Promise<string | null> {
+  const { reviews, comments } = await github.getPRReviews(config.repo, prNumber);
 
   // Look for CHANGES_REQUESTED reviews or new review comments since last update
   const taskUpdated = new Date(task.updated_at).getTime();
@@ -623,7 +662,7 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
   if (inputRound > config.max_input_rounds) {
     log.error(`#${task.issue} exceeded max input rounds (${config.max_input_rounds}) for PR feedback. Needs manual intervention.`);
     try {
-      github.commentOnPR(config.repo, task.pr_number!, [
+      await github.commentOnPR(config.repo, task.pr_number!, [
         `**Foundry Agent — Giving Up** (exceeded ${config.max_input_rounds} input rounds)`,
         '',
         'The agent has been unable to address review feedback after multiple rounds. Manual intervention required.',
@@ -632,7 +671,7 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
       // best effort
     }
     state.updateTaskStatus(config.repo, task.issue, 'failed', { input_request_count: inputRound });
-    claim.markFailed(config, task.issue);
+    await claim.markFailed(config, task.issue);
     return;
   }
 

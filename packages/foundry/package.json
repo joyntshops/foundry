@@ -13,6 +13,8 @@
   ],
   "scripts": {
     "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build",
     "dev": "tsc --watch"
   },
@@ -28,12 +30,14 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@octokit/rest": "^22.0.1",
+    "chalk": "^5.4.1",
     "commander": "^12.1.0",
-    "yaml": "^2.6.1",
-    "chalk": "^5.4.1"
+    "yaml": "^2.6.1"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
   }
 }

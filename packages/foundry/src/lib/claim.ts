@@ -58,20 +58,20 @@ export async function claimIssue(
 
   // Step 1: Swap labels
   try {
-    github.removeLabel(config.repo, issue.number, config.labels.ready);
+    await github.removeLabel(config.repo, issue.number, config.labels.ready);
   } catch {
     // may already be removed
   }
-  try { github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
-  github.addLabel(config.repo, issue.number, config.labels.in_progress);
+  try { await github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
+  await github.addLabel(config.repo, issue.number, config.labels.in_progress);
 
   // Step 2: Post claim comment
-  github.addComment(config.repo, issue.number, buildClaimComment(claimInfo));
+  await github.addComment(config.repo, issue.number, buildClaimComment(claimInfo));
 
   // Step 3: Verify — re-fetch issue and check our claim is the active one
   await sleep(1000); // brief delay to avoid race
 
-  const comments = github.getComments(config.repo, issue.number);
+  const comments = await github.getComments(config.repo, issue.number);
   const claimComments = comments
     .filter(c => c.body.includes('<!-- foundry-claim-block -->'))
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -96,10 +96,10 @@ export function isClaimedByUs(config: FoundryConfig, issue: number): boolean {
  * Mark an issue as failed on GitHub.
  * Removes in_progress/waiting_for_input, adds the failed label.
  */
-export function markFailed(config: FoundryConfig, issue: number): void {
-  try { github.removeLabel(config.repo, issue, config.labels.in_progress); } catch {}
-  try { github.removeLabel(config.repo, issue, config.labels.waiting_for_input); } catch {}
-  try { github.addLabel(config.repo, issue, config.labels.failed); } catch {}
+export async function markFailed(config: FoundryConfig, issue: number): Promise<void> {
+  try { await github.removeLabel(config.repo, issue, config.labels.in_progress); } catch {}
+  try { await github.removeLabel(config.repo, issue, config.labels.waiting_for_input); } catch {}
+  try { await github.addLabel(config.repo, issue, config.labels.failed); } catch {}
 }
 
 function sleep(ms: number): Promise<void> {

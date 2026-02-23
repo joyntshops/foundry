@@ -36,7 +36,7 @@ export async function runReview(target: string): Promise<void> {
   log.info(`Reviewing PR/issue #${prNumber}...`);
 
   // Check mergeability
-  if (!github.isPRMergeable(config.repo, prNumber)) {
+  if (!await github.isPRMergeable(config.repo, prNumber)) {
     log.error(`PR #${prNumber} is not mergeable. Resolve conflicts first.`);
     return;
   }
@@ -44,17 +44,9 @@ export async function runReview(target: string): Promise<void> {
   log.success('PR is mergeable.');
 
   // Get PR details to find the branch
-  const { execFileSync } = require('node:child_process');
   let prBranch: string;
   try {
-    const prData = JSON.parse(
-      execFileSync('gh', [
-        'pr', 'view', prNumber,
-        '--repo', config.repo,
-        '--json', 'headRefName,number',
-      ], { encoding: 'utf-8' })
-    );
-    prBranch = prData.headRefName;
+    prBranch = await github.getPRBranch(config.repo, prNumber);
   } catch (err: any) {
     log.error(`Failed to get PR details: ${err.message}`);
     return;
@@ -80,7 +72,7 @@ export async function runReview(target: string): Promise<void> {
 
     // Merge into integration
     log.info('Merging into integration...');
-    github.mergePR(config.repo, prNumber, 'rebase');
+    await github.mergePR(config.repo, prNumber, 'rebase');
     log.success('Merged into integration.');
 
     // Clean up worktree
@@ -106,7 +98,7 @@ export async function runReview(target: string): Promise<void> {
 
   // Update issue label
   try {
-    github.addLabel(config.repo, parseInt(prNumber), config.labels.ready_for_review);
+    await github.addLabel(config.repo, parseInt(prNumber), config.labels.ready_for_review);
   } catch {
     // best effort
   }

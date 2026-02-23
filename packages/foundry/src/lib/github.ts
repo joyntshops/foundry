@@ -1,210 +1,134 @@
 /**
- * GitHub CLI (gh) wrapper — all GitHub operations go through `gh`.
+ * GitHub module — thin facade over GitHubClient.
+ *
+ * Provides a module-level singleton and delegating functions so existing
+ * call-sites (`github.addLabel(...)`) keep working. Tests inject a mock
+ * via `setClient()`.
  */
-import { execFileSync, execFile } from 'node:child_process';
+import type { GitHubClient, CreatePROpts, PRReview, PRReviewComment } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
+import type { FoundryConfig } from '../types.js';
+import { GhCliClient } from './gh-cli-client.js';
 
-function gh(args: string[], cwd?: string): string {
-  return execFileSync('gh', args, {
-    cwd,
-    encoding: 'utf-8',
-    timeout: 30_000,
-    env: { ...process.env },
-  }).trim();
+// Re-export types that consumers may need
+export type { PRReview, PRReviewComment, CreatePROpts } from './github-client.js';
+export type { GitHubClient } from './github-client.js';
+
+// ── Singleton ────────────────────────────────────────────────────────────
+
+let _client: GitHubClient = new GhCliClient();
+
+export function setClient(client: GitHubClient): void {
+  _client = client;
 }
 
-function ghJson<T>(args: string[], cwd?: string): T {
-  const raw = gh([...args, '--json'], cwd);
-  return JSON.parse(raw);
+export function getClient(): GitHubClient {
+  return _client;
 }
 
-// ── Issues ──────────────────────────────────────────────────────────────
+/**
+ * Initialize the GitHub client based on config and/or environment.
+ *
+ * Priority: FOUNDRY_GITHUB_BACKEND env var > config.github_backend > 'gh-cli'
+ *
+ * For the 'octokit' backend, auth is resolved from:
+ *   1. GITHUB_TOKEN env var
+ *   2. `gh auth token` (falls back to gh CLI for token)
+ */
+export async function initClient(config?: FoundryConfig): Promise<void> {
+  const envBackend = process.env.FOUNDRY_GITHUB_BACKEND;
+  const backend = envBackend ?? config?.github_backend ?? 'gh-cli';
 
-export function listIssuesByLabel(repo: string, label: string): GitHubIssue[] {
-  const raw = gh([
-    'issue', 'list',
-    '--repo', repo,
-    '--label', label,
-    '--state', 'open',
-    '--json', 'number,title,body,labels,url,state',
-    '--limit', '50',
-  ]);
-  const issues = JSON.parse(raw) as any[];
-  return issues.map(i => ({
-    number: i.number,
-    title: i.title,
-    body: i.body ?? '',
-    labels: (i.labels ?? []).map((l: any) => ({ name: l.name })),
-    html_url: i.url,
-    state: i.state,
-  }));
+  if (backend === 'octokit') {
+    const { OctokitClient } = await import('./octokit-client.js');
+    _client = new OctokitClient();
+  } else {
+    _client = new GhCliClient();
+  }
 }
 
-export function getIssue(repo: string, issue: number): GitHubIssue {
-  const raw = gh([
-    'issue', 'view', String(issue),
-    '--repo', repo,
-    '--json', 'number,title,body,labels,url,state',
-  ]);
-  const i = JSON.parse(raw);
-  return {
-    number: i.number,
-    title: i.title,
-    body: i.body ?? '',
-    labels: (i.labels ?? []).map((l: any) => ({ name: l.name })),
-    html_url: i.url,
-    state: i.state,
-  };
+// ── Delegate functions ───────────────────────────────────────────────────
+
+export function listIssuesByLabel(repo: string, label: string): Promise<GitHubIssue[]> {
+  return _client.listIssuesByLabel(repo, label);
 }
 
-export function addLabel(repo: string, issue: number, label: string): void {
-  gh(['issue', 'edit', String(issue), '--repo', repo, '--add-label', label]);
+export function getIssue(repo: string, issue: number): Promise<GitHubIssue> {
+  return _client.getIssue(repo, issue);
 }
 
-export function removeLabel(repo: string, issue: number, label: string): void {
-  gh(['issue', 'edit', String(issue), '--repo', repo, '--remove-label', label]);
+export function addLabel(repo: string, issue: number, label: string): Promise<void> {
+  return _client.addLabel(repo, issue, label);
 }
 
-export function addComment(repo: string, issue: number, body: string): void {
-  gh(['issue', 'comment', String(issue), '--repo', repo, '--body', body]);
+export function removeLabel(repo: string, issue: number, label: string): Promise<void> {
+  return _client.removeLabel(repo, issue, label);
 }
 
-export function getComments(repo: string, issue: number): GitHubComment[] {
-  const raw = gh([
-    'api', `repos/${repo}/issues/${issue}/comments`,
-    '--paginate',
-  ]);
-  return JSON.parse(raw);
+export function addComment(repo: string, issue: number, body: string): Promise<void> {
+  return _client.addComment(repo, issue, body);
 }
+
+export function getComments(repo: string, issue: number): Promise<GitHubComment[]> {
+  return _client.getComments(repo, issue);
+}
+
+export function listLabels(repo: string): Promise<string[]> {
+  return _client.listLabels(repo);
+}
+
+export function deleteLabel(repo: string, name: string): Promise<void> {
+  return _client.deleteLabel(repo, name);
+}
+
+export function ensureLabel(repo: string, name: string, color: string, description: string): Promise<void> {
+  return _client.ensureLabel(repo, name, color, description);
+}
+
+export function closeIssue(repo: string, issue: number): Promise<void> {
+  return _client.closeIssue(repo, issue);
+}
+
+export function closePR(repo: string, pr: string | number): Promise<void> {
+  return _client.closePR(repo, pr);
+}
+
+export function createPR(repo: string, opts: CreatePROpts): Promise<string> {
+  return _client.createPR(repo, opts);
+}
+
+export function getPRStatus(repo: string, branch: string): Promise<{ state: string; url: string } | null> {
+  return _client.getPRStatus(repo, branch);
+}
+
+export function getPRBranch(repo: string, pr: string | number): Promise<string> {
+  return _client.getPRBranch(repo, pr);
+}
+
+export function mergePR(repo: string, pr: string | number, method?: 'merge' | 'rebase' | 'squash'): Promise<void> {
+  return _client.mergePR(repo, pr, method);
+}
+
+export function isPRMergeable(repo: string, pr: string | number): Promise<boolean> {
+  return _client.isPRMergeable(repo, pr);
+}
+
+export function getPRReviews(repo: string, prNumber: number): Promise<{ reviews: PRReview[]; comments: PRReviewComment[] }> {
+  return _client.getPRReviews(repo, prNumber);
+}
+
+export function commentOnPR(repo: string, prNumber: number, body: string): Promise<void> {
+  return _client.commentOnPR(repo, prNumber, body);
+}
+
+export function getRepoSlug(): Promise<string> {
+  return _client.getRepoSlug();
+}
+
+// ── Pure logic (no interface needed) ─────────────────────────────────────
 
 export function hasLabel(issue: GitHubIssue, label: string): boolean {
   return issue.labels.some(l => l.name === label);
-}
-
-// ── Labels ──────────────────────────────────────────────────────────────
-
-export function listLabels(repo: string): string[] {
-  const raw = gh([
-    'label', 'list',
-    '--repo', repo,
-    '--json', 'name',
-    '--limit', '100',
-  ]);
-  const labels = JSON.parse(raw) as Array<{ name: string }>;
-  return labels.map(l => l.name);
-}
-
-export function deleteLabel(repo: string, name: string): void {
-  gh(['label', 'delete', name, '--repo', repo, '--yes']);
-}
-
-export function ensureLabel(repo: string, name: string, color: string, description: string): void {
-  try {
-    gh(['label', 'create', name, '--repo', repo, '--color', color, '--description', description, '--force']);
-  } catch {
-    // label may already exist — that's fine
-  }
-}
-
-// ── Pull Requests ───────────────────────────────────────────────────────
-
-export function createPR(repo: string, opts: {
-  title: string;
-  body: string;
-  head: string;
-  base: string;
-}): string {
-  const result = gh([
-    'pr', 'create',
-    '--repo', repo,
-    '--title', opts.title,
-    '--body', opts.body,
-    '--head', opts.head,
-    '--base', opts.base,
-  ]);
-  // gh pr create outputs the PR URL
-  return result;
-}
-
-export function getPRStatus(repo: string, branch: string): { state: string; url: string } | null {
-  try {
-    const raw = gh([
-      'pr', 'view', branch,
-      '--repo', repo,
-      '--json', 'state,url',
-    ]);
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-export function mergePR(repo: string, pr: string | number, method: 'merge' | 'rebase' | 'squash' = 'merge'): void {
-  gh([
-    'pr', 'merge', String(pr),
-    '--repo', repo,
-    `--${method}`,
-    '--delete-branch',
-  ]);
-}
-
-export function isPRMergeable(repo: string, pr: string | number): boolean {
-  try {
-    const raw = gh([
-      'pr', 'view', String(pr),
-      '--repo', repo,
-      '--json', 'mergeable,mergeStateStatus',
-    ]);
-    const data = JSON.parse(raw);
-    return data.mergeable === 'MERGEABLE';
-  } catch {
-    return false;
-  }
-}
-
-// ── PR Reviews ─────────────────────────────────────────────────────────
-
-export interface PRReview {
-  author: { login: string };
-  state: string; // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
-  body: string;
-  submittedAt: string;
-}
-
-export interface PRReviewComment {
-  author: { login: string };
-  body: string;
-  createdAt: string;
-  path: string;
-  line: number | null;
-}
-
-export function getPRReviews(repo: string, prNumber: number): { reviews: PRReview[]; comments: PRReviewComment[] } {
-  const raw = gh([
-    'pr', 'view', String(prNumber),
-    '--repo', repo,
-    '--json', 'reviews,reviewComments',
-  ]);
-  const data = JSON.parse(raw);
-  return {
-    reviews: (data.reviews ?? []).map((r: any) => ({
-      author: r.author ?? { login: 'unknown' },
-      state: r.state,
-      body: r.body ?? '',
-      submittedAt: r.submittedAt,
-    })),
-    comments: (data.reviewComments ?? []).map((c: any) => ({
-      author: c.author ?? { login: 'unknown' },
-      body: c.body ?? '',
-      createdAt: c.createdAt,
-      path: c.path ?? '',
-      line: c.line ?? null,
-    })),
-  };
-}
-
-export function commentOnPR(repo: string, prNumber: number, body: string): void {
-  gh(['pr', 'comment', String(prNumber), '--repo', repo, '--body', body]);
 }
 
 export function extractPRNumber(prUrl: string): number | null {

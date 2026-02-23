@@ -8,6 +8,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Command } from 'commander';
 import { setVerbose } from './lib/log.js';
+import { loadConfigSafe } from './config.js';
+import { initClient } from './lib/github.js';
 
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
 
@@ -18,9 +20,13 @@ program
   .description('Joynt Foundry — developer automation via GitHub Issues and pluggable coding agents')
   .version(pkg.version)
   .option('-v, --verbose', 'Enable verbose/debug output')
-  .hook('preAction', (thisCommand) => {
+  .option('--github-backend <backend>', 'GitHub backend: gh-cli or octokit (env: FOUNDRY_GITHUB_BACKEND)')
+  .hook('preAction', async (thisCommand) => {
     const opts = thisCommand.opts();
     if (opts.verbose) setVerbose(true);
+    if (opts.githubBackend) process.env.FOUNDRY_GITHUB_BACKEND = opts.githubBackend;
+    const config = loadConfigSafe() ?? undefined;
+    await initClient(config);
   });
 
 // ── foundry init ──────────────────────────────────────────────────────
@@ -60,10 +66,12 @@ program
 
 program
   .command('sessions')
-  .description('List Foundry tmux sessions')
-  .action(async () => {
+  .description('Show unified task dashboard (all tracked tasks and their resources)')
+  .option('--all', 'Include terminal tasks (done/failed/stopped)')
+  .option('--local', 'Skip GitHub API calls, only show local resource state')
+  .action(async (opts) => {
     const { runSessions } = await import('./commands/sessions.js');
-    await runSessions();
+    await runSessions(opts);
   });
 
 // ── foundry attach ────────────────────────────────────────────────────
@@ -85,6 +93,17 @@ program
   .action(async (target, opts) => {
     const { runStop } = await import('./commands/sessions.js');
     await runStop(target, opts);
+  });
+
+// ── foundry reset ─────────────────────────────────────────────────────
+
+program
+  .command('reset <issue>')
+  .description('Tear down all resources for a task and restore issue to state:ready')
+  .option('--force', 'Actually execute (default is dry-run)')
+  .action(async (issue, opts) => {
+    const { runReset } = await import('./commands/sessions.js');
+    await runReset(issue, opts);
   });
 
 // ── foundry prune ─────────────────────────────────────────────────────

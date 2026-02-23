@@ -6,9 +6,10 @@
 foundry [options] [command]
 
 Options:
-  -V, --version     Output version number
-  -v, --verbose     Enable verbose/debug output
-  -h, --help        Display help
+  -V, --version                    Output version number
+  -v, --verbose                    Enable verbose/debug output
+  --github-backend <backend>       GitHub backend: gh-cli or octokit (env: FOUNDRY_GITHUB_BACKEND)
+  -h, --help                       Display help
 ```
 
 ---
@@ -67,11 +68,20 @@ Displays per-task: issue number, title, status, branch, worktree, tmux session (
 
 ## `foundry sessions`
 
-List Foundry tmux sessions with mapped task info.
+Show a unified task dashboard for all tracked tasks and their resources.
 
 ```bash
-foundry sessions
+foundry sessions               # active tasks only
+foundry sessions --all         # include terminal tasks (done/failed/stopped)
+foundry sessions --local       # skip GitHub API calls, show local state only
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--all` | Include terminal tasks (`done`, `failed`, `stopped`) |
+| `--local` | Skip GitHub API calls, only show local resource state |
+
+**Columns:** Issue, Status, tmux (alive/dead), Worktree (exists/—), PR (OPEN/MERGED/CLOSED), Labels (foundry labels from GitHub).
 
 ---
 
@@ -93,9 +103,38 @@ Stop a Foundry session safely.
 ```bash
 foundry stop 42                # by issue number
 foundry stop foundry-42        # by session name
+foundry stop 42 --ready        # stop and restore state:ready label
 ```
 
-Sends Ctrl+C, waits 2 seconds, then kills the tmux session. Marks the task as `stopped`.
+| Option | Description |
+|--------|-------------|
+| `--ready` | Restore the `state:ready` label so the runner re-claims immediately |
+
+Sends Ctrl+C, waits 2 seconds, then kills the tmux session. Without `--ready`, marks the task as `stopped` and adds the `state:failed` label. With `--ready`, restores `state:ready` for re-claiming.
+
+---
+
+## `foundry reset <issue>`
+
+Tear down all resources for a task and restore the issue to `state:ready`.
+
+```bash
+foundry reset 42               # dry-run (shows what would be removed)
+foundry reset 42 --force       # actually execute
+```
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Execute cleanup (default is dry-run) |
+
+**Steps performed:**
+1. Kill tmux session (if alive)
+2. Remove worktree (if exists)
+3. Delete local branch (if exists)
+4. Delete remote branch (if exists)
+5. Close PR (if open)
+6. Remove foundry labels, add `state:ready`
+7. Remove task from state
 
 ---
 

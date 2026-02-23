@@ -48,6 +48,7 @@ export interface FoundryConfig {
 
   agent_label_map?: Record<string, string>;   // label → backend name
   poll_interval_seconds: number;              // default 30
+  github_backend: 'gh-cli' | 'octokit';      // default "gh-cli"
 }
 
 // ── Local State (~/.joynt-foundry/) ─────────────────────────────────────
