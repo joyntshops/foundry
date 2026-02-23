@@ -62,6 +62,7 @@ export async function claimIssue(
   } catch {
     // may already be removed
   }
+  try { github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
   github.addLabel(config.repo, issue.number, config.labels.in_progress);
 
   // Step 2: Post claim comment
@@ -89,6 +90,16 @@ export async function claimIssue(
 export function isClaimedByUs(config: FoundryConfig, issue: number): boolean {
   const tasks = state.getAllTasks(config.repo);
   return tasks.some(t => t.issue === issue && !['done', 'failed', 'stopped'].includes(t.status));
+}
+
+/**
+ * Mark an issue as failed on GitHub.
+ * Removes in_progress/waiting_for_input, adds the failed label.
+ */
+export function markFailed(config: FoundryConfig, issue: number): void {
+  try { github.removeLabel(config.repo, issue, config.labels.in_progress); } catch {}
+  try { github.removeLabel(config.repo, issue, config.labels.waiting_for_input); } catch {}
+  try { github.addLabel(config.repo, issue, config.labels.failed); } catch {}
 }
 
 function sleep(ms: number): Promise<void> {

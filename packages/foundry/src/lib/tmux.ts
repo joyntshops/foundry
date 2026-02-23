@@ -8,6 +8,7 @@ function tmux(args: string[]): string {
     encoding: 'utf-8',
     timeout: 10_000,
     env: { ...process.env },
+    stdio: ['pipe', 'pipe', 'ignore'],
   }).trim();
 }
 

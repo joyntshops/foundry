@@ -7,6 +7,7 @@ import { loadConfigSafe } from '../config.js';
 import * as state from '../lib/state.js';
 import * as tmux from '../lib/tmux.js';
 import * as github from '../lib/github.js';
+import * as claim from '../lib/claim.js';
 import * as log from '../lib/log.js';
 
 export async function runSessions(): Promise<void> {
@@ -67,7 +68,7 @@ export async function runAttach(target: string): Promise<void> {
   tmux.attachSession(sessionName);
 }
 
-export async function runStop(target: string): Promise<void> {
+export async function runStop(target: string, opts?: { ready?: boolean }): Promise<void> {
   const config = loadConfigSafe();
   let sessionName: string;
   let issueNum: number | null = null;
@@ -100,6 +101,13 @@ export async function runStop(target: string): Promise<void> {
 
   if (issueNum && config) {
     state.updateTaskStatus(config.repo, issueNum, 'stopped');
-    log.info(`Task #${issueNum} marked as stopped.`);
+    if (opts?.ready) {
+      try { github.removeLabel(config.repo, issueNum, config.labels.in_progress); } catch {}
+      try { github.addLabel(config.repo, issueNum, config.labels.ready); } catch {}
+      log.info(`Task #${issueNum} stopped. Label restored to ${config.labels.ready}.`);
+    } else {
+      claim.markFailed(config, issueNum);
+      log.info(`Task #${issueNum} stopped. Label set to ${config.labels.failed}.`);
+    }
   }
 }

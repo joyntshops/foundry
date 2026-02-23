@@ -81,9 +81,10 @@ program
 program
   .command('stop <target>')
   .description('Stop a Foundry session safely (issue number or session name)')
-  .action(async (target) => {
+  .option('--ready', 'Restore the state:ready label so the runner re-claims immediately')
+  .action(async (target, opts) => {
     const { runStop } = await import('./commands/sessions.js');
-    await runStop(target);
+    await runStop(target, opts);
   });
 
 // ── foundry prune ─────────────────────────────────────────────────────

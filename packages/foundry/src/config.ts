@@ -17,6 +17,7 @@ const DEFAULTS: FoundryConfig = {
     ready_for_review: 'state:ready-for-human-review',
     spec_changed: 'spec:changed',
     waiting_for_input: 'state:waiting-for-input',
+    failed: 'state:failed',
   },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',

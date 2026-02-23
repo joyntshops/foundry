@@ -16,6 +16,7 @@ const LABEL_DEFS: Array<{ name: string; color: string; description: string }> = 
   { name: 'state:ready-for-human-review', color: '1d76db', description: 'Ready for human review' },
   { name: 'spec:changed', color: 'd93f0b', description: 'Specification changed — replan needed' },
   { name: 'state:waiting-for-input', color: 'e4e669', description: 'Agent needs human input to proceed' },
+  { name: 'state:failed', color: 'b60205', description: 'Task failed — needs human review before retry' },
   { name: 'agent:claude', color: 'c5def5', description: 'Use Claude Code agent backend' },
   { name: 'agent:cursor', color: 'c5def5', description: 'Use Cursor agent backend' },
 ];
@@ -99,6 +100,8 @@ const DEFAULT_CONFIG = {
     done: 'state:done',
     ready_for_review: 'state:ready-for-human-review',
     spec_changed: 'spec:changed',
+    waiting_for_input: 'state:waiting-for-input',
+    failed: 'state:failed',
   },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',

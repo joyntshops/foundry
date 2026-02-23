@@ -21,6 +21,7 @@ export interface FoundryConfig {
     ready_for_review: string;           // default "state:ready-for-human-review"
     spec_changed: string;               // default "spec:changed"
     waiting_for_input: string;          // default "state:waiting-for-input"
+    failed: string;                     // default "state:failed"
   };
 
   branch_template: string;              // default "feature/{issue}-{slug}"

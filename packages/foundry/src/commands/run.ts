@@ -83,6 +83,8 @@ function reconcile(config: FoundryConfig): void {
     if (!tmux.sessionExists(task.tmux_session)) {
       log.warn(`Session ${task.tmux_session} for #${task.issue} is dead. Marking stopped.`);
       state.updateTaskStatus(config.repo, task.issue, 'stopped');
+      claim.markFailed(config, task.issue);
+      try { github.addComment(config.repo, task.issue, `**Foundry: Session Died**\n\ntmux session \`${task.tmux_session}\` exited unexpectedly during reconciliation.`); } catch {}
     }
   }
 }
@@ -162,6 +164,16 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
   const base = git.remoteBranchExists('integration', repoDir)
     ? 'origin/integration'
     : 'origin/main';
+
+  // Clean up stale worktree/branch from previous failed attempt
+  if (git.worktreeExists(worktree, repoDir)) {
+    log.info(`Removing stale worktree from previous attempt: ${worktree}`);
+    git.removeWorktree(worktree, repoDir);
+  }
+  if (git.branchExists(branch, repoDir)) {
+    log.info(`Removing stale branch from previous attempt: ${branch}`);
+    git.deleteBranch(branch, repoDir);
+  }
 
   try {
     git.addWorktree(worktree, branch, base, repoDir);
@@ -259,6 +271,7 @@ async function checkCompletedAgents(config: FoundryConfig, repoDir: string): Pro
           state.updateTaskStatus(config.repo, task.issue, 'failed', {
             last_agent_message: outcome.final_message ?? undefined,
           });
+          claim.markFailed(config, task.issue);
           if (outcome.final_message) {
             try {
               github.addComment(config.repo, task.issue, [
@@ -292,6 +305,8 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
     } catch (err: any) {
       log.error(`Push failed for #${task.issue}: ${err.message}`);
       state.updateTaskStatus(config.repo, task.issue, 'failed');
+      claim.markFailed(config, task.issue);
+      try { github.addComment(config.repo, task.issue, `**Foundry: Push Failed**\n\n${err.message}`); } catch {}
       return;
     }
 
@@ -320,6 +335,8 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
       } catch (err: any) {
         log.error(`PR creation failed for #${task.issue}: ${err.message}`);
         state.updateTaskStatus(config.repo, task.issue, 'failed');
+        claim.markFailed(config, task.issue);
+        try { github.addComment(config.repo, task.issue, `**Foundry: PR Creation Failed**\n\n${err.message}`); } catch {}
       }
     }
   } else {
@@ -331,6 +348,7 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
       }
     }
     state.updateTaskStatus(config.repo, task.issue, 'failed');
+    claim.markFailed(config, task.issue);
 
     // Comment on issue with failure details
     const failureComment = [
@@ -366,6 +384,7 @@ async function handleNeedsInput(config: FoundryConfig, task: TaskState, outcome:
       input_request_count: inputRound,
       last_agent_message: outcome.final_message ?? undefined,
     });
+    claim.markFailed(config, task.issue);
     try {
       const target = task.pr_url ? 'PR' : 'issue';
       const body = `**Foundry Agent — Giving Up** (exceeded ${config.max_input_rounds} input rounds)\n\nThe agent has been unable to complete this task after multiple rounds of input. Manual intervention required.`;
@@ -612,6 +631,7 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
       // best effort
     }
     state.updateTaskStatus(config.repo, task.issue, 'failed', { input_request_count: inputRound });
+    claim.markFailed(config, task.issue);
     return;
   }
 

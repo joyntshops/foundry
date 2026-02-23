@@ -58,6 +58,10 @@ export function push(branch: string, cwd?: string, force = false): void {
   git(args, cwd);
 }
 
+export function deleteBranch(branch: string, cwd?: string): void {
+  gitSafe(['branch', '-D', branch], cwd);
+}
+
 export function rebase(onto: string, cwd?: string): void {
   git(['rebase', onto], cwd);
 }
