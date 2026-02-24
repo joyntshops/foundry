@@ -22,6 +22,7 @@ export interface FoundryConfig {
     waiting_for_input: string;          // default "state:waiting-for-input"
     failed: string;                     // default "state:failed"
     plan_review: string;                // default "state:plan-review"
+    claim: string;                      // default "state:claim"
   };
 
   mode_labels?: {
@@ -48,6 +49,7 @@ export interface FoundryConfig {
     continue: string;                   // default "@foundry continue"
     plan: string;                       // default "@foundry plan"
     start: string;                      // default "@foundry start"
+    claim: string;                      // default "@foundry claim"
   };
 
   version_sources: string[];            // ordered list of version file paths (package.json, Cargo.toml, pyproject.toml)
@@ -87,7 +89,7 @@ export interface TaskState {
   pr_url?: string;
   pr_number?: number;
   agent_backend: string;
-  agent_command: string;
+  agent_command?: string;
   status: TaskStatus;
   claimed_at: string;
   updated_at: string;

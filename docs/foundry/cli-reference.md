@@ -78,6 +78,8 @@ foundry run [--once]
 - Auth is automatic after `foundry setup-bot` — no additional config needed
 - Reconciles state on startup (marks dead sessions as stopped)
 - Polls every `poll_interval_seconds` (default: 30s)
+- Detects `state:ready` issues → claims and launches agent immediately
+- Detects `state:claim` issues → claims without starting agent (direct via `@foundry plan`, `@foundry continue`, etc.)
 - Respects `max_sessions` concurrency limit
 - Handles SIGINT/SIGTERM for graceful shutdown
 - On agent completion: verify → push → create PR
@@ -144,20 +146,23 @@ Sends Ctrl+C, waits 2 seconds, then kills the tmux session. Without `--ready`, m
 
 ---
 
-## `foundry reset <issue>`
+## `foundry reset [issue]`
 
-Tear down all resources for a task and restore the issue to `state:ready`.
+Tear down all resources (local + remote) for a task and restore the issue to `state:ready`. This is the "nuclear option" — full cleanup including GitHub resources.
 
 ```bash
 foundry reset 42               # dry-run (shows what would be removed)
 foundry reset 42 --force       # actually execute
+foundry reset --all            # dry-run all known tasks
+foundry reset --all --force    # reset every tracked task
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--force` | Execute cleanup (default is dry-run) |
+| `--all` | Reset all known tasks (discovers issues from task directories and state) |
 
-**Steps performed:**
+**Steps performed (per task):**
 1. Kill tmux session (if alive)
 2. Remove worktree (if exists)
 3. Delete local branch (if exists)
@@ -166,20 +171,23 @@ foundry reset 42 --force       # actually execute
 6. Remove foundry labels, add `state:ready`
 7. Remove task from state
 
+When using `--all`, Foundry discovers issues from `~/.joynt-foundry/tasks/{repo}/` subdirectories and the state JSON. Each discovered task goes through the full reset sequence.
+
 ---
 
 ## `foundry prune`
 
-Clean stale state, worktrees, and tmux sessions for completed/failed/stopped tasks.
+Clean **local** runner resources (tmux sessions, worktrees, local branches, state) for completed/failed/stopped tasks. Does **not** touch remote branches, PRs, or GitHub labels — use `foundry reset` for full teardown.
 
 ```bash
 foundry prune              # dry-run (shows what would be removed)
-foundry prune --force      # actually remove
+foundry prune --all        # actually remove
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--force` | Execute cleanup (default is dry-run) |
+| `--all` | Execute cleanup (default is dry-run) |
+| `--force` | Alias for `--all` (backwards compat) |
 
 ---
 

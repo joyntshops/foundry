@@ -78,8 +78,8 @@ async function reconcile(config: FoundryConfig): Promise<void> {
   for (const task of tasks) {
     if (['done', 'failed', 'stopped'].includes(task.status)) continue;
 
-    // Waiting/pr-changes-requested/plan-review tasks are valid without a tmux session
-    if (['waiting-for-input', 'pr-changes-requested', 'plan-review'].includes(task.status)) continue;
+    // Waiting/pr-changes-requested/plan-review/claimed tasks are valid without a tmux session
+    if (['waiting-for-input', 'pr-changes-requested', 'plan-review', 'claimed'].includes(task.status)) continue;
 
     // If resuming but tmux is dead, revert to waiting-for-input
     if (task.status === 'resuming' && !tmux.sessionExists(task.tmux_session)) {
@@ -101,6 +101,9 @@ async function reconcile(config: FoundryConfig): Promise<void> {
 async function poll(config: FoundryConfig, repoDir: string): Promise<void> {
   // Check for @foundry comment commands (highest priority — user intent)
   await checkCommentCommands(config, repoDir);
+
+  // Check for claim-only requests (state:claim label)
+  await checkClaimRequests(config, repoDir);
 
   // Check for merged PRs (done = PR merged)
   await checkMergedPRs(config, repoDir);
@@ -258,10 +261,160 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
   log.success(`Agent launched in ${tmuxSession}`);
 }
 
+// ── Claim-Only Requests (state:claim label) ──────────────────────────────
+
+async function checkClaimRequests(config: FoundryConfig, repoDir: string): Promise<void> {
+  let issues: GitHubIssue[];
+  try {
+    issues = await github.listIssuesByLabel(config.repo, config.labels.claim);
+  } catch (err: any) {
+    log.error(`Error polling for claim requests: ${err.message}`);
+    return;
+  }
+
+  if (issues.length === 0) return;
+
+  log.info(`Found ${issues.length} claim request(s).`);
+
+  for (const issue of issues) {
+    if (!running) break;
+    if (claim.isClaimedByUs(config, issue.number)) continue;
+
+    await claimTask(config, issue, repoDir);
+  }
+}
+
+async function claimTask(config: FoundryConfig, issue: GitHubIssue, repoDir: string): Promise<void> {
+  const runnerId = state.getRunnerId();
+  const branch = git.resolveBranchName(config.branch_template, issue.number, issue.title);
+  const worktree = git.resolveWorktreePath(config.worktree_base, issue.number, issue.title, repoDir);
+  const tmuxSession = git.resolveTmuxName(config.tmux_template, issue.number);
+  const issueLabels = issue.labels.map(l => l.name);
+  const backend = resolveBackendForIssue(config, issueLabels);
+
+  log.info(`Claim-only #${issue.number}: ${issue.title}`);
+
+  // Attempt claim
+  const claimed = await claim.claimIssueOnly(config, issue, {
+    runner_id: runnerId,
+    branch,
+    worktree,
+    tmux_session: tmuxSession,
+    agent_backend: backend.name,
+  });
+
+  if (!claimed) {
+    log.warn(`Failed to claim #${issue.number} — another runner may own it.`);
+    return;
+  }
+
+  log.success(`Claimed #${issue.number} (claim-only)`);
+
+  // Fetch latest from remote
+  try {
+    git.fetchAll(repoDir);
+  } catch (err: any) {
+    log.warn(`Fetch failed: ${err.message}`);
+  }
+
+  // Create worktree + branch
+  const base = git.remoteBranchExists('integration', repoDir)
+    ? 'origin/integration'
+    : 'origin/main';
+
+  // Clean up stale worktree/branch from previous failed attempt
+  if (git.worktreeExists(worktree, repoDir)) {
+    log.info(`Removing stale worktree from previous attempt: ${worktree}`);
+    git.removeWorktree(worktree, repoDir);
+  }
+  if (git.branchExists(branch, repoDir)) {
+    log.info(`Removing stale branch from previous attempt: ${branch}`);
+    git.deleteBranch(branch, repoDir);
+  }
+  if (git.remoteBranchExists(branch, repoDir)) {
+    log.info(`Removing stale remote branch from previous attempt: ${branch}`);
+    git.deleteRemoteBranch(branch, repoDir);
+  }
+
+  try {
+    git.addWorktree(worktree, branch, base, repoDir);
+    log.success(`Worktree: ${worktree}`);
+  } catch (err: any) {
+    log.error(`Failed to create worktree: ${err.message}`);
+    return;
+  }
+
+  // Save state — no tmux session, no agent command
+  const taskState: TaskState = {
+    issue: issue.number,
+    title: issue.title,
+    repo: config.repo,
+    branch,
+    worktree,
+    tmux_session: tmuxSession,
+    agent_backend: backend.name,
+    status: 'claimed',
+    claimed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    runner_id: runnerId,
+  };
+
+  state.upsertTask(config.repo, taskState);
+  log.success(`Task #${issue.number} saved as claimed — awaiting commands`);
+}
+
+async function launchAgentFromClaimed(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
+  // Fetch latest issue for body and labels
+  const issue = await github.getIssue(config.repo, task.issue);
+  const issueLabels = issue.labels.map(l => l.name);
+
+  const backend = resolveBackend(config, task.agent_backend);
+  const logDir = state.getLogDir(config.repo, task.issue);
+  const stateDir = state.getTaskStateDir(config.repo, task.issue);
+  const permissionMode = resolvePermissionMode(issueLabels, config);
+
+  // If a message was provided, append it to the issue body as extra context
+  const body = message
+    ? `${issue.body ?? ''}\n\n---\nAdditional instructions:\n${message}`
+    : issue.body ?? '';
+
+  const params: AgentLaunchParams = {
+    worktree: task.worktree,
+    issue_url: issue.html_url,
+    issue_number: issue.number,
+    repo: config.repo,
+    title: issue.title,
+    body,
+    labels: issueLabels,
+    log_dir: logDir,
+    state_dir: stateDir,
+    permission_mode: permissionMode,
+  };
+
+  const agentCommand = backend.resolveCommand(params);
+  const agentEnv = backend.resolveEnv(params);
+
+  // Create tmux session in the existing worktree
+  tmux.createSession(task.tmux_session, task.worktree);
+
+  // Set env vars in tmux session
+  for (const [k, v] of Object.entries(agentEnv)) {
+    tmux.sendKeys(task.tmux_session, `export ${k}="${v}"`);
+  }
+
+  // Launch agent
+  tmux.sendKeys(task.tmux_session, `${agentCommand}; exit`);
+
+  state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
+    agent_command: agentCommand,
+  });
+  log.success(`Agent launched from claimed state for #${task.issue} in ${task.tmux_session}`);
+}
+
 // ── Comment Commands (@foundry ...) ──────────────────────────────────────
 
 interface ParsedCommand {
-  command: 'replan' | 'restart' | 'stop' | 'continue' | 'plan' | 'start';
+  command: 'replan' | 'restart' | 'stop' | 'continue' | 'plan' | 'start' | 'claim';
   message?: string; // for `continue <msg>` and `start <msg>`
   author: string;
 }
@@ -294,6 +447,7 @@ function parseCommentCommand(body: string, author: string, config: FoundryConfig
   if (firstLine === triggers.replan) return { command: 'replan', author };
   if (firstLine === triggers.restart) return { command: 'restart', author };
   if (firstLine === triggers.stop) return { command: 'stop', author };
+  if (firstLine === triggers.claim) return { command: 'claim', author };
 
   return null;
 }
@@ -369,21 +523,25 @@ function getValidStatesForCommand(command: ParsedCommand['command']): TaskState[
     case 'replan':
       return ['agent-running'];
     case 'restart':
-      return ['agent-running', 'waiting-for-input', 'failed', 'plan-review'];
+      return ['agent-running', 'waiting-for-input', 'failed', 'plan-review', 'claimed'];
     case 'stop':
-      return ['agent-running', 'waiting-for-input', 'resuming'];
+      return ['agent-running', 'waiting-for-input', 'resuming', 'claimed'];
     case 'continue':
-      return ['pr-open', 'waiting-for-input', 'plan-review'];
+      return ['pr-open', 'waiting-for-input', 'plan-review', 'claimed'];
     case 'plan':
-      return ['agent-running', 'waiting-for-input', 'plan-review'];
+      return ['agent-running', 'waiting-for-input', 'plan-review', 'claimed'];
     case 'start':
-      return ['failed', 'stopped'];
+      return ['failed', 'stopped', 'claimed'];
+    case 'claim':
+      return []; // not valid on any existing task — only for unclaimed issues via label
   }
 }
 
 async function handleCommandStop(config: FoundryConfig, task: TaskState, repoDir: string): Promise<void> {
-  // Kill tmux session
-  tmux.killSession(task.tmux_session);
+  // Kill tmux session (if one exists — claimed tasks have no session)
+  if (task.status !== 'claimed') {
+    tmux.killSession(task.tmux_session);
+  }
 
   // Update state and labels
   state.updateTaskStatus(config.repo, task.issue, 'failed');
@@ -402,8 +560,10 @@ async function handleCommandStop(config: FoundryConfig, task: TaskState, repoDir
 }
 
 async function handleCommandRestart(config: FoundryConfig, task: TaskState, repoDir: string): Promise<void> {
-  // Kill tmux session
-  tmux.killSession(task.tmux_session);
+  // Kill tmux session (if one exists — claimed tasks have no session)
+  if (task.status !== 'claimed') {
+    tmux.killSession(task.tmux_session);
+  }
 
   // Clean up worktree and branch
   try { git.removeWorktree(task.worktree, repoDir); } catch {}
@@ -480,7 +640,10 @@ async function handleCommandReplan(config: FoundryConfig, task: TaskState, repoD
 async function handleCommandContinue(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
   const prompt = message || 'The user asked you to continue working on this task.';
 
-  if (task.status === 'pr-open') {
+  if (task.status === 'claimed') {
+    // Launch agent from claimed state (no agent has run yet)
+    await launchAgentFromClaimed(config, task, message, repoDir);
+  } else if (task.status === 'pr-open') {
     // Resume agent to address PR feedback
     state.updateTaskStatus(config.repo, task.issue, 'pr-changes-requested', {
       last_agent_message: prompt,
@@ -501,8 +664,10 @@ async function handleCommandContinue(config: FoundryConfig, task: TaskState, mes
 }
 
 async function handleCommandPlan(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
-  // Kill the current tmux session
-  tmux.killSession(task.tmux_session);
+  // Kill the current tmux session (if one exists — claimed tasks have no session)
+  if (task.status !== 'claimed') {
+    tmux.killSession(task.tmux_session);
+  }
 
   // Re-fetch the issue body for the fresh prompt
   const issue = await github.getIssue(config.repo, task.issue);
@@ -558,8 +723,10 @@ async function handleCommandPlan(config: FoundryConfig, task: TaskState, message
 }
 
 async function handleCommandStart(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
-  // Clean up old worktree and branch
-  tmux.killSession(task.tmux_session);
+  // Clean up old worktree and branch (claimed tasks have no tmux session)
+  if (task.status !== 'claimed') {
+    tmux.killSession(task.tmux_session);
+  }
   try { git.removeWorktree(task.worktree, repoDir); } catch {}
   try { git.deleteBranch(task.branch, repoDir); } catch {}
   try { git.deleteRemoteBranch(task.branch, repoDir); } catch {}

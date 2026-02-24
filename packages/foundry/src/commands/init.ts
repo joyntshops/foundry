@@ -17,6 +17,7 @@ const LABEL_DEFS: Array<{ name: string; color: string; description: string }> = 
   { name: 'state:waiting-for-input', color: '1d76db', description: 'Agent needs human input to proceed' },
   { name: 'state:failed', color: 'b60205', description: 'Task failed — needs human review before retry' },
   { name: 'state:plan-review', color: '1d76db', description: 'Agent plan awaiting human review' },
+  { name: 'state:claim', color: 'c2e0c6', description: 'Request Foundry to claim without starting agent' },
   { name: 'mode:plan', color: '5319e7', description: 'Agent runs in plan-only mode' },
   { name: 'mode:auto', color: '5319e7', description: 'Agent runs with full permissions' },
   { name: 'mode:default', color: '5319e7', description: 'Agent runs in step-by-step mode' },
@@ -98,6 +99,7 @@ const DEFAULT_CONFIG = {
     waiting_for_input: 'state:waiting-for-input',
     failed: 'state:failed',
     plan_review: 'state:plan-review',
+    claim: 'state:claim',
   },
   mode_labels: {
     plan: 'mode:plan',
@@ -118,6 +120,7 @@ const DEFAULT_CONFIG = {
     continue: '@foundry continue',
     plan: '@foundry plan',
     start: '@foundry start',
+    claim: '@foundry claim',
   },
   version_sources: [] as string[],
   tag_prefix: 'v',

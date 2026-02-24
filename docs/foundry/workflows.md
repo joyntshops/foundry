@@ -42,6 +42,28 @@ git checkout -b hotfix/v1.2.1
 foundry sync-integration
 ```
 
+## Claim-Only Workflow
+
+The claim-only workflow lets you have Foundry claim and set up an issue (worktree, branch) **without** launching an agent. You then direct the agent step-by-step via comment commands.
+
+```
+1. Create GitHub Issue
+2. Label: state:claim
+3. foundry run claims → creates worktree + branch → does NOT start agent
+4. Direct the agent via comments:
+   - @foundry plan [message]     → launch in plan mode
+   - @foundry continue [message] → launch normally
+   - @foundry stop               → cancel and mark failed
+   - @foundry restart             → discard and re-queue
+```
+
+This is useful when you want to:
+- Review the issue setup before starting the agent
+- Give the agent specific first instructions via `@foundry continue`
+- Start in plan mode via `@foundry plan` and review before implementation
+
+Claimed tasks do not consume a `max_sessions` slot (no agent is running), and they persist across runner restarts.
+
 ## Controlling Foundry
 
 Comment `@foundry <command>` on an issue or PR to control the agent. Foundry checks for commands on every poll cycle.
@@ -50,12 +72,12 @@ Comment `@foundry <command>` on an issue or PR to control the agent. Foundry che
 
 | Command | Valid when | What it does |
 |---------|-----------|--------------|
-| `@foundry stop` | Agent running, waiting for input | Kill the agent and mark task failed |
-| `@foundry restart` | Agent running, waiting, failed, plan review | Discard all work (worktree + branch) and re-queue the issue as ready |
+| `@foundry stop` | Agent running, waiting for input, claimed | Kill the agent and mark task failed |
+| `@foundry restart` | Agent running, waiting, failed, plan review, claimed | Discard all work (worktree + branch) and re-queue the issue as ready |
 | `@foundry replan` | Agent running | Kill the agent, re-read the issue body, and relaunch |
-| `@foundry plan [message]` | Agent running, waiting, plan review | Relaunch in plan mode (produces a plan for review) |
-| `@foundry continue [message]` | PR open, waiting for input, plan review | Resume the agent with the message as context |
-| `@foundry start [message]` | Failed, stopped | Clean up and re-queue the issue with optional context |
+| `@foundry plan [message]` | Agent running, waiting, plan review, claimed | Relaunch in plan mode (produces a plan for review) |
+| `@foundry continue [message]` | PR open, waiting for input, plan review, claimed | Resume/launch the agent with the message as context |
+| `@foundry start [message]` | Failed, stopped, claimed | Clean up and re-queue the issue with optional context |
 
 The `[message]` is optional for all commands that accept it. It can appear on the same line as the command or start on the next line. Multiline messages are supported:
 
@@ -103,6 +125,36 @@ This:
 4. Merges into integration
 5. Runs integration rebuild
 6. Labels the issue `state:ready-for-human-review`
+
+## Cleanup: Prune vs Reset
+
+Foundry has two cleanup commands with distinct scopes:
+
+**`foundry prune`** — Clean the runner machine (safe, local-only, routine)
+- Removes tmux sessions, worktrees, local branches, and state for completed/failed/stopped tasks
+- Does **not** touch remote branches, PRs, or GitHub labels
+- Use after tasks complete to free local resources
+
+```bash
+foundry prune              # dry-run
+foundry prune --all        # execute
+```
+
+**`foundry reset`** — Full teardown and re-queue (affects GitHub, destructive)
+- Removes everything `prune` does, **plus** remote branches, PRs, and labels
+- Restores the issue to `state:ready` so the runner can re-claim it
+- Use when you need to restart a task from scratch
+
+```bash
+foundry reset 42 --force       # reset a single issue
+foundry reset --all --force    # reset every tracked task
+```
+
+| Command | Scope | Local cleanup | Remote cleanup | Resets labels |
+|---------|-------|--------------|----------------|---------------|
+| `foundry prune` | Stale tasks | Yes | No | No |
+| `foundry reset <issue>` | Single task | Yes | Yes | Yes → `state:ready` |
+| `foundry reset --all` | All tasks | Yes | Yes | Yes → `state:ready` |
 
 ## Concurrent Sessions
 

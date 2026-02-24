@@ -45,6 +45,38 @@ function buildClaimComment(info: ClaimInfo): string {
   ].join('\n');
 }
 
+function buildClaimOnlyComment(info: ClaimInfo): string {
+  return [
+    '<!-- foundry-claim-block -->',
+    '**Foundry Claim** (claim-only — no agent running)',
+    '',
+    '| Field | Value |',
+    '|-------|-------|',
+    `| Runner | \`${info.runner_id}\` |`,
+    `| Branch | \`${info.branch}\` |`,
+    `| Worktree | \`${info.worktree}\` |`,
+    `| tmux Session | \`${info.tmux_session}\` |`,
+    `| Agent Backend | \`${info.agent_backend}\` |`,
+    `| Claimed At | ${new Date().toISOString()} |`,
+    '',
+    'No agent is running. Use one of the commands below to direct this task:',
+    '',
+    '<details><summary><b>Commands</b></summary>',
+    '',
+    '| Command | Description |',
+    '|---------|-------------|',
+    '| `@foundry plan [message]` | Launch agent in plan mode (produces a plan for review) |',
+    '| `@foundry continue [message]` | Launch agent with optional instructions |',
+    '| `@foundry stop` | Cancel claim and mark task failed |',
+    '| `@foundry restart` | Discard claim and re-queue as ready |',
+    '',
+    'Message can be on the same line or start on the next line (multiline supported).',
+    '',
+    '</details>',
+    '<!-- /foundry-claim-block -->',
+  ].join('\n');
+}
+
 function parseClaimComment(body: string): ClaimInfo | null {
   if (!body.includes('<!-- foundry-claim-block -->')) return null;
   const extract = (field: string): string => {
@@ -85,6 +117,41 @@ export async function claimIssue(
 
   // Step 3: Verify — re-fetch issue and check our claim is the active one
   await sleep(1000); // brief delay to avoid race
+
+  const comments = await github.getComments(config.repo, issue.number);
+  const claimComments = comments
+    .filter(c => c.body.includes('<!-- foundry-claim-block -->'))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+  if (claimComments.length === 0) return false;
+
+  const latestClaim = parseClaimComment(claimComments[0].body);
+  if (!latestClaim) return false;
+
+  return latestClaim.runner_id === runnerId;
+}
+
+/**
+ * Claim an issue without starting an agent. Returns true if this runner owns it.
+ */
+export async function claimIssueOnly(
+  config: FoundryConfig,
+  issue: GitHubIssue,
+  claimInfo: ClaimInfo,
+): Promise<boolean> {
+  const runnerId = state.getRunnerId();
+
+  // Step 1: Swap labels — remove claim/ready/failed, add in-progress
+  try { await github.removeLabel(config.repo, issue.number, config.labels.claim); } catch {}
+  try { await github.removeLabel(config.repo, issue.number, config.labels.ready); } catch {}
+  try { await github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
+  await github.addLabel(config.repo, issue.number, config.labels.in_progress);
+
+  // Step 2: Post claim-only comment
+  await github.addComment(config.repo, issue.number, buildClaimOnlyComment(claimInfo));
+
+  // Step 3: Verify — re-fetch issue and check our claim is the active one
+  await sleep(1000);
 
   const comments = await github.getComments(config.repo, issue.number);
   const claimComments = comments

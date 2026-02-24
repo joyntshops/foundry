@@ -19,6 +19,7 @@ labels:
   waiting_for_input: "state:waiting-for-input"  # Agent needs human input
   failed: "state:failed"                # Task failed
   plan_review: "state:plan-review"       # Agent produced a plan, awaiting approval
+  claim: "state:claim"                  # Claim-only: set up worktree without starting agent
 
 # ── Mode Labels (optional) ──────────────────────────────────────────
 
@@ -58,6 +59,7 @@ comment_triggers:
   continue: "@foundry continue"         # Resume agent with message
   plan: "@foundry plan"                 # Relaunch in plan mode
   start: "@foundry start"              # Re-queue a failed/stopped task
+  claim: "@foundry claim"              # Claim issue without starting agent (comment trigger)
 
 # ── Versioning ───────────────────────────────────────────────────────
 
@@ -107,7 +109,7 @@ agent_label_map:
 GitHub repository in `owner/repo` format.
 
 ### `labels`
-Label names used by Foundry to track task state. Customize if your repo uses different label conventions. Includes `plan_review` for the plan-review workflow.
+Label names used by Foundry to track task state. Customize if your repo uses different label conventions. Includes `plan_review` for the plan-review workflow and `claim` for the claim-only workflow (claim without starting an agent).
 
 ### `mode_labels`
 Label names that control agent permission mode. Apply one of these labels to an issue to override the default auto mode. `plan` makes the agent produce a plan for approval before implementing. `default` uses Claude Code's default permission mode (asks before tool use).

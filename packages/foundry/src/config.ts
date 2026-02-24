@@ -18,6 +18,7 @@ const DEFAULTS: FoundryConfig = {
     waiting_for_input: 'state:waiting-for-input',
     failed: 'state:failed',
     plan_review: 'state:plan-review',
+    claim: 'state:claim',
   },
   mode_labels: {
     plan: 'mode:plan',
@@ -39,6 +40,7 @@ const DEFAULTS: FoundryConfig = {
     continue: '@foundry continue',
     plan: '@foundry plan',
     start: '@foundry start',
+    claim: '@foundry claim',
   },
   version_sources: [],
   tag_prefix: 'v',

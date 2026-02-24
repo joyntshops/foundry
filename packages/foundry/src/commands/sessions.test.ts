@@ -61,6 +61,7 @@ const mockConfig: FoundryConfig = {
     waiting_for_input: 'state:waiting-for-input',
     failed: 'state:failed',
     plan_review: 'state:plan-review',
+    claim: 'state:claim',
   },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
