@@ -16,7 +16,13 @@ function git(args: string[], cwd?: string): string {
 
 function gitSafe(args: string[], cwd?: string): string | null {
   try {
-    return git(args, cwd);
+    return execFileSync('git', args, {
+      cwd: cwd ?? process.cwd(),
+      encoding: 'utf-8',
+      timeout: 60_000,
+      env: { ...process.env },
+      stdio: ['pipe', 'pipe', 'pipe'],  // suppress stderr
+    }).trim();
   } catch {
     return null;
   }

@@ -61,8 +61,6 @@ function buildClaimOnlyComment(info: ClaimInfo): string {
     '',
     'No agent is running. Use one of the commands below to direct this task:',
     '',
-    '<details><summary><b>Commands</b></summary>',
-    '',
     '| Command | Description |',
     '|---------|-------------|',
     '| `@foundry plan [message]` | Launch agent in plan mode (produces a plan for review) |',
@@ -71,8 +69,6 @@ function buildClaimOnlyComment(info: ClaimInfo): string {
     '| `@foundry restart` | Discard claim and re-queue as ready |',
     '',
     'Message can be on the same line or start on the next line (multiline supported).',
-    '',
-    '</details>',
     '<!-- /foundry-claim-block -->',
   ].join('\n');
 }
@@ -140,11 +136,18 @@ export async function claimIssueOnly(
   claimInfo: ClaimInfo,
 ): Promise<boolean> {
   const runnerId = state.getRunnerId();
+  const issueLabels = new Set(issue.labels.map(l => l.name));
 
-  // Step 1: Swap labels — remove claim/ready/failed, add in-progress
-  try { await github.removeLabel(config.repo, issue.number, config.labels.claim); } catch {}
-  try { await github.removeLabel(config.repo, issue.number, config.labels.ready); } catch {}
-  try { await github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
+  // Step 1: Swap labels — remove claim/ready/failed (only if present), add in-progress
+  if (issueLabels.has(config.labels.claim)) {
+    try { await github.removeLabel(config.repo, issue.number, config.labels.claim); } catch {}
+  }
+  if (issueLabels.has(config.labels.ready)) {
+    try { await github.removeLabel(config.repo, issue.number, config.labels.ready); } catch {}
+  }
+  if (issueLabels.has(config.labels.failed)) {
+    try { await github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
+  }
   await github.addLabel(config.repo, issue.number, config.labels.in_progress);
 
   // Step 2: Post claim-only comment
