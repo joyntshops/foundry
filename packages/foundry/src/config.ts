@@ -35,6 +35,10 @@ const DEFAULTS: FoundryConfig = {
   comment_triggers: {
     replan: '@foundry replan',
     restart: '@foundry restart',
+    stop: '@foundry stop',
+    continue: '@foundry continue',
+    plan: '@foundry plan',
+    start: '@foundry start',
   },
   version_sources: [],
   tag_prefix: 'v',

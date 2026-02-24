@@ -44,6 +44,10 @@ export interface FoundryConfig {
   comment_triggers: {
     replan: string;                     // default "@foundry replan"
     restart: string;                    // default "@foundry restart"
+    stop: string;                       // default "@foundry stop"
+    continue: string;                   // default "@foundry continue"
+    plan: string;                       // default "@foundry plan"
+    start: string;                      // default "@foundry start"
   };
 
   version_sources: string[];            // ordered list of version file paths (package.json, Cargo.toml, pyproject.toml)

@@ -99,6 +99,9 @@ async function reconcile(config: FoundryConfig): Promise<void> {
 }
 
 async function poll(config: FoundryConfig, repoDir: string): Promise<void> {
+  // Check for @foundry comment commands (highest priority — user intent)
+  await checkCommentCommands(config, repoDir);
+
   // Check for merged PRs (done = PR merged)
   await checkMergedPRs(config, repoDir);
 
@@ -255,6 +258,337 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
   log.success(`Agent launched in ${tmuxSession}`);
 }
 
+// ── Comment Commands (@foundry ...) ──────────────────────────────────────
+
+interface ParsedCommand {
+  command: 'replan' | 'restart' | 'stop' | 'continue' | 'plan' | 'start';
+  message?: string; // for `continue <msg>` and `start <msg>`
+  author: string;
+}
+
+function isHumanAuthor(login: string): boolean {
+  return !login.includes('[bot]') && login !== 'github-actions' && login !== 'foundry';
+}
+
+function parseCommentCommand(body: string, author: string, config: FoundryConfig): ParsedCommand | null {
+  const triggers = config.comment_triggers;
+  const trimmed = body.trim();
+  const firstLine = trimmed.split('\n')[0].trim();
+
+  // Commands with optional trailing message — match prefix, capture rest of entire body.
+  // Message can be on the same line or start on the next line (multiline supported).
+  if (trimmed.startsWith(triggers.continue)) {
+    const msg = trimmed.slice(triggers.continue.length).trim();
+    return { command: 'continue', message: msg || undefined, author };
+  }
+  if (trimmed.startsWith(triggers.start)) {
+    const msg = trimmed.slice(triggers.start.length).trim();
+    return { command: 'start', message: msg || undefined, author };
+  }
+  if (trimmed.startsWith(triggers.plan)) {
+    const msg = trimmed.slice(triggers.plan.length).trim();
+    return { command: 'plan', message: msg || undefined, author };
+  }
+
+  // Single-word commands — match on the first line only (ignore trailing text)
+  if (firstLine === triggers.replan) return { command: 'replan', author };
+  if (firstLine === triggers.restart) return { command: 'restart', author };
+  if (firstLine === triggers.stop) return { command: 'stop', author };
+
+  return null;
+}
+
+async function checkCommentCommands(config: FoundryConfig, repoDir: string): Promise<void> {
+  const tasks = state.getAllTasks(config.repo);
+  // Include failed/stopped tasks so @foundry start and @foundry restart can act on them
+  const activeTasks = tasks.filter(t => t.status !== 'done');
+
+  for (const task of activeTasks) {
+    if (!running) break;
+
+    try {
+      // Fetch comments from the active conversation surface
+      const comments = task.pr_number
+        ? await getPRComments(config.repo, task.pr_number)
+        : await github.getComments(config.repo, task.issue);
+
+      const taskUpdated = new Date(task.updated_at).getTime();
+
+      // Find new human comments with @foundry commands
+      for (const comment of comments) {
+        const commentTime = new Date(comment.created_at).getTime();
+        if (commentTime <= taskUpdated) continue;
+
+        const login = comment.user?.login ?? '';
+        if (!isHumanAuthor(login)) continue;
+
+        const cmd = parseCommentCommand(comment.body, login, config);
+        if (!cmd) continue;
+
+        // Validate command against current task status
+        const validStates = getValidStatesForCommand(cmd.command);
+        if (!validStates.includes(task.status)) {
+          log.debug(`Ignoring @foundry ${cmd.command} for #${task.issue} — invalid in state "${task.status}"`);
+          continue;
+        }
+
+        log.info(`@foundry ${cmd.command} from ${cmd.author} for #${task.issue}`);
+
+        switch (cmd.command) {
+          case 'stop':
+            await handleCommandStop(config, task, repoDir);
+            break;
+          case 'restart':
+            await handleCommandRestart(config, task, repoDir);
+            break;
+          case 'replan':
+            await handleCommandReplan(config, task, repoDir);
+            break;
+          case 'continue':
+            await handleCommandContinue(config, task, cmd.message ?? '', repoDir);
+            break;
+          case 'plan':
+            await handleCommandPlan(config, task, cmd.message ?? '', repoDir);
+            break;
+          case 'start':
+            await handleCommandStart(config, task, cmd.message ?? '', repoDir);
+            break;
+        }
+
+        // Only process the first matching command per task per poll cycle
+        break;
+      }
+    } catch (err: any) {
+      log.error(`Error checking comment commands for #${task.issue}: ${err.message}`);
+    }
+  }
+}
+
+function getValidStatesForCommand(command: ParsedCommand['command']): TaskState['status'][] {
+  switch (command) {
+    case 'replan':
+      return ['agent-running'];
+    case 'restart':
+      return ['agent-running', 'waiting-for-input', 'failed', 'plan-review'];
+    case 'stop':
+      return ['agent-running', 'waiting-for-input', 'resuming'];
+    case 'continue':
+      return ['pr-open', 'waiting-for-input', 'plan-review'];
+    case 'plan':
+      return ['agent-running', 'waiting-for-input', 'plan-review'];
+    case 'start':
+      return ['failed', 'stopped'];
+  }
+}
+
+async function handleCommandStop(config: FoundryConfig, task: TaskState, repoDir: string): Promise<void> {
+  // Kill tmux session
+  tmux.killSession(task.tmux_session);
+
+  // Update state and labels
+  state.updateTaskStatus(config.repo, task.issue, 'failed');
+  await claim.markFailed(config, task.issue);
+
+  // Also remove plan-review and waiting labels if present
+  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
+
+  // Post confirmation
+  try {
+    await postToConversationTarget(config, task,
+      '**Foundry: Stopped** — Agent has been stopped per `@foundry stop` command.');
+  } catch {}
+
+  log.success(`Stopped agent for #${task.issue} via @foundry stop`);
+}
+
+async function handleCommandRestart(config: FoundryConfig, task: TaskState, repoDir: string): Promise<void> {
+  // Kill tmux session
+  tmux.killSession(task.tmux_session);
+
+  // Clean up worktree and branch
+  try { git.removeWorktree(task.worktree, repoDir); } catch {}
+  try { git.deleteBranch(task.branch, repoDir); } catch {}
+  try { git.deleteRemoteBranch(task.branch, repoDir); } catch {}
+
+  // Remove task from state
+  state.removeTask(config.repo, task.issue);
+
+  // Reset labels: remove all state labels, set back to ready
+  try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.failed); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.ready_for_review); } catch {}
+  await github.addLabel(config.repo, task.issue, config.labels.ready);
+
+  // Post confirmation
+  try {
+    await postToConversationTarget(config, task,
+      '**Foundry: Restarting** — Work discarded per `@foundry restart`. The issue has been re-queued and will be claimed on the next poll cycle.');
+  } catch {}
+
+  log.success(`Restarted #${task.issue} via @foundry restart — re-queued as ready`);
+}
+
+async function handleCommandReplan(config: FoundryConfig, task: TaskState, repoDir: string): Promise<void> {
+  // Kill the current tmux session
+  tmux.killSession(task.tmux_session);
+
+  // Re-fetch the issue body for the fresh prompt
+  const issue = await github.getIssue(config.repo, task.issue);
+  const issueLabels = issue.labels.map(l => l.name);
+
+  const backend = resolveBackend(config, task.agent_backend);
+  const logDir = state.getLogDir(config.repo, task.issue);
+  const stateDir = state.getTaskStateDir(config.repo, task.issue);
+  const permissionMode = resolvePermissionMode(issueLabels, config);
+
+  const params: AgentLaunchParams = {
+    worktree: task.worktree,
+    issue_url: issue.html_url,
+    issue_number: issue.number,
+    repo: config.repo,
+    title: issue.title,
+    body: issue.body ?? '',
+    labels: issueLabels,
+    log_dir: logDir,
+    state_dir: stateDir,
+    permission_mode: permissionMode,
+  };
+
+  const agentCommand = backend.resolveCommand(params);
+  const agentEnv = backend.resolveEnv(params);
+
+  // Create new tmux session in the existing worktree
+  tmux.createSession(task.tmux_session, task.worktree);
+  for (const [k, v] of Object.entries(agentEnv)) {
+    tmux.sendKeys(task.tmux_session, `export ${k}="${v}"`);
+  }
+  tmux.sendKeys(task.tmux_session, `${agentCommand}; exit`);
+
+  state.updateTaskStatus(config.repo, task.issue, 'agent-running');
+
+  // Post confirmation
+  try {
+    await postToConversationTarget(config, task,
+      '**Foundry: Replanning** — Agent re-launched with fresh issue body per `@foundry replan`.');
+  } catch {}
+
+  log.success(`Replanned #${task.issue} via @foundry replan`);
+}
+
+async function handleCommandContinue(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
+  const prompt = message || 'The user asked you to continue working on this task.';
+
+  if (task.status === 'pr-open') {
+    // Resume agent to address PR feedback
+    state.updateTaskStatus(config.repo, task.issue, 'pr-changes-requested', {
+      last_agent_message: prompt,
+    });
+    await resumeAgentForPR(config, task, prompt, repoDir);
+  } else {
+    // Resume agent for waiting-for-input or plan-review
+    await resumeAgent(config, task, prompt, repoDir);
+  }
+
+  // Post confirmation
+  try {
+    await postToConversationTarget(config, task,
+      `**Foundry: Resuming** — Agent is continuing per \`@foundry continue\`. \`@foundry stop\` to cancel.`);
+  } catch {}
+
+  log.success(`Continued #${task.issue} via @foundry continue`);
+}
+
+async function handleCommandPlan(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
+  // Kill the current tmux session
+  tmux.killSession(task.tmux_session);
+
+  // Re-fetch the issue body for the fresh prompt
+  const issue = await github.getIssue(config.repo, task.issue);
+  const issueLabels = issue.labels.map(l => l.name);
+
+  // If a message was provided, append it to the issue body as extra context
+  const body = message
+    ? `${issue.body ?? ''}\n\n---\nAdditional instructions from @foundry plan:\n${message}`
+    : issue.body ?? '';
+
+  const backend = resolveBackend(config, task.agent_backend);
+  const logDir = state.getLogDir(config.repo, task.issue);
+  const stateDir = state.getTaskStateDir(config.repo, task.issue);
+
+  // Force plan mode regardless of issue labels
+  const params: AgentLaunchParams = {
+    worktree: task.worktree,
+    issue_url: issue.html_url,
+    issue_number: issue.number,
+    repo: config.repo,
+    title: issue.title,
+    body,
+    labels: issueLabels,
+    log_dir: logDir,
+    state_dir: stateDir,
+    permission_mode: '--permission-mode plan',
+  };
+
+  const agentCommand = backend.resolveCommand(params);
+  const agentEnv = backend.resolveEnv(params);
+
+  // Create new tmux session in the existing worktree
+  tmux.createSession(task.tmux_session, task.worktree);
+  for (const [k, v] of Object.entries(agentEnv)) {
+    tmux.sendKeys(task.tmux_session, `export ${k}="${v}"`);
+  }
+  tmux.sendKeys(task.tmux_session, `${agentCommand}; exit`);
+
+  // Remove waiting/plan-review labels, ensure in-progress
+  try { await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
+  try { await github.addLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+
+  state.updateTaskStatus(config.repo, task.issue, 'agent-running');
+
+  // Post confirmation
+  try {
+    await postToConversationTarget(config, task,
+      '**Foundry: Plan Mode** — Agent re-launched in plan mode per `@foundry plan`. It will produce a plan for review instead of implementing directly.');
+  } catch {}
+
+  log.success(`Switched #${task.issue} to plan mode via @foundry plan`);
+}
+
+async function handleCommandStart(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
+  // Clean up old worktree and branch
+  tmux.killSession(task.tmux_session);
+  try { git.removeWorktree(task.worktree, repoDir); } catch {}
+  try { git.deleteBranch(task.branch, repoDir); } catch {}
+  try { git.deleteRemoteBranch(task.branch, repoDir); } catch {}
+
+  // Remove task from state
+  state.removeTask(config.repo, task.issue);
+
+  // Reset labels to ready
+  try { await github.removeLabel(config.repo, task.issue, config.labels.failed); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input); } catch {}
+  await github.addLabel(config.repo, task.issue, config.labels.ready);
+
+  // If a message was provided, post it as context for the agent
+  if (message) {
+    try {
+      await github.addComment(config.repo, task.issue,
+        `**Foundry: Starting** — Re-queued per \`@foundry start\`. Additional context from the user:\n\n${message}`);
+    } catch {}
+  } else {
+    try {
+      await github.addComment(config.repo, task.issue,
+        '**Foundry: Starting** — Re-queued per `@foundry start`. Will be claimed on the next poll cycle.');
+    } catch {}
+  }
+
+  log.success(`Re-queued #${task.issue} via @foundry start`);
+}
+
 // ── Merged PR Detection ──────────────────────────────────────────────────
 
 async function checkMergedPRs(config: FoundryConfig, repoDir: string): Promise<void> {
@@ -340,16 +674,16 @@ async function checkCompletedAgents(config: FoundryConfig, repoDir: string): Pro
             last_agent_message: outcome.final_message ?? undefined,
           });
           await claim.markFailed(config, task.issue);
-          if (outcome.final_message) {
-            try {
-              await github.addComment(config.repo, task.issue, [
-                '**Foundry Agent Error**',
-                '',
-                outcome.final_message.slice(-2000),
-              ].join('\n'));
-            } catch {
-              // best effort
-            }
+          try {
+            await github.addComment(config.repo, task.issue, [
+              '**Foundry Agent Error**',
+              '',
+              outcome.final_message ? outcome.final_message.slice(-2000) : 'No error details captured.',
+              '',
+              '`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
+            ].join('\n'));
+          } catch {
+            // best effort
           }
           break;
       }
@@ -401,6 +735,17 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
         });
         await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
         try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+
+        // Post instructions on the new PR
+        if (prNumber) {
+          try {
+            await github.commentOnPR(config.repo, prNumber, [
+              'Foundry is watching this PR. To send the agent back to work:',
+              '- Submit a review with **Request changes**',
+              '- Or comment `@foundry continue [feedback]`',
+            ].join('\n'));
+          } catch {}
+        }
       } catch (err: any) {
         log.error(`PR creation failed for #${task.issue}: ${err.message}`);
         state.updateTaskStatus(config.repo, task.issue, 'failed');
@@ -431,6 +776,8 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
         .filter(r => !r.success)
         .map(r => `\`\`\`\n${r.output.slice(-1000)}\n\`\`\``)
         .join('\n'),
+      '',
+      '`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
     ].join('\n');
 
     try {
@@ -498,6 +845,8 @@ async function handlePlanCompleted(config: FoundryConfig, task: TaskState, outco
     '',
     '---',
     'Reply to approve this plan, or provide feedback to revise it.',
+    '',
+    'Or: `@foundry restart` · `@foundry stop`',
   ].join('\n');
 
   await postToConversationTarget(config, task, planComment);
@@ -837,6 +1186,15 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
   state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
     input_request_count: inputRound,
   });
+
+  // Post confirmation on the PR
+  if (task.pr_number) {
+    try {
+      await github.commentOnPR(config.repo, task.pr_number,
+        'Agent is addressing your feedback. `@foundry stop` to cancel.');
+    } catch {}
+  }
+
   log.success(`Resumed agent for #${task.issue} to address PR feedback (round ${inputRound})`);
 }
 

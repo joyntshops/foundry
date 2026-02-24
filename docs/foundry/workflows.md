@@ -42,19 +42,50 @@ git checkout -b hotfix/v1.2.1
 foundry sync-integration
 ```
 
-## Task Change Handling
+## Controlling Foundry
 
-### Replan
+Comment `@foundry <command>` on an issue or PR to control the agent. Foundry checks for commands on every poll cycle.
 
-When requirements change mid-implementation:
+### Command Reference
+
+| Command | Valid when | What it does |
+|---------|-----------|--------------|
+| `@foundry stop` | Agent running, waiting for input | Kill the agent and mark task failed |
+| `@foundry restart` | Agent running, waiting, failed, plan review | Discard all work (worktree + branch) and re-queue the issue as ready |
+| `@foundry replan` | Agent running | Kill the agent, re-read the issue body, and relaunch |
+| `@foundry plan [message]` | Agent running, waiting, plan review | Relaunch in plan mode (produces a plan for review) |
+| `@foundry continue [message]` | PR open, waiting for input, plan review | Resume the agent with the message as context |
+| `@foundry start [message]` | Failed, stopped | Clean up and re-queue the issue with optional context |
+
+The `[message]` is optional for all commands that accept it. It can appear on the same line as the command or start on the next line. Multiline messages are supported:
+
+```
+@foundry continue
+Please fix the typo on line 5.
+Also add a test for the edge case where the input is empty.
+```
+
+### Where to comment
+
+- **Issue comments** — always work for any command
+- **PR comments** — work once a PR exists (Foundry checks the PR when `task.pr_number` is set)
+
+### How PR feedback works
+
+Two ways to send the agent back to work on a PR:
+
+1. **Formal review** — Submit a review with "Request changes". Foundry picks up the review body and inline comments automatically.
+2. **`@foundry continue [feedback]`** — Leave a regular PR comment. This is explicit and avoids false triggers from reviewer chatter.
+
+### Task change handling
+
+**Replan** — When requirements change mid-implementation:
 
 1. Update the issue body
-2. Comment `@foundry replan` or add label `spec:changed`
-3. Foundry pauses the agent, re-reads the issue, and resumes
+2. Comment `@foundry replan`
+3. Foundry kills the agent, re-reads the issue, and relaunches
 
-### Restart
-
-To discard current work and start fresh:
+**Restart** — To discard current work and start fresh:
 
 1. Comment `@foundry restart`
 2. Foundry stops the agent, removes the worktree, and re-creates from scratch

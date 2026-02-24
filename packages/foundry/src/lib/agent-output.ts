@@ -298,6 +298,8 @@ export function formatInputRequestComment(
   }
 
   parts.push('Reply with your answers. Foundry will resume the agent automatically.');
+  parts.push('');
+  parts.push('Or: `@foundry restart` · `@foundry stop`');
 
   return parts.join('\n');
 }
