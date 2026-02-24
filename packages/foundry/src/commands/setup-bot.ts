@@ -204,19 +204,44 @@ async function verifyAppAuth(appId: string, privateKey: string, installationId: 
 }
 
 /**
+ * Detect repo slug (owner/repo) from git remote origin URL.
+ * Works without any GitHub auth — just reads the local git config.
+ * Supports SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git).
+ */
+export function repoSlugFromRemote(): string | null {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      encoding: 'utf-8',
+      timeout: 5_000,
+    }).trim();
+
+    // SSH: git@github.com:owner/repo.git
+    const sshMatch = url.match(/github\.com[:/](.+?\/.+?)(?:\.git)?$/);
+    if (sshMatch) return sshMatch[1];
+
+    // HTTPS: https://github.com/owner/repo.git
+    const httpsMatch = url.match(/github\.com\/(.+?\/.+?)(?:\.git)?$/);
+    if (httpsMatch) return httpsMatch[1];
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Main setup-bot flow.
  */
 export async function runSetupBot(): Promise<void> {
   const config = loadConfigSafe();
-  const repo = config?.repo;
+  const repo = config?.repo || repoSlugFromRemote();
   if (!repo) {
-    log.error('No repo configured. Run `foundry init` first or set `repo` in .joynt-foundry.yml.');
+    log.error('Could not determine repo. Run from a git repo with a GitHub remote, or run `foundry init` first.');
     process.exitCode = 1;
     return;
   }
 
   const org = repo.split('/')[0];
-  const isPersonal = !org.includes('/'); // Always true for "org/repo" split
 
   log.info(`Setting up Foundry Bot for ${org}...`);
   log.info('');
@@ -243,7 +268,7 @@ export async function runSetupBot(): Promise<void> {
   // 3. Build the form-post URL
   //    GitHub requires the manifest to be submitted as a form POST from the browser.
   //    We serve an auto-submitting form that redirects the user to GitHub.
-  const formServer = http.createServer((req, res) => {
+  const formServer = http.createServer((_req, res) => {
     const settingsBase = `https://github.com/organizations/${org}/settings/apps/new`;
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(`<!DOCTYPE html>
