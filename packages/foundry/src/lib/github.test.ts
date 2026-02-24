@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as github from './github.js';
 import { MockGitHubClient } from './__tests__/mock-github-client.js';
 import { GhCliClient } from './gh-cli-client.js';
+import * as octokitModule from './octokit-client.js';
 
 describe('pure logic helpers', () => {
   describe('hasLabel', () => {
@@ -165,5 +166,37 @@ describe('initClient', () => {
     // Even though config says octokit, env should win
     await github.initClient({ github_backend: 'octokit' } as any);
     expect(github.getClient()).toBeInstanceOf(GhCliClient);
+  });
+
+  it('auto-selects OctokitClient when App credentials exist for org', async () => {
+    delete process.env.FOUNDRY_GITHUB_BACKEND;
+    const origToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    // Mock appCredsExist to return true for 'myorg'
+    vi.spyOn(octokitModule, 'appCredsExist').mockReturnValue(true);
+
+    try {
+      await github.initClient({ repo: 'myorg/myrepo' } as any);
+      const client = github.getClient();
+      expect(client.constructor.name).toBe('OctokitClient');
+    } finally {
+      if (origToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = origToken;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('falls back to GhCliClient when no App credentials exist', async () => {
+    delete process.env.FOUNDRY_GITHUB_BACKEND;
+
+    vi.spyOn(octokitModule, 'appCredsExist').mockReturnValue(false);
+
+    try {
+      await github.initClient({ repo: 'myorg/myrepo' } as any);
+      expect(github.getClient()).toBeInstanceOf(GhCliClient);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

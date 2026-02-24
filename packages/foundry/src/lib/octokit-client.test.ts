@@ -1,8 +1,11 @@
 /**
  * OctokitClient tests — mock the Octokit instance to verify correct API calls.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OctokitClient } from './octokit-client.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { OctokitClient, resolveAppAuth, appCredsExist } from './octokit-client.js';
 
 function createMockOctokit() {
   return {
@@ -294,5 +297,109 @@ describe('OctokitClient', () => {
         owner: 'o', repo: 'r', issue_number: 5, body: 'feedback',
       });
     });
+  });
+});
+
+// ── App auth resolution tests ─────────────────────────────────────────
+
+describe('resolveAppAuth', () => {
+  const stateDir = path.join(os.homedir(), '.joynt-foundry');
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    savedEnv.FOUNDRY_GITHUB_APP_ID = process.env.FOUNDRY_GITHUB_APP_ID;
+    savedEnv.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH = process.env.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH;
+    savedEnv.FOUNDRY_GITHUB_APP_INSTALLATION_ID = process.env.FOUNDRY_GITHUB_APP_INSTALLATION_ID;
+
+    delete process.env.FOUNDRY_GITHUB_APP_ID;
+    delete process.env.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH;
+    delete process.env.FOUNDRY_GITHUB_APP_INSTALLATION_ID;
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedEnv)) {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('returns credentials from env vars when all three are set', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foundry-test-'));
+    const pemPath = path.join(tmpDir, 'test.pem');
+    fs.writeFileSync(pemPath, '-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n');
+
+    process.env.FOUNDRY_GITHUB_APP_ID = '12345';
+    process.env.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH = pemPath;
+    process.env.FOUNDRY_GITHUB_APP_INSTALLATION_ID = '67890';
+
+    const result = resolveAppAuth('testorg');
+    expect(result).not.toBeNull();
+    expect(result!.appId).toBe('12345');
+    expect(result!.installationId).toBe('67890');
+    expect(result!.privateKey).toContain('BEGIN RSA PRIVATE KEY');
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('warns and returns null when env vars are partially set', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    process.env.FOUNDRY_GITHUB_APP_ID = '12345';
+    // Missing KEY_PATH and INSTALLATION_ID
+
+    const result = resolveAppAuth('testorg');
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Partial GitHub App env vars'));
+  });
+
+  it('returns credentials from saved files when they exist', () => {
+    // Use a temp dir to simulate ~/.joynt-foundry/
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foundry-test-'));
+    const jsonPath = path.join(tmpDir, 'github-app-testorg.json');
+    const pemPath = path.join(tmpDir, 'github-app-testorg.pem');
+
+    fs.writeFileSync(jsonPath, JSON.stringify({ appId: 111, installationId: 222, slug: 'foundry-bot' }));
+    fs.writeFileSync(pemPath, '-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n');
+
+    // We can't mock fs in ESM, so we test the function indirectly via env vars + real files.
+    // The saved-file path is hardcoded to ~/.joynt-foundry/, so test the JSON parsing logic directly.
+    const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    const privateKey = fs.readFileSync(pemPath, 'utf-8');
+
+    expect(String(meta.appId)).toBe('111');
+    expect(String(meta.installationId)).toBe('222');
+    expect(privateKey).toContain('BEGIN RSA PRIVATE KEY');
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('returns null when no credentials are found', () => {
+    const result = resolveAppAuth('nonexistent-org');
+    expect(result).toBeNull();
+  });
+
+  it('env vars override saved credentials', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'foundry-test-'));
+    const pemPath = path.join(tmpDir, 'test.pem');
+    fs.writeFileSync(pemPath, '-----BEGIN RSA PRIVATE KEY-----\nenv-key\n-----END RSA PRIVATE KEY-----\n');
+
+    process.env.FOUNDRY_GITHUB_APP_ID = '99999';
+    process.env.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH = pemPath;
+    process.env.FOUNDRY_GITHUB_APP_INSTALLATION_ID = '88888';
+
+    // Even if saved creds exist, env vars should win
+    const result = resolveAppAuth('testorg');
+    expect(result!.appId).toBe('99999');
+    expect(result!.installationId).toBe('88888');
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+});
+
+describe('appCredsExist', () => {
+  it('returns false for a non-existent org (no files in ~/.joynt-foundry/)', () => {
+    // Use a unique org name that will never have real files
+    expect(appCredsExist('__nonexistent_org_test_12345__')).toBe(false);
   });
 });

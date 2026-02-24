@@ -29,6 +29,16 @@ program
     await initClient(config);
   });
 
+// ── foundry setup-bot ────────────────────────────────────────────────
+
+program
+  .command('setup-bot')
+  .description('Create a GitHub App for Foundry and install it on your repos')
+  .action(async () => {
+    const { runSetupBot } = await import('./commands/setup-bot.js');
+    await runSetupBot();
+  });
+
 // ── foundry init ──────────────────────────────────────────────────────
 
 program

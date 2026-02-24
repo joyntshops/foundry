@@ -14,6 +14,35 @@ Options:
 
 ---
 
+## `foundry setup-bot`
+
+Create a GitHub App for Foundry and install it on your repos. This is the **recommended** way to authenticate Foundry — after running this command, no other auth setup is needed.
+
+```bash
+foundry setup-bot
+```
+
+**What it does:**
+1. Opens your browser to GitHub's App creation page (auto-filled manifest)
+2. You click "Create" — GitHub creates the App
+3. Opens the installation page — you select which repos to grant access
+4. Saves credentials to `~/.joynt-foundry/github-app-{org}.*`
+5. Verifies API access
+
+**After setup:**
+- `foundry run` auto-detects the App and uses it — no flags, no env vars
+- Actions appear as `Foundry Bot[bot]` on GitHub
+- Tokens are auto-managed (generated from the private key, refreshed automatically)
+
+**For CI**, set these env vars instead of running `setup-bot`:
+```bash
+export FOUNDRY_GITHUB_APP_ID=<app-id>
+export FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH=/path/to/key.pem
+export FOUNDRY_GITHUB_APP_INSTALLATION_ID=<installation-id>
+```
+
+---
+
 ## `foundry init`
 
 Scaffold `.joynt-foundry.yml` and create required GitHub labels.
@@ -46,6 +75,7 @@ foundry run [--once]
 | `--once` | Run a single poll cycle then exit |
 
 **Behavior:**
+- Auth is automatic after `foundry setup-bot` — no additional config needed
 - Reconciles state on startup (marks dead sessions as stopped)
 - Polls every `poll_interval_seconds` (default: 30s)
 - Respects `max_sessions` concurrency limit

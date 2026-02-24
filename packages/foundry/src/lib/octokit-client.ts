@@ -1,12 +1,82 @@
 /**
  * OctokitClient — GitHubClient backed by @octokit/rest.
  *
- * Auth: uses GITHUB_TOKEN env var, falling back to `gh auth token`.
+ * Auth priority:
+ *   1. GitHub App credentials (env vars or ~/.joynt-foundry/github-app-{org}.*)
+ *   2. GITHUB_TOKEN env var
+ *   3. `gh auth token` fallback
+ *
  * Uses dynamic import for @octokit/rest since it's ESM-only.
  */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
+
+const STATE_DIR = path.join(os.homedir(), '.joynt-foundry');
+
+interface AppAuth {
+  appId: string;
+  privateKey: string;
+  installationId: string;
+}
+
+/**
+ * Check whether App credentials exist for a given org (without reading the key).
+ */
+export function appCredsExist(org: string): boolean {
+  const jsonPath = path.join(STATE_DIR, `github-app-${org}.json`);
+  const pemPath = path.join(STATE_DIR, `github-app-${org}.pem`);
+  return fs.existsSync(jsonPath) && fs.existsSync(pemPath);
+}
+
+/**
+ * Resolve GitHub App auth credentials.
+ * 1. Env vars (FOUNDRY_GITHUB_APP_ID, _PRIVATE_KEY_PATH, _INSTALLATION_ID) — for CI
+ * 2. Saved credentials at ~/.joynt-foundry/github-app-{org}.json + .pem — for local dev
+ * Returns null if no App credentials found.
+ */
+export function resolveAppAuth(org?: string): AppAuth | null {
+  // 1. Env vars (not org-scoped — used in CI)
+  const envAppId = process.env.FOUNDRY_GITHUB_APP_ID;
+  const envKeyPath = process.env.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH;
+  const envInstallationId = process.env.FOUNDRY_GITHUB_APP_INSTALLATION_ID;
+
+  if (envAppId && envKeyPath && envInstallationId) {
+    const privateKey = fs.readFileSync(envKeyPath, 'utf-8');
+    return { appId: envAppId, privateKey, installationId: envInstallationId };
+  }
+
+  // Warn if partially set
+  const envCount = [envAppId, envKeyPath, envInstallationId].filter(Boolean).length;
+  if (envCount > 0 && envCount < 3) {
+    console.warn(
+      '[foundry] Partial GitHub App env vars detected — need all three: ' +
+      'FOUNDRY_GITHUB_APP_ID, FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH, FOUNDRY_GITHUB_APP_INSTALLATION_ID. ' +
+      'Falling back to personal token.',
+    );
+  }
+
+  // 2. Saved credentials (org-scoped)
+  if (org) {
+    const jsonPath = path.join(STATE_DIR, `github-app-${org}.json`);
+    const pemPath = path.join(STATE_DIR, `github-app-${org}.pem`);
+
+    if (fs.existsSync(jsonPath) && fs.existsSync(pemPath)) {
+      const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+      const privateKey = fs.readFileSync(pemPath, 'utf-8');
+      return {
+        appId: String(meta.appId),
+        privateKey,
+        installationId: String(meta.installationId),
+      };
+    }
+  }
+
+  return null;
+}
 
 function resolveToken(): string {
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
@@ -53,21 +123,37 @@ type OctokitLike = {
   };
 };
 
-async function createOctokit(): Promise<OctokitLike> {
+async function createOctokit(org?: string): Promise<OctokitLike> {
   const { Octokit } = await import('@octokit/rest');
+
+  const appAuth = resolveAppAuth(org);
+  if (appAuth) {
+    const { createAppAuth } = await import('@octokit/auth-app');
+    return new Octokit({
+      authStrategy: createAppAuth,
+      auth: {
+        appId: appAuth.appId,
+        privateKey: appAuth.privateKey,
+        installationId: appAuth.installationId,
+      },
+    }) as unknown as OctokitLike;
+  }
+
   return new Octokit({ auth: resolveToken() });
 }
 
 export class OctokitClient implements GitHubClient {
   private _octokit: OctokitLike | null;
+  private _org: string | undefined;
 
-  constructor(octokit?: OctokitLike) {
+  constructor(octokit?: OctokitLike, org?: string) {
     this._octokit = octokit ?? null;
+    this._org = org;
   }
 
   private async octokit(): Promise<OctokitLike> {
     if (!this._octokit) {
-      this._octokit = await createOctokit();
+      this._octokit = await createOctokit(this._org);
     }
     return this._octokit;
   }

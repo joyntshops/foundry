@@ -29,19 +29,32 @@ export function getClient(): GitHubClient {
 /**
  * Initialize the GitHub client based on config and/or environment.
  *
- * Priority: FOUNDRY_GITHUB_BACKEND env var > config.github_backend > 'gh-cli'
+ * Priority:
+ *   1. FOUNDRY_GITHUB_BACKEND env var
+ *   2. config.github_backend
+ *   3. Auto-detect: if GitHub App credentials exist for the current org → octokit
+ *   4. Default: gh-cli
  *
  * For the 'octokit' backend, auth is resolved from:
- *   1. GITHUB_TOKEN env var
- *   2. `gh auth token` (falls back to gh CLI for token)
+ *   1. GitHub App credentials (env vars or ~/.joynt-foundry/github-app-{org}.*)
+ *   2. GITHUB_TOKEN env var
+ *   3. `gh auth token` (falls back to gh CLI for token)
  */
 export async function initClient(config?: FoundryConfig): Promise<void> {
   const envBackend = process.env.FOUNDRY_GITHUB_BACKEND;
-  const backend = envBackend ?? config?.github_backend ?? 'gh-cli';
+  const org = config?.repo?.split('/')[0];
 
-  if (backend === 'octokit') {
+  let hasAppCreds = false;
+  if (org) {
+    const { appCredsExist } = await import('./octokit-client.js');
+    hasAppCreds = appCredsExist(org);
+  }
+
+  const backend = envBackend ?? config?.github_backend ?? (hasAppCreds ? 'octokit' : 'gh-cli');
+
+  if (backend === 'octokit' || hasAppCreds) {
     const { OctokitClient } = await import('./octokit-client.js');
-    _client = new OctokitClient();
+    _client = new OctokitClient(undefined, org);
   } else {
     _client = new GhCliClient();
   }
