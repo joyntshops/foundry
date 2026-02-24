@@ -50,7 +50,7 @@ const DEFAULTS: FoundryConfig = {
     },
   },
   poll_interval_seconds: 30,
-  github_backend: 'gh-cli' as const,
+  github_backend: 'octokit' as const,
 };
 
 /**

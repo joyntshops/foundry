@@ -16,9 +16,16 @@ labels:
   in_progress: "state:in-progress"      # Task claimed by a runner
   done: "state:done"                    # Task completed
   ready_for_review: "state:ready-for-human-review"  # Awaiting human review
-  spec_changed: "spec:changed"          # Spec changed, replan needed
   waiting_for_input: "state:waiting-for-input"  # Agent needs human input
-  failed: "state:failed"              # Task failed
+  failed: "state:failed"                # Task failed
+  plan_review: "state:plan-review"       # Agent produced a plan, awaiting approval
+
+# ── Mode Labels (optional) ──────────────────────────────────────────
+
+mode_labels:
+  plan: "mode:plan"                     # Issue runs agent in plan mode
+  auto: "mode:auto"                     # Issue runs agent in auto mode (default)
+  default: "mode:default"               # Issue runs agent in default permission mode
 
 # ── Branching & Worktrees ────────────────────────────────────────────
 
@@ -30,6 +37,7 @@ tmux_template: "foundry-{issue}"            # {issue} = number
 
 max_sessions: 4                         # Max concurrent agent sessions
 max_verify_parallel: 1                  # Max concurrent verification pipelines
+max_input_rounds: 3                     # Max human-input rounds before giving up
 
 # ── Verification ─────────────────────────────────────────────────────
 
@@ -44,8 +52,12 @@ integration_rebuild: "npm run build"    # Command run after integration merge
 # ── Comment Triggers ─────────────────────────────────────────────────
 
 comment_triggers:
-  replan: "@foundry replan"             # Trigger replan on comment match
-  restart: "@foundry restart"           # Trigger restart on comment match
+  replan: "@foundry replan"             # Kill agent, re-read issue, relaunch
+  restart: "@foundry restart"           # Discard work, re-queue as ready
+  stop: "@foundry stop"                 # Kill agent, mark failed
+  continue: "@foundry continue"         # Resume agent with message
+  plan: "@foundry plan"                 # Relaunch in plan mode
+  start: "@foundry start"              # Re-queue a failed/stopped task
 
 # ── Versioning ───────────────────────────────────────────────────────
 
@@ -62,7 +74,7 @@ poll_interval_seconds: 30               # Seconds between issue polls
 
 # ── GitHub Backend ──────────────────────────────────────────────────
 
-github_backend: "gh-cli"               # "gh-cli" (default) or "octokit"
+github_backend: "octokit"              # "octokit" (default) or "gh-cli"
                                         # Override with FOUNDRY_GITHUB_BACKEND env var
                                         # or --github-backend CLI flag
 
@@ -95,7 +107,10 @@ agent_label_map:
 GitHub repository in `owner/repo` format.
 
 ### `labels`
-Label names used by Foundry to track task state. Customize if your repo uses different label conventions.
+Label names used by Foundry to track task state. Customize if your repo uses different label conventions. Includes `plan_review` for the plan-review workflow.
+
+### `mode_labels`
+Label names that control agent permission mode. Apply one of these labels to an issue to override the default auto mode. `plan` makes the agent produce a plan for approval before implementing. `default` uses Claude Code's default permission mode (asks before tool use).
 
 ### `branch_template`
 Template for feature branch names. Variables: `{issue}` (number), `{slug}` (slugified title, max 40 chars).
@@ -112,6 +127,9 @@ Maximum number of concurrent agent sessions. Set based on machine resources.
 ### `max_verify_parallel`
 Maximum number of concurrent verification pipelines. Default 1 to avoid resource contention during builds.
 
+### `max_input_rounds`
+Maximum number of human-input rounds (including PR review feedback rounds) before the agent gives up and marks the task failed. Default 3.
+
 ### `verify`
 Ordered list of shell commands run in the task worktree before opening a PR. Fails fast on first error.
 
@@ -119,7 +137,7 @@ Ordered list of shell commands run in the task worktree before opening a PR. Fai
 Shell command run after merging into integration (via `foundry review`).
 
 ### `comment_triggers`
-Strings matched in issue comments to trigger replan or restart.
+Strings matched in issue/PR comments to trigger agent commands. Foundry checks for these on every poll cycle. Commands that accept a message (`continue`, `start`, `plan`) match as a prefix — everything after the trigger string becomes the message. See [Controlling Foundry](workflows.md#controlling-foundry) for the full command reference.
 
 ### `version_sources`
 **Ordered** list of version file paths (relative to repo root). All are bumped to the same version on `foundry release`. The first entry is the primary version source. Supported file types: `package.json`, `Cargo.toml`, `pyproject.toml`.
@@ -144,8 +162,8 @@ Optional mapping from issue label names to backend names. When an issue has a ma
 
 ### `github_backend`
 Which GitHub API backend to use. Options:
-- `gh-cli` (default) — uses the `gh` CLI. Zero config if `gh` is installed and authenticated.
-- `octokit` — uses `@octokit/rest`. Better for CI/containers or when you want to avoid process spawns.
+- `octokit` (default) — uses `@octokit/rest`. Recommended for automation and CI/containers.
+- `gh-cli` — uses the `gh` CLI. Convenient for local dev if `gh` is installed and authenticated.
 
 Override priority: `--github-backend` CLI flag > `FOUNDRY_GITHUB_BACKEND` env var > config file.
 

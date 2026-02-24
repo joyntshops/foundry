@@ -114,6 +114,10 @@ const DEFAULT_CONFIG = {
   comment_triggers: {
     replan: '@foundry replan',
     restart: '@foundry restart',
+    stop: '@foundry stop',
+    continue: '@foundry continue',
+    plan: '@foundry plan',
+    start: '@foundry start',
   },
   version_sources: [] as string[],
   tag_prefix: 'v',
@@ -133,7 +137,7 @@ const DEFAULT_CONFIG = {
   agent_label_map: {
     'agent:claude': 'claude-code',
   },
-  github_backend: 'gh-cli' as const,
+  github_backend: 'octokit' as const,
 };
 
 export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolean }): Promise<void> {
