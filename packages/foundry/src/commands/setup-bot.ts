@@ -268,6 +268,9 @@ export async function runSetupBot(): Promise<void> {
   // 3. Build the form-post URL
   //    GitHub requires the manifest to be submitted as a form POST from the browser.
   //    We serve an auto-submitting form that redirects the user to GitHub.
+  //    The manifest JSON is injected via JS to avoid HTML attribute escaping issues.
+  //    Double-serialize: JS parses the outer string → assigns the inner JSON string to the input.
+  const manifestJsonForJs = JSON.stringify(JSON.stringify(manifest));
   const formServer = http.createServer((_req, res) => {
     const settingsBase = `https://github.com/organizations/${org}/settings/apps/new`;
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -275,9 +278,12 @@ export async function runSetupBot(): Promise<void> {
 <html>
 <body>
   <form id="f" method="post" action="${settingsBase}">
-    <input type="hidden" name="manifest" value='${JSON.stringify(manifest).replace(/'/g, '&#39;')}'>
+    <input type="hidden" id="manifest" name="manifest">
   </form>
-  <script>document.getElementById('f').submit();</script>
+  <script>
+    document.getElementById('manifest').value = ${manifestJsonForJs};
+    document.getElementById('f').submit();
+  </script>
 </body>
 </html>`);
   });
