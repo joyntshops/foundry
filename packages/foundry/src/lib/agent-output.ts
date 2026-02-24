@@ -167,7 +167,11 @@ function endsWithQuestion(message: string): boolean {
   return trimmed.endsWith('?');
 }
 
-export function determineOutcome(logPath: string, worktreePath: string, baseBranch: string): AgentOutcome {
+export interface DetermineOutcomeOptions {
+  permissionMode?: string;
+}
+
+export function determineOutcome(logPath: string, worktreePath: string, baseBranch: string, options?: DetermineOutcomeOptions): AgentOutcome {
   const events = parseStreamJsonLog(logPath);
 
   if (events.length === 0) {
@@ -201,6 +205,16 @@ export function determineOutcome(logPath: string, worktreePath: string, baseBran
       session_id: sessionId,
       final_message: finalMessage,
       ask_user_questions: askQuestions,
+    };
+  }
+
+  // Plan mode: agent ran in plan-only mode — no commits expected
+  if (options?.permissionMode === '--permission-mode plan') {
+    return {
+      type: 'plan-completed',
+      session_id: sessionId,
+      final_message: finalMessage,
+      ask_user_questions: null,
     };
   }
 

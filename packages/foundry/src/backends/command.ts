@@ -13,7 +13,8 @@ function interpolate(template: string, params: AgentLaunchParams): string {
     .replace(/\{title\}/g, params.title)
     .replace(/\{body\}/g, (params.body ?? '').slice(0, 4000))
     .replace(/\{log_dir\}/g, params.log_dir)
-    .replace(/\{state_dir\}/g, params.state_dir);
+    .replace(/\{state_dir\}/g, params.state_dir)
+    .replace(/\{permission_mode\}/g, params.permission_mode ?? '--dangerously-skip-permissions');
 }
 
 function interpolateResume(template: string, params: ResumeParams): string {
@@ -53,7 +54,7 @@ export function createCommandBackend(name: string, def: AgentBackendDef): AgentB
  */
 export const CLAUDE_CODE_PRESET: AgentBackendDef = {
   type: 'command',
-  command: 'claude --dangerously-skip-permissions -p "You are working on issue #{issue_number}: {title}. The issue is at {issue_url}. Read the issue body and implement the task. When done, create a commit with your changes." --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
+  command: 'claude {permission_mode} -p "You are working on issue #{issue_number}: {title}. The issue is at {issue_url}. Read the issue body and implement the task. When done, create a commit with your changes." --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
   resume_command: 'claude --dangerously-skip-permissions -p "{prompt}" --resume "{session_id}" --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
   env: {},
 };

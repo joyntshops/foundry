@@ -4,7 +4,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { stringify as toYaml } from 'yaml';
-import { CONFIG_FILENAME } from '../config.js';
+import { CONFIG_FILENAME, loadConfig } from '../config.js';
 import * as github from '../lib/github.js';
 import * as log from '../lib/log.js';
 import * as git from '../lib/git.js';
@@ -12,13 +12,14 @@ import * as git from '../lib/git.js';
 const LABEL_DEFS: Array<{ name: string; color: string; description: string }> = [
   { name: 'state:ready', color: '0e8a16', description: 'Task ready for Foundry to claim' },
   { name: 'state:in-progress', color: 'fbca04', description: 'Task claimed by Foundry runner' },
-  { name: 'state:done', color: '5319e7', description: 'Task completed by Foundry' },
+  { name: 'state:done', color: '006b75', description: 'Task completed by Foundry' },
   { name: 'state:ready-for-human-review', color: '1d76db', description: 'Ready for human review' },
-  { name: 'spec:changed', color: 'd93f0b', description: 'Specification changed — replan needed' },
-  { name: 'state:waiting-for-input', color: 'e4e669', description: 'Agent needs human input to proceed' },
+  { name: 'state:waiting-for-input', color: '1d76db', description: 'Agent needs human input to proceed' },
   { name: 'state:failed', color: 'b60205', description: 'Task failed — needs human review before retry' },
-  { name: 'agent:claude', color: 'c5def5', description: 'Use Claude Code agent backend' },
-  { name: 'agent:cursor', color: 'c5def5', description: 'Use Cursor agent backend' },
+  { name: 'state:plan-review', color: '1d76db', description: 'Agent plan awaiting human review' },
+  { name: 'mode:plan', color: '5319e7', description: 'Agent runs in plan-only mode' },
+  { name: 'mode:auto', color: '5319e7', description: 'Agent runs with full permissions' },
+  { name: 'mode:default', color: '5319e7', description: 'Agent runs in step-by-step mode' },
 ];
 
 async function detectRepo(): Promise<string> {
@@ -94,9 +95,14 @@ const DEFAULT_CONFIG = {
     in_progress: 'state:in-progress',
     done: 'state:done',
     ready_for_review: 'state:ready-for-human-review',
-    spec_changed: 'spec:changed',
     waiting_for_input: 'state:waiting-for-input',
     failed: 'state:failed',
+    plan_review: 'state:plan-review',
+  },
+  mode_labels: {
+    plan: 'mode:plan',
+    auto: 'mode:auto',
+    default: 'mode:default',
   },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
@@ -177,10 +183,20 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
 
   if (!opts.skipLabels) {
     const repo = await detectRepo();
+    const config = loadConfig();
+
+    // Derive agent labels dynamically when 2+ entries exist in agent_label_map
+    const allLabels = [...LABEL_DEFS];
+    const agentMap = config.agent_label_map ?? {};
+    if (Object.keys(agentMap).length >= 2) {
+      for (const labelName of Object.keys(agentMap)) {
+        allLabels.push({ name: labelName, color: 'c5def5', description: `Use ${agentMap[labelName]} agent backend` });
+      }
+    }
 
     if (opts.cleanLabels) {
       log.info('Removing non-Foundry labels...');
-      const foundryNames = new Set(LABEL_DEFS.map(l => l.name));
+      const foundryNames = new Set(allLabels.map(l => l.name));
       const existing = await github.listLabels(repo);
       for (const name of existing) {
         if (!foundryNames.has(name)) {
@@ -195,7 +211,7 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     }
 
     log.info('Creating GitHub labels...');
-    for (const label of LABEL_DEFS) {
+    for (const label of allLabels) {
       try {
         await github.ensureLabel(repo, label.name, label.color, label.description);
         log.success(`  Label: ${label.name}`);

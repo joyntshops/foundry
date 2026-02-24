@@ -21,6 +21,15 @@ import type { FoundryConfig, GitHubIssue, TaskState, AgentLaunchParams, AgentOut
 
 let running = true;
 
+function resolvePermissionMode(issueLabels: string[], config: FoundryConfig): string {
+  const modeLabels = config.mode_labels ?? { plan: 'mode:plan', auto: 'mode:auto', default: 'mode:default' };
+
+  if (issueLabels.includes(modeLabels.plan)) return '--permission-mode plan';
+  if (issueLabels.includes(modeLabels.default)) return '--permission-mode default';
+  // auto (default): full permissions
+  return '--dangerously-skip-permissions';
+}
+
 export async function runRunner(opts: { once?: boolean }): Promise<void> {
   const config = loadConfig();
   const repoDir = getConfigDir();
@@ -69,8 +78,8 @@ async function reconcile(config: FoundryConfig): Promise<void> {
   for (const task of tasks) {
     if (['done', 'failed', 'stopped'].includes(task.status)) continue;
 
-    // Waiting/pr-changes-requested tasks are valid without a tmux session
-    if (['waiting-for-input', 'pr-changes-requested'].includes(task.status)) continue;
+    // Waiting/pr-changes-requested/plan-review tasks are valid without a tmux session
+    if (['waiting-for-input', 'pr-changes-requested', 'plan-review'].includes(task.status)) continue;
 
     // If resuming but tmux is dead, revert to waiting-for-input
     if (task.status === 'resuming' && !tmux.sessionExists(task.tmux_session)) {
@@ -98,6 +107,9 @@ async function poll(config: FoundryConfig, repoDir: string): Promise<void> {
 
   // Check for PR review feedback
   await checkPRFeedback(config, repoDir);
+
+  // Check for plan review responses
+  await checkPlanReviewTasks(config, repoDir);
 
   const activeCount = state.getActiveTaskCount(config.repo);
   if (activeCount >= config.max_sessions) {
@@ -189,6 +201,7 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
   // Prepare agent launch params
   const logDir = state.getLogDir(config.repo, issue.number);
   const stateDir = state.getTaskStateDir(config.repo, issue.number);
+  const permissionMode = resolvePermissionMode(issueLabels, config);
 
   const params: AgentLaunchParams = {
     worktree,
@@ -200,6 +213,7 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
     labels: issueLabels,
     log_dir: logDir,
     state_dir: stateDir,
+    permission_mode: permissionMode,
   };
 
   const agentCommand = backend.resolveCommand(params);
@@ -290,7 +304,12 @@ async function checkCompletedAgents(config: FoundryConfig, repoDir: string): Pro
         ? 'origin/integration'
         : 'origin/main';
 
-      const outcome = agentOutput.determineOutcome(logPath, task.worktree, baseBranch);
+      // Determine the permission mode this task was launched with
+      const taskPermissionMode = resolvePermissionMode(
+        (await github.getIssue(config.repo, task.issue)).labels.map(l => l.name),
+        config,
+      );
+      const outcome = agentOutput.determineOutcome(logPath, task.worktree, baseBranch, { permissionMode: taskPermissionMode });
       log.info(`Outcome for #${task.issue}: ${outcome.type}`);
 
       // Persist session_id for future resumes
@@ -304,6 +323,9 @@ async function checkCompletedAgents(config: FoundryConfig, repoDir: string): Pro
         case 'completed':
         case 'indeterminate':
           await handleCompleted(config, task, repoDir);
+          break;
+        case 'plan-completed':
+          await handlePlanCompleted(config, task, outcome);
           break;
         case 'needs-input':
           await handleNeedsInput(config, task, outcome);
@@ -461,6 +483,92 @@ async function handleNeedsInput(config: FoundryConfig, task: TaskState, outcome:
   });
 }
 
+// ── Plan Mode: Plan Completed ─────────────────────────────────────────────
+
+async function handlePlanCompleted(config: FoundryConfig, task: TaskState, outcome: AgentOutcome): Promise<void> {
+  const planComment = [
+    '<!-- foundry-plan-review -->',
+    '**Foundry Agent — Plan for Review**',
+    '',
+    outcome.final_message ?? 'No plan content captured.',
+    '',
+    '---',
+    'Reply to approve this plan, or provide feedback to revise it.',
+  ].join('\n');
+
+  await postToConversationTarget(config, task, planComment);
+
+  // Update labels
+  try { await github.addLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
+  try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+
+  state.updateTaskStatus(config.repo, task.issue, 'plan-review', {
+    session_id: outcome.session_id ?? task.session_id,
+    last_agent_message: outcome.final_message ?? undefined,
+  });
+
+  log.success(`Plan posted for #${task.issue}. Awaiting human review.`);
+}
+
+// ── Plan Mode: Check for Approval/Feedback ────────────────────────────────
+
+async function checkPlanReviewTasks(config: FoundryConfig, repoDir: string): Promise<void> {
+  const tasks = state.getAllTasks(config.repo);
+  const planTasks = tasks.filter(t => t.status === 'plan-review');
+
+  for (const task of planTasks) {
+    if (!running) break;
+
+    try {
+      const response = await findPlanResponse(config, task);
+      if (response) {
+        log.info(`Plan approval/feedback for #${task.issue}. Resuming in auto mode...`);
+        await executeApprovedPlan(config, task, response, repoDir);
+      }
+    } catch (err: any) {
+      log.error(`Error checking plan review for #${task.issue}: ${err.message}`);
+    }
+  }
+}
+
+async function findPlanResponse(config: FoundryConfig, task: TaskState): Promise<string | null> {
+  const comments = task.pr_number
+    ? await getPRComments(config.repo, task.pr_number)
+    : await github.getComments(config.repo, task.issue);
+
+  // Find the last foundry plan review marker
+  let lastPlanIndex = -1;
+  for (let i = comments.length - 1; i >= 0; i--) {
+    if (comments[i].body.includes('<!-- foundry-plan-review -->')) {
+      lastPlanIndex = i;
+      break;
+    }
+  }
+
+  if (lastPlanIndex === -1) return null;
+
+  // Find human replies after the marker (non-bot comments)
+  const repliesAfterPlan = comments.slice(lastPlanIndex + 1);
+  const humanReplies = repliesAfterPlan.filter(c => {
+    const login = c.user?.login ?? '';
+    return !login.includes('[bot]') && login !== 'github-actions' && login !== 'foundry';
+  });
+
+  if (humanReplies.length === 0) return null;
+
+  return humanReplies.map(c => c.body).join('\n\n');
+}
+
+async function executeApprovedPlan(config: FoundryConfig, task: TaskState, humanResponse: string, repoDir: string): Promise<void> {
+  // Remove plan-review label, add in-progress
+  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
+  try { await github.addLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+
+  // Resume the agent in auto mode with the human's response
+  // The resume_command template already uses --dangerously-skip-permissions
+  await resumeAgent(config, task, humanResponse, repoDir);
+}
+
 async function postToConversationTarget(config: FoundryConfig, task: TaskState, body: string): Promise<void> {
   if (task.pr_number) {
     await github.commentOnPR(config.repo, task.pr_number, body);
@@ -558,6 +666,7 @@ async function resumeAgent(config: FoundryConfig, task: TaskState, humanResponse
     labels: [],
     log_dir: logDir,
     state_dir: stateDir,
+    permission_mode: '--dangerously-skip-permissions',
   };
 
   let command: string;
@@ -694,6 +803,7 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
     labels: [],
     log_dir: logDir,
     state_dir: stateDir,
+    permission_mode: '--dangerously-skip-permissions',
   };
 
   let command: string;

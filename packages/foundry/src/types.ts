@@ -19,9 +19,15 @@ export interface FoundryConfig {
     in_progress: string;                // default "state:in-progress"
     done: string;                       // default "state:done"
     ready_for_review: string;           // default "state:ready-for-human-review"
-    spec_changed: string;               // default "spec:changed"
     waiting_for_input: string;          // default "state:waiting-for-input"
     failed: string;                     // default "state:failed"
+    plan_review: string;                // default "state:plan-review"
+  };
+
+  mode_labels?: {
+    plan: string;                       // default "mode:plan"
+    auto: string;                       // default "mode:auto"
+    default: string;                    // default "mode:default"
   };
 
   branch_template: string;              // default "feature/{issue}-{slug}"
@@ -62,6 +68,7 @@ export type TaskStatus =
   | 'waiting-for-input'
   | 'resuming'
   | 'pr-changes-requested'
+  | 'plan-review'
   | 'done'
   | 'failed'
   | 'stopped';
@@ -104,6 +111,7 @@ export interface AgentLaunchParams {
   labels: string[];
   log_dir: string;
   state_dir: string;
+  permission_mode: string;
 }
 
 export interface ResumeParams extends AgentLaunchParams {
@@ -138,7 +146,7 @@ export interface GitHubComment {
 
 // ── Agent Outcome ────────────────────────────────────────────────────────
 
-export type AgentOutcomeType = 'completed' | 'needs-input' | 'errored' | 'indeterminate';
+export type AgentOutcomeType = 'completed' | 'needs-input' | 'errored' | 'indeterminate' | 'plan-completed';
 
 export interface AskUserQuestionOption {
   label: string;
