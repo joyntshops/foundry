@@ -358,6 +358,7 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
       log.success(`PR already exists for #${task.issue}: ${task.pr_url}`);
       state.updateTaskStatus(config.repo, task.issue, 'pr-open');
       await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
+      try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
     } else {
       try {
         const prUrl = await github.createPR(config.repo, {
@@ -373,6 +374,7 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
           pr_number: prNumber ?? undefined,
         });
         await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
+        try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
       } catch (err: any) {
         log.error(`PR creation failed for #${task.issue}: ${err.message}`);
         state.updateTaskStatus(config.repo, task.issue, 'failed');

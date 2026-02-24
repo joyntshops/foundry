@@ -96,11 +96,16 @@ export async function runReview(target: string): Promise<void> {
     log.success('Integration rebuild passed.');
   }
 
-  // Update issue label
+  // Update issue labels
   try {
     await github.addLabel(config.repo, parseInt(prNumber), config.labels.ready_for_review);
   } catch {
     // best effort
+  }
+  try {
+    await github.removeLabel(config.repo, parseInt(prNumber), config.labels.in_progress);
+  } catch {
+    // best effort — label may not exist
   }
 
   log.success(`Review complete for #${prNumber}.`);
