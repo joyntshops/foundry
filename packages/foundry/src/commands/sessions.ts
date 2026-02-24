@@ -184,10 +184,20 @@ export async function runStop(target: string, opts?: { ready?: boolean }): Promi
 
 // ── foundry reset ────────────────────────────────────────────────────────
 
-export async function runReset(issueArg: string, opts?: { force?: boolean }): Promise<void> {
+export async function runReset(issueArg: string | undefined, opts?: { force?: boolean; all?: boolean }): Promise<void> {
   const config = loadConfigSafe();
   if (!config) {
     log.error('No config found. Run `foundry init` first.');
+    return;
+  }
+
+  if (opts?.all) {
+    await runResetAll(config, opts);
+    return;
+  }
+
+  if (!issueArg) {
+    log.error('Provide an issue number, or use --all to reset all tasks.');
     return;
   }
 
@@ -204,10 +214,60 @@ export async function runReset(issueArg: string, opts?: { force?: boolean }): Pr
     return;
   }
 
+  const dryRun = !opts?.force;
+  await resetSingleTask(config, task, issueNum, dryRun);
+
+  log.info('');
+  if (dryRun) {
+    log.info('No changes made. Run with --force to execute.');
+  } else {
+    log.success(`Reset complete for #${issueNum}. Issue restored to ${config.labels.ready}.`);
+  }
+}
+
+async function runResetAll(config: FoundryConfig, opts?: { force?: boolean }): Promise<void> {
+  const dryRun = !opts?.force;
+
+  if (dryRun) {
+    log.info('Dry-run reset --all. Use --force to execute.');
+    log.info('');
+  }
+
+  // Discover all issue numbers from task directories + state JSON
+  const issueNumbers = state.listTaskIssueNumbers(config.repo);
+  if (issueNumbers.length === 0) {
+    log.info('No tasks found to reset.');
+    return;
+  }
+
+  const tasks = state.getAllTasks(config.repo);
+  let resetCount = 0;
+
+  for (const issueNum of issueNumbers) {
+    const task = tasks.find(t => t.issue === issueNum);
+    if (!task) {
+      log.warn(`  #${issueNum}: found task directory but no state — skipping`);
+      continue;
+    }
+
+    log.info(`─── Resetting #${issueNum}: ${task.title} ───`);
+    await resetSingleTask(config, task, issueNum, dryRun);
+    log.info('');
+    resetCount++;
+  }
+
+  if (resetCount === 0) {
+    log.info('No tasks with state to reset.');
+  } else if (dryRun) {
+    log.info(`Would reset ${resetCount} task(s). Run with --force to execute.`);
+  } else {
+    log.success(`Reset ${resetCount} task(s). All issues restored to ${config.labels.ready}.`);
+  }
+}
+
+async function resetSingleTask(config: FoundryConfig, task: TaskState, issueNum: number, dryRun: boolean): Promise<void> {
   let repoDir: string | undefined;
   try { repoDir = git.repoRoot(); } catch {}
-
-  const dryRun = !opts?.force;
 
   if (dryRun) {
     log.info(`Dry-run reset for #${issueNum}. Use --force to execute.`);
@@ -292,13 +352,6 @@ export async function runReset(issueArg: string, opts?: { force?: boolean }): Pr
   logAction(dryRun, 'Remove task from state');
   if (!dryRun) {
     state.removeTask(config.repo, issueNum);
-  }
-
-  log.info('');
-  if (dryRun) {
-    log.info('No changes made. Run with --force to execute.');
-  } else {
-    log.success(`Reset complete for #${issueNum}. Issue restored to ${config.labels.ready}.`);
   }
 }
 

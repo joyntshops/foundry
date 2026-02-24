@@ -1,15 +1,16 @@
 /**
- * foundry prune — clean stale state, worktrees, and tmux sessions.
+ * foundry prune — clean local runner resources for stale tasks.
  *
- * Non-destructive by default (dry-run). Use --force to actually clean.
+ * Local-only cleanup (tmux, worktrees, local branches, state).
+ * Non-destructive by default (dry-run). Use --all to actually clean.
  */
-import { loadConfig, loadConfigSafe, getConfigDir } from '../config.js';
+import { loadConfigSafe, getConfigDir } from '../config.js';
 import * as state from '../lib/state.js';
 import * as tmux from '../lib/tmux.js';
 import * as git from '../lib/git.js';
 import * as log from '../lib/log.js';
 
-export async function runPrune(opts: { force?: boolean }): Promise<void> {
+export async function runPrune(opts: { all?: boolean; force?: boolean }): Promise<void> {
   const config = loadConfigSafe();
   if (!config) {
     log.error('No .joynt-foundry.yml found.');
@@ -17,10 +18,10 @@ export async function runPrune(opts: { force?: boolean }): Promise<void> {
   }
 
   const repoDir = getConfigDir();
-  const dryRun = !opts.force;
+  const dryRun = !opts.all && !opts.force;
 
   if (dryRun) {
-    log.info('Dry run — use --force to actually clean. Showing what would be removed:');
+    log.info('Dry run — use --all to actually clean. Showing what would be removed:');
     log.info('');
   }
 
@@ -59,6 +60,21 @@ export async function runPrune(opts: { force?: boolean }): Promise<void> {
       }
     }
 
+    // Delete local branch
+    if (task.branch) {
+      if (git.branchExists(task.branch, repoDir)) {
+        log.info(`    branch: ${task.branch} — would delete`);
+        if (!dryRun) {
+          try {
+            git.deleteBranch(task.branch, repoDir);
+            log.success(`    Deleted branch: ${task.branch}`);
+          } catch (err: any) {
+            log.warn(`    Failed to delete branch: ${err.message}`);
+          }
+        }
+      }
+    }
+
     // Remove from state
     if (!dryRun) {
       state.removeTask(config.repo, task.issue);
@@ -72,7 +88,7 @@ export async function runPrune(opts: { force?: boolean }): Promise<void> {
     log.info('Nothing to prune.');
   } else if (dryRun) {
     log.info('');
-    log.info(`Would prune ${cleaned} task(s). Run with --force to execute.`);
+    log.info(`Would prune ${cleaned} task(s). Run with --all to execute.`);
   } else {
     log.success(`Pruned ${cleaned} task(s).`);
   }

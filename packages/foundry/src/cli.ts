@@ -108,10 +108,15 @@ program
 // ── foundry reset ─────────────────────────────────────────────────────
 
 program
-  .command('reset <issue>')
-  .description('Tear down all resources for a task and restore issue to state:ready')
+  .command('reset [issue]')
+  .description('Tear down all resources (local + remote) for a task and restore to state:ready')
   .option('--force', 'Actually execute (default is dry-run)')
+  .option('--all', 'Reset all known tasks (iterates task directories)')
   .action(async (issue, opts) => {
+    if (!issue && !opts.all) {
+      console.error('Error: provide an issue number, or use --all to reset all tasks.');
+      process.exit(1);
+    }
     const { runReset } = await import('./commands/sessions.js');
     await runReset(issue, opts);
   });
@@ -120,8 +125,9 @@ program
 
 program
   .command('prune')
-  .description('Clean stale state, worktrees, and tmux sessions')
-  .option('--force', 'Actually remove (default is dry-run)')
+  .description('Clean local runner resources (tmux, worktrees, local branches, state) for completed/failed tasks')
+  .option('--all', 'Actually remove (default is dry-run)')
+  .option('--force', 'Alias for --all (backwards compat)')
   .action(async (opts) => {
     const { runPrune } = await import('./commands/prune.js');
     await runPrune(opts);

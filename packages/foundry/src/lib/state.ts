@@ -105,3 +105,36 @@ export function getAllTasks(repo: string): TaskState[] {
   const state = loadRunnerState(repo);
   return Object.values(state.tasks);
 }
+
+/**
+ * List all issue numbers that have task directories under ~/.joynt-foundry/tasks/{repo-slug}/.
+ * Falls back to state JSON task keys if the directory doesn't exist.
+ */
+export function listTaskIssueNumbers(repo: string): number[] {
+  const safe = repo.replace(/\//g, '__');
+  const tasksDir = path.join(STATE_DIR, 'tasks', safe);
+
+  const issueSet = new Set<number>();
+
+  // Scan task subdirectories (each named by issue number)
+  if (fs.existsSync(tasksDir)) {
+    try {
+      const entries = fs.readdirSync(tasksDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const num = parseInt(entry.name, 10);
+          if (!isNaN(num)) issueSet.add(num);
+        }
+      }
+    } catch {}
+  }
+
+  // Also include issues from state JSON
+  const st = loadRunnerState(repo);
+  for (const key of Object.keys(st.tasks)) {
+    const num = parseInt(key, 10);
+    if (!isNaN(num)) issueSet.add(num);
+  }
+
+  return Array.from(issueSet).sort((a, b) => a - b);
+}
