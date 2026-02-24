@@ -189,6 +189,10 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
     log.info(`Removing stale branch from previous attempt: ${branch}`);
     git.deleteBranch(branch, repoDir);
   }
+  if (git.remoteBranchExists(branch, repoDir)) {
+    log.info(`Removing stale remote branch from previous attempt: ${branch}`);
+    git.deleteRemoteBranch(branch, repoDir);
+  }
 
   try {
     git.addWorktree(worktree, branch, base, repoDir);
