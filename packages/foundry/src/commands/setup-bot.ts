@@ -257,32 +257,62 @@ export async function runSetupBot(): Promise<void> {
     return;
   }
 
-  // 1. Find a free port and start the callback server
+  // 1. Determine if the owner is a GitHub org or a personal account
+  let isOrg = false;
+  try {
+    const ghType = execFileSync('gh', ['api', `/users/${org}`, '--jq', '.type'], {
+      encoding: 'utf-8',
+      timeout: 10_000,
+    }).trim();
+    isOrg = ghType === 'Organization';
+  } catch {
+    // If gh isn't available, try unauthenticated fetch
+    try {
+      const resp = await fetch(`https://api.github.com/users/${org}`, {
+        headers: { 'User-Agent': 'joynt-foundry' },
+      });
+      if (resp.ok) {
+        const data = await resp.json() as { type: string };
+        isOrg = data.type === 'Organization';
+      }
+    } catch {
+      // Default to org URL — will fail clearly if wrong
+      isOrg = true;
+    }
+  }
+
+  // 2. Find a free port and start the callback server
   const port = await findFreePort();
   const redirectUrl = `http://localhost:${port}/callback`;
 
-  // 2. Build manifest
+  // 3. Build manifest
   const appName = `Foundry Bot ${org}`;
   const manifest = buildManifest(appName, redirectUrl);
 
-  // 3. Build the form-post URL
+  // 4. Build the form-post URL
   //    GitHub requires the manifest to be submitted as a form POST from the browser.
-  //    We serve an auto-submitting form that redirects the user to GitHub.
-  //    The manifest JSON is injected via JS to avoid HTML attribute escaping issues.
-  //    Double-serialize: JS parses the outer string → assigns the inner JSON string to the input.
+  //    We serve a page with a button that submits the manifest to GitHub.
   const manifestJsonForJs = JSON.stringify(JSON.stringify(manifest));
+  const settingsBase = isOrg
+    ? `https://github.com/organizations/${org}/settings/apps/new`
+    : 'https://github.com/settings/apps/new';
+
   const formServer = http.createServer((_req, res) => {
-    const settingsBase = `https://github.com/organizations/${org}/settings/apps/new`;
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(`<!DOCTYPE html>
 <html>
-<body>
+<head><title>Foundry Bot Setup</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 500px; margin: 80px auto; text-align: center;">
+  <h2>Create Foundry Bot</h2>
+  <p>Click below to create a GitHub App for <strong>${org}</strong>.</p>
   <form id="f" method="post" action="${settingsBase}">
     <input type="hidden" id="manifest" name="manifest">
+    <button type="submit" style="font-size: 16px; padding: 12px 24px; cursor: pointer; background: #2ea44f; color: white; border: none; border-radius: 6px;">
+      Create GitHub App
+    </button>
   </form>
   <script>
     document.getElementById('manifest').value = ${manifestJsonForJs};
-    document.getElementById('f').submit();
   </script>
 </body>
 </html>`);
@@ -293,11 +323,11 @@ export async function runSetupBot(): Promise<void> {
     formServer.listen(formPort, '127.0.0.1', resolve);
   });
 
-  // 4. Start waiting for callback (before opening browser)
+  // 5. Start waiting for callback (before opening browser)
   const codePromise = waitForCallback(port);
 
-  // 5. Open browser
-  log.info('Opening GitHub to create the app...');
+  // 6. Open browser
+  log.info('Opening browser — click "Create GitHub App" to continue...');
   openBrowser(`http://localhost:${formPort}`);
   log.info('');
   log.info('Waiting for GitHub redirect... (press Ctrl+C to cancel)');
