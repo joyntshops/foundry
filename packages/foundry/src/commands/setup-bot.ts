@@ -150,13 +150,10 @@ async function exchangeCode(code: string): Promise<{
 }
 
 /**
- * Poll for an installation of the App.
+ * Check if the App already has an installation (e.g., user installed it manually).
+ * Returns the installation ID, or null if none found.
  */
-async function pollForInstallation(
-  appId: number,
-  privateKey: string,
-  maxWaitMs = 5 * 60 * 1000,
-): Promise<number> {
+async function findExistingInstallation(appId: number, privateKey: string): Promise<number | null> {
   const { createAppAuth } = await import('@octokit/auth-app');
   const { Octokit } = await import('@octokit/rest');
 
@@ -165,22 +162,36 @@ async function pollForInstallation(
     auth: { appId: String(appId), privateKey },
   });
 
+  try {
+    const { data: installations } = await (octokit as any).rest.apps.listInstallations({ per_page: 1 });
+    if (installations.length > 0) {
+      return installations[0].id;
+    }
+  } catch {
+    // Auth may not be working
+  }
+  return null;
+}
+
+/**
+ * Poll for an installation of the App.
+ * Returns the installation ID, or null if timed out.
+ */
+async function pollForInstallation(
+  appId: number,
+  privateKey: string,
+  maxWaitMs = 5 * 60 * 1000,
+): Promise<number | null> {
   const start = Date.now();
   const pollInterval = 3000;
 
   while (Date.now() - start < maxWaitMs) {
-    try {
-      const { data: installations } = await (octokit as any).rest.apps.listInstallations({ per_page: 1 });
-      if (installations.length > 0) {
-        return installations[0].id;
-      }
-    } catch {
-      // App may not be ready yet
-    }
+    const id = await findExistingInstallation(appId, privateKey);
+    if (id !== null) return id;
     await new Promise(r => setTimeout(r, pollInterval));
   }
 
-  throw new Error('Timed out waiting for App installation (5 minutes).');
+  return null;
 }
 
 /**
@@ -243,63 +254,90 @@ export async function runSetupBot(): Promise<void> {
 
   const org = repo.split('/')[0];
 
-  log.info(`Setting up Foundry Bot for ${org}...`);
-  log.info('');
-
-  // Check if already set up
   const jsonPath = path.join(STATE_DIR, `github-app-${org}.json`);
   const pemPath = path.join(STATE_DIR, `github-app-${org}.pem`);
-  if (fs.existsSync(jsonPath) && fs.existsSync(pemPath)) {
-    log.warn(`GitHub App credentials already exist for ${org}.`);
-    log.warn(`  ${jsonPath}`);
-    log.warn(`  ${pemPath}`);
-    log.warn('Delete these files and re-run to set up a new App.');
-    return;
-  }
 
-  // 1. Determine if the owner is a GitHub org or a personal account
-  let isOrg = false;
-  try {
-    const ghType = execFileSync('gh', ['api', `/users/${org}`, '--jq', '.type'], {
-      encoding: 'utf-8',
-      timeout: 10_000,
-    }).trim();
-    isOrg = ghType === 'Organization';
-  } catch {
-    // If gh isn't available, try unauthenticated fetch
-    try {
-      const resp = await fetch(`https://api.github.com/users/${org}`, {
-        headers: { 'User-Agent': 'joynt-foundry' },
-      });
-      if (resp.ok) {
-        const data = await resp.json() as { type: string };
-        isOrg = data.type === 'Organization';
+  // ── Resume logic: detect partial state and pick up where we left off ──
+
+  let appId: number | undefined;
+  let slug: string | undefined;
+  let privateKey: string | undefined;
+  let installationId: number | undefined;
+
+  if (fs.existsSync(jsonPath) && fs.existsSync(pemPath)) {
+    const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    appId = meta.appId;
+    slug = meta.slug;
+    privateKey = fs.readFileSync(pemPath, 'utf-8');
+
+    if (meta.installationId) {
+      // Fully configured — verify and exit
+      log.info(`GitHub App already configured for ${org} (${slug}, ID: ${appId}).`);
+      const ok = await verifyAppAuth(String(appId), privateKey, String(meta.installationId));
+      if (ok) {
+        log.success('Verified — API access is working.');
+      } else {
+        log.warn('App credentials exist but API verification failed. Check the App installation on GitHub.');
       }
-    } catch {
-      // Default to org URL — will fail clearly if wrong
-      isOrg = true;
+      return;
+    }
+
+    // App created but installationId missing — check if installed out-of-band
+    log.info(`App "${slug}" (ID: ${appId}) exists but installation is not recorded. Checking...`);
+    const existingId = await findExistingInstallation(appId!, privateKey!);
+    if (existingId !== null) {
+      installationId = existingId;
+      log.success(`Found existing installation (ID: ${installationId})`);
+    } else {
+      log.info('No installation found. Continuing with installation step...');
     }
   }
 
-  // 2. Find a free port and start the callback server
-  const port = await findFreePort();
-  const redirectUrl = `http://localhost:${port}/callback`;
+  // ── Step 1: Create the App (skip if already created) ──
 
-  // 3. Build manifest
-  const appName = `Foundry Bot ${org}`;
-  const manifest = buildManifest(appName, redirectUrl);
+  if (!appId || !privateKey) {
+    log.info(`Setting up Foundry Bot for ${org}...`);
+    log.info('');
 
-  // 4. Build the form-post URL
-  //    GitHub requires the manifest to be submitted as a form POST from the browser.
-  //    We serve a page with a button that submits the manifest to GitHub.
-  const manifestJsonForJs = JSON.stringify(JSON.stringify(manifest));
-  const settingsBase = isOrg
-    ? `https://github.com/organizations/${org}/settings/apps/new`
-    : 'https://github.com/settings/apps/new';
+    // Determine if the owner is a GitHub org or a personal account
+    let isOrg = false;
+    try {
+      const ghType = execFileSync('gh', ['api', `/users/${org}`, '--jq', '.type'], {
+        encoding: 'utf-8',
+        timeout: 10_000,
+      }).trim();
+      isOrg = ghType === 'Organization';
+    } catch {
+      try {
+        const resp = await fetch(`https://api.github.com/users/${org}`, {
+          headers: { 'User-Agent': 'joynt-foundry' },
+        });
+        if (resp.ok) {
+          const data = await resp.json() as { type: string };
+          isOrg = data.type === 'Organization';
+        }
+      } catch {
+        isOrg = true;
+      }
+    }
 
-  const formServer = http.createServer((_req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(`<!DOCTYPE html>
+    // Find a free port and start the callback server
+    const port = await findFreePort();
+    const redirectUrl = `http://localhost:${port}/callback`;
+
+    // Build manifest
+    const appName = `Foundry Bot ${org}`;
+    const manifest = buildManifest(appName, redirectUrl);
+
+    // Serve the form page
+    const manifestJsonForJs = JSON.stringify(JSON.stringify(manifest));
+    const settingsBase = isOrg
+      ? `https://github.com/organizations/${org}/settings/apps/new`
+      : 'https://github.com/settings/apps/new';
+
+    const formServer = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`<!DOCTYPE html>
 <html>
 <head><title>Foundry Bot Setup</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 500px; margin: 80px auto; text-align: center;">
@@ -316,74 +354,86 @@ export async function runSetupBot(): Promise<void> {
   </script>
 </body>
 </html>`);
-  });
+    });
 
-  const formPort = await findFreePort();
-  await new Promise<void>((resolve) => {
-    formServer.listen(formPort, '127.0.0.1', resolve);
-  });
+    const formPort = await findFreePort();
+    await new Promise<void>((resolve) => {
+      formServer.listen(formPort, '127.0.0.1', resolve);
+    });
 
-  // 5. Start waiting for callback (before opening browser)
-  const codePromise = waitForCallback(port);
+    const codePromise = waitForCallback(port);
 
-  // 6. Open browser
-  const formUrl = `http://localhost:${formPort}`;
-  log.info('Opening browser — click "Create GitHub App" to continue...');
-  log.info(`  ${formUrl}`);
-  openBrowser(formUrl);
-  log.info('');
-  log.info('Waiting for GitHub redirect... (press Ctrl+C to cancel)');
+    const formUrl = `http://localhost:${formPort}`;
+    log.info('Opening browser — click "Create GitHub App" to continue...');
+    log.info(`  ${formUrl}`);
+    openBrowser(formUrl);
+    log.info('');
+    log.info('Waiting for GitHub redirect... (press Ctrl+C to cancel)');
 
-  // 6. Wait for the code
-  let code: string;
-  try {
-    code = await codePromise;
-  } finally {
-    formServer.close();
+    let code: string;
+    try {
+      code = await codePromise;
+    } finally {
+      formServer.close();
+    }
+
+    log.info('');
+    const appData = await exchangeCode(code);
+
+    // Save credentials (without installationId for now)
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(pemPath, appData.pem, { mode: 0o600 });
+    log.success(`Private key saved to ${pemPath}`);
+
+    appId = appData.id;
+    slug = appData.slug;
+    privateKey = appData.pem;
+
+    const metaJson = { appId, slug };
+    fs.writeFileSync(jsonPath, JSON.stringify(metaJson, null, 2) + '\n');
+    log.success(`App created: ${slug} (ID: ${appId})`);
   }
 
-  // 7. Exchange code for credentials
-  log.info('');
-  const appData = await exchangeCode(code);
+  // ── Step 2: Install the App (skip if already installed) ──
 
-  // 8. Save credentials
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(pemPath, appData.pem, { mode: 0o600 });
-  log.success(`Private key saved to ${pemPath}`);
+  if (!installationId) {
+    const installUrl = `https://github.com/apps/${slug}/installations/new`;
+    log.info('');
+    log.info('Now install the app on your repos:');
+    log.info(`  ${installUrl}`);
+    openBrowser(installUrl);
+    log.info('');
+    log.info('Waiting for installation... (press Ctrl+C to cancel)');
 
-  const metaJson = { appId: appData.id, slug: appData.slug };
-  fs.writeFileSync(jsonPath, JSON.stringify(metaJson, null, 2) + '\n');
-  log.success(`App created: ${appData.slug} (ID: ${appData.id})`);
+    installationId = await pollForInstallation(appId!, privateKey!, 5 * 60 * 1000) ?? undefined;
 
-  // 9. Open installation page
-  log.info('');
-  log.info('Now install the app on your repos:');
-  const installUrl = `https://github.com/apps/${appData.slug}/installations/new`;
-  openBrowser(installUrl);
-  log.info('');
-  log.info('Waiting for installation confirmation...');
+    if (!installationId) {
+      log.warn('Timed out waiting for installation.');
+      log.info('If you already installed the app, re-run `foundry setup-bot` to detect it.');
+      log.info(`Or install it now at: ${installUrl}`);
+      process.exitCode = 1;
+      return;
+    }
 
-  // 10. Poll for installation
-  const installationId = await pollForInstallation(appData.id, appData.pem);
-  log.success(`Installation confirmed (ID: ${installationId})`);
+    log.success(`Installation confirmed (ID: ${installationId})`);
+  }
 
-  // 11. Save installationId
-  const fullMeta = { ...metaJson, installationId };
+  // ── Step 3: Save final state and verify ──
+
+  const fullMeta = { appId, slug, installationId };
   fs.writeFileSync(jsonPath, JSON.stringify(fullMeta, null, 2) + '\n');
 
-  // 12. Verify API access
-  const ok = await verifyAppAuth(String(appData.id), appData.pem, String(installationId));
+  const ok = await verifyAppAuth(String(appId), privateKey!, String(installationId));
   if (ok) {
     log.success('Test API call successful — actions will appear as "Foundry Bot[bot]"');
   } else {
     log.warn('Test API call failed — the App may need additional permissions.');
   }
 
-  // 13. Print summary
   log.info('');
   log.success(`Setup complete! No other auth needed — Foundry will use the bot for all ${org} repos.`);
   log.info('To use in CI, set these env vars:');
-  log.info(`  FOUNDRY_GITHUB_APP_ID=${appData.id}`);
+  log.info(`  FOUNDRY_GITHUB_APP_ID=${appId}`);
   log.info(`  FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH=/path/to/key.pem`);
   log.info(`  FOUNDRY_GITHUB_APP_INSTALLATION_ID=${installationId}`);
 }
