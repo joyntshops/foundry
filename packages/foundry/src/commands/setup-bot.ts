@@ -327,8 +327,10 @@ export async function runSetupBot(): Promise<void> {
   const codePromise = waitForCallback(port);
 
   // 6. Open browser
+  const formUrl = `http://localhost:${formPort}`;
   log.info('Opening browser — click "Create GitHub App" to continue...');
-  openBrowser(`http://localhost:${formPort}`);
+  log.info(`  ${formUrl}`);
+  openBrowser(formUrl);
   log.info('');
   log.info('Waiting for GitHub redirect... (press Ctrl+C to cancel)');
 
