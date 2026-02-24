@@ -153,6 +153,36 @@ program
     await runRelease(type);
   });
 
+// ── foundry preview ──────────────────────────────────────────────────
+
+const previewCmd = program
+  .command('preview')
+  .description('Manage preview environments for tasks');
+
+previewCmd
+  .command('up <issue>')
+  .description('Trigger preview deployment for a task')
+  .action(async (issue: string) => {
+    const { runPreviewUp } = await import('./commands/preview.js');
+    await runPreviewUp(issue);
+  });
+
+previewCmd
+  .command('down <issue>')
+  .description('Tear down preview environment for a task')
+  .action(async (issue: string) => {
+    const { runPreviewDown } = await import('./commands/preview.js');
+    await runPreviewDown(issue);
+  });
+
+previewCmd
+  .command('status <issue>')
+  .description('Show preview environment status for a task')
+  .action(async (issue: string) => {
+    const { runPreviewStatus } = await import('./commands/preview.js');
+    await runPreviewStatus(issue);
+  });
+
 // ── foundry sync-integration ──────────────────────────────────────────
 
 program

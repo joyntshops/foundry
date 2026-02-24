@@ -58,6 +58,9 @@ export interface GitHubClient {
   getPRReviews(repo: string, prNumber: number): Promise<{ reviews: PRReview[]; comments: PRReviewComment[] }>;
   commentOnPR(repo: string, prNumber: number, body: string): Promise<void>;
 
+  // Comments
+  updateComment(repo: string, commentId: number, body: string): Promise<void>;
+
   // Repository
   getRepoSlug(): Promise<string>;
 }

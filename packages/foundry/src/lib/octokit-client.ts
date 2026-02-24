@@ -102,6 +102,7 @@ type OctokitLike = {
       addLabels(p: any): Promise<any>;
       removeLabel(p: any): Promise<any>;
       createComment(p: any): Promise<any>;
+      updateComment(p: any): Promise<any>;
       listComments(p: any): Promise<any>;
       listLabelsForRepo(p: any): Promise<any>;
       deleteLabel(p: any): Promise<any>;
@@ -116,6 +117,10 @@ type OctokitLike = {
       merge(p: any): Promise<any>;
       listReviews(p: any): Promise<any>;
       listReviewComments(p: any): Promise<any>;
+    };
+    repos: {
+      createDeployment(p: any): Promise<any>;
+      createDeploymentStatus(p: any): Promise<any>;
     };
     git: {
       deleteRef(p: any): Promise<any>;
@@ -141,6 +146,9 @@ async function createOctokit(org?: string): Promise<OctokitLike> {
 
   return new Octokit({ auth: resolveToken() });
 }
+
+/** Exposed for direct use by modules that need Octokit outside the GitHubClient interface (e.g. deployments). */
+export { createOctokit as createOctokitInstance };
 
 export class OctokitClient implements GitHubClient {
   private _octokit: OctokitLike | null;
@@ -446,6 +454,17 @@ export class OctokitClient implements GitHubClient {
       owner,
       repo: repoName,
       issue_number: prNumber,
+      body,
+    });
+  }
+
+  async updateComment(repo: string, commentId: number, body: string): Promise<void> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    await ok.rest.issues.updateComment({
+      owner,
+      repo: repoName,
+      comment_id: commentId,
       body,
     });
   }

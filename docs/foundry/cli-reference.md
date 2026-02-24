@@ -191,6 +191,50 @@ foundry prune --all        # actually remove
 
 ---
 
+## `foundry preview up <issue>`
+
+Trigger a preview deployment for a task. Spins up a preview environment using the configured `preview` settings and posts the preview URL as a PR comment.
+
+```bash
+foundry preview up 42
+```
+
+## `foundry preview down <issue>`
+
+Tear down a preview environment for a task. Removes the preview deployment and marks any GitHub Deployment as inactive (if `github_deployments.auto_inactive` is enabled).
+
+```bash
+foundry preview down 42
+```
+
+## `foundry preview status <issue>`
+
+Show preview environment status including the preview URL, GitHub Deployment ID, and current state.
+
+```bash
+foundry preview status 42
+```
+
+**Example workflow:**
+
+```bash
+# Spin up a preview for issue 42
+foundry preview up 42
+# => Preview deployed: https://pr-42.preview.example.com
+
+# Check the current preview state
+foundry preview status 42
+# => Issue: 42
+# => URL:   https://pr-42.preview.example.com
+# => State: active
+
+# Tear down when done
+foundry preview down 42
+# => Preview for issue 42 torn down
+```
+
+---
+
 ## `foundry review <target>`
 
 Review and merge a PR into integration.

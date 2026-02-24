@@ -254,6 +254,17 @@ describe('GhCliClient', () => {
     });
   });
 
+  describe('updateComment', () => {
+    it('calls gh api PATCH for comment update', async () => {
+      mockExec.mockReturnValue('');
+      await client.updateComment('o/r', 456, 'new body');
+      expect(mockExec).toHaveBeenCalledWith('gh',
+        ['api', '--method', 'PATCH', 'repos/o/r/issues/comments/456', '-f', 'body=new body'],
+        expect.anything(),
+      );
+    });
+  });
+
   describe('closeIssue', () => {
     it('calls gh issue close', async () => {
       mockExec.mockReturnValue('');

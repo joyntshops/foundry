@@ -134,6 +134,10 @@ export function commentOnPR(repo: string, prNumber: number, body: string): Promi
   return _client.commentOnPR(repo, prNumber, body);
 }
 
+export function updateComment(repo: string, commentId: number, body: string): Promise<void> {
+  return _client.updateComment(repo, commentId, body);
+}
+
 export function getRepoSlug(): Promise<string> {
   return _client.getRepoSlug();
 }

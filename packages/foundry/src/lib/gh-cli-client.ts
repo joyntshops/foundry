@@ -210,6 +210,10 @@ export class GhCliClient implements GitHubClient {
     gh(['pr', 'comment', String(prNumber), '--repo', repo, '--body', body]);
   }
 
+  async updateComment(repo: string, commentId: number, body: string): Promise<void> {
+    gh(['api', '--method', 'PATCH', `repos/${repo}/issues/comments/${commentId}`, '-f', `body=${body}`]);
+  }
+
   // ── Repository ─────────────────────────────────────────────────────────
 
   async getRepoSlug(): Promise<string> {

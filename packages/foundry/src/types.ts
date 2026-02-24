@@ -61,6 +61,21 @@ export interface FoundryConfig {
   agent_label_map?: Record<string, string>;   // label → backend name
   poll_interval_seconds: number;              // default 30
   github_backend: 'gh-cli' | 'octokit';      // default "gh-cli"
+
+  preview?: {
+    mode: 'template' | 'provider';
+    url_template?: string;
+    up_command?: string;
+    down_command?: string;
+    comment?: boolean;
+  };
+
+  github_deployments?: {
+    enabled: boolean;
+    environment?: string;
+    production?: boolean;
+    auto_inactive?: boolean;
+  };
 }
 
 // ── Local State (~/.joynt-foundry/) ─────────────────────────────────────
@@ -97,6 +112,8 @@ export interface TaskState {
   session_id?: string;
   input_request_count?: number;
   last_agent_message?: string;
+  preview_url?: string;
+  deployment_id?: number;
 }
 
 export interface RunnerState {

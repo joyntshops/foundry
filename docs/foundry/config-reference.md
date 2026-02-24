@@ -101,6 +101,23 @@ agent_backends:
 agent_label_map:
   "agent:claude": "claude-code"
   "agent:cursor": "cursor"
+
+# ── Preview Environments (optional) ─────────────────────────────────
+
+preview:
+  mode: "template"                        # "template" = URL from config, "provider" = URL from command output
+  url_template: "https://pr-{issue}.preview.example.com"   # mode:template only
+  # up_command: "deploy.sh up {branch}"   # mode:provider — must output URL or JSON { url }
+  # down_command: "deploy.sh down {branch}"  # mode:provider
+  comment: true                           # Post/update PR comment (default true)
+
+# ── GitHub Deployments (optional) ───────────────────────────────────
+
+github_deployments:
+  enabled: false                          # Default false
+  environment: "preview"                  # GitHub environment name
+  production: false                       # Whether this is a production environment
+  auto_inactive: true                     # Mark deployment inactive on teardown
 ```
 
 ## Field Reference
@@ -161,6 +178,23 @@ Map of backend definitions. Each backend has:
 
 ### `agent_label_map`
 Optional mapping from issue label names to backend names. When an issue has a matching label, that backend is used instead of the default.
+
+### `preview`
+Configuration for preview/staging environments deployed per-task.
+
+- `mode` — `"template"` or `"provider"`. In `template` mode, the preview URL is constructed from `url_template`. In `provider` mode, the URL is read from the output of `up_command`.
+- `url_template` — URL template used when `mode` is `"template"`. Template variables: `{branch}` (branch name), `{issue}` (issue number), `{repo}` (owner/repo), `{pr_number}` (pull request number).
+- `up_command` — Shell command to spin up the preview environment (mode `"provider"` only). Must print a URL or JSON `{ "url": "..." }` to stdout. Template variables: `{branch}`, `{issue}`, `{repo}`, `{pr_number}`.
+- `down_command` — Shell command to tear down the preview environment (mode `"provider"` only). Same template variables as `up_command`.
+- `comment` — Whether to post/update a PR comment with the preview URL. Default `true`.
+
+### `github_deployments`
+Configuration for creating GitHub Deployment objects alongside preview environments.
+
+- `enabled` — Whether to create GitHub Deployments. Default `false`.
+- `environment` — GitHub environment name used for the deployment (e.g. `"preview"`, `"staging"`). Default `"preview"`.
+- `production` — Whether the environment is a production environment. Default `false`.
+- `auto_inactive` — Whether to automatically mark the deployment as `inactive` when the preview is torn down. Default `true`.
 
 ### `github_backend`
 Which GitHub API backend to use. Options:

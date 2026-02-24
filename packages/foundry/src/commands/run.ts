@@ -17,6 +17,7 @@ import * as log from '../lib/log.js';
 import * as verify from '../lib/verify.js';
 import * as agentOutput from '../lib/agent-output.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
+import * as preview from '../lib/preview.js';
 import type { FoundryConfig, GitHubIssue, TaskState, AgentLaunchParams, AgentOutcome, ResumeParams } from '../types.js';
 
 let running = true;
@@ -543,6 +544,9 @@ async function handleCommandStop(config: FoundryConfig, task: TaskState, repoDir
     tmux.killSession(task.tmux_session);
   }
 
+  // Tear down preview environment
+  await triggerPreviewDown(config, task);
+
   // Update state and labels
   state.updateTaskStatus(config.repo, task.issue, 'failed');
   await claim.markFailed(config, task.issue);
@@ -564,6 +568,9 @@ async function handleCommandRestart(config: FoundryConfig, task: TaskState, repo
   if (task.status !== 'claimed') {
     tmux.killSession(task.tmux_session);
   }
+
+  // Tear down preview environment
+  await triggerPreviewDown(config, task);
 
   // Clean up worktree and branch
   try { git.removeWorktree(task.worktree, repoDir); } catch {}
@@ -723,6 +730,9 @@ async function handleCommandPlan(config: FoundryConfig, task: TaskState, message
 }
 
 async function handleCommandStart(config: FoundryConfig, task: TaskState, message: string, repoDir: string): Promise<void> {
+  // Tear down preview environment
+  await triggerPreviewDown(config, task);
+
   // Clean up old worktree and branch (claimed tasks have no tmux session)
   if (task.status !== 'claimed') {
     tmux.killSession(task.tmux_session);
@@ -776,6 +786,9 @@ async function checkMergedPRs(config: FoundryConfig, repoDir: string): Promise<v
         if (!isMerged) continue;
 
         log.success(`PR for #${task.issue} has been merged. Completing task.`);
+
+        // Tear down preview environment
+        await triggerPreviewDown(config, task);
 
         // Add done label and close the issue
         try { await github.addLabel(config.repo, task.issue, config.labels.done); } catch {}
@@ -886,6 +899,7 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
       state.updateTaskStatus(config.repo, task.issue, 'pr-open');
       await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
       try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+      await triggerPreviewUp(config, task);
     } else {
       try {
         const prUrl = await github.createPR(config.repo, {
@@ -913,6 +927,7 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
             ].join('\n'));
           } catch {}
         }
+        await triggerPreviewUp(config, task);
       } catch (err: any) {
         log.error(`PR creation failed for #${task.issue}: ${err.message}`);
         state.updateTaskStatus(config.repo, task.issue, 'failed');
@@ -1363,6 +1378,26 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
   }
 
   log.success(`Resumed agent for #${task.issue} to address PR feedback (round ${inputRound})`);
+}
+
+// ── Preview helpers ──────────────────────────────────────────────────────
+
+async function triggerPreviewUp(config: FoundryConfig, task: TaskState): Promise<void> {
+  if (!config.preview) return;
+  const fresh = state.getAllTasks(config.repo).find(t => t.issue === task.issue);
+  if (fresh) {
+    try { await preview.previewUp(config, fresh); } catch (err: any) {
+      log.warn(`Preview up failed for #${task.issue}: ${err.message}`);
+    }
+  }
+}
+
+async function triggerPreviewDown(config: FoundryConfig, task: TaskState): Promise<void> {
+  if (!config.preview) return;
+  if (!task.preview_url) return;
+  try { await preview.previewDown(config, task); } catch (err: any) {
+    log.warn(`Preview down failed for #${task.issue}: ${err.message}`);
+  }
 }
 
 // ── Utility ──────────────────────────────────────────────────────────────

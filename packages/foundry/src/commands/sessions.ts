@@ -11,6 +11,7 @@ import * as git from '../lib/git.js';
 import * as github from '../lib/github.js';
 import * as claim from '../lib/claim.js';
 import * as log from '../lib/log.js';
+import * as preview from '../lib/preview.js';
 import type { FoundryConfig, TaskState } from '../types.js';
 
 // ── foundry sessions ─────────────────────────────────────────────────────
@@ -313,7 +314,15 @@ async function resetSingleTask(config: FoundryConfig, task: TaskState, issueNum:
     log.info(`  remote branch: origin/${task.branch} — not found`);
   }
 
-  // 5. PR
+  // 5. Preview teardown
+  if (!dryRun && task.preview_url) {
+    logAction(dryRun, `Tear down preview: ${task.preview_url}`);
+    try { await preview.previewDown(config, task); } catch {}
+  } else if (dryRun && task.preview_url) {
+    logAction(dryRun, `Tear down preview: ${task.preview_url}`);
+  }
+
+  // 6. PR
   let prOpen = false;
   if (task.pr_url) {
     try {
@@ -331,7 +340,7 @@ async function resetSingleTask(config: FoundryConfig, task: TaskState, issueNum:
     log.info(`  PR: ${task.pr_url ?? 'none'} — ${task.pr_url ? 'not open' : 'N/A'}`);
   }
 
-  // 6. Labels — remove foundry labels, add ready
+  // 7. Labels — remove foundry labels, add ready
   const labelsToRemove = [
     config.labels.in_progress,
     config.labels.waiting_for_input,
@@ -348,7 +357,7 @@ async function resetSingleTask(config: FoundryConfig, task: TaskState, issueNum:
     try { await github.addLabel(config.repo, issueNum, config.labels.ready); } catch {}
   }
 
-  // 7. State
+  // 8. State
   logAction(dryRun, 'Remove task from state');
   if (!dryRun) {
     state.removeTask(config.repo, issueNum);

@@ -16,6 +16,7 @@ function createMockOctokit() {
         addLabels: vi.fn(),
         removeLabel: vi.fn(),
         createComment: vi.fn(),
+        updateComment: vi.fn(),
         listComments: vi.fn(),
         listLabelsForRepo: vi.fn(),
         deleteLabel: vi.fn(),
@@ -295,6 +296,16 @@ describe('OctokitClient', () => {
       await client.commentOnPR('o/r', 5, 'feedback');
       expect(octokit.rest.issues.createComment).toHaveBeenCalledWith({
         owner: 'o', repo: 'r', issue_number: 5, body: 'feedback',
+      });
+    });
+  });
+
+  describe('updateComment', () => {
+    it('calls issues.updateComment', async () => {
+      octokit.rest.issues.updateComment.mockResolvedValue({});
+      await client.updateComment('o/r', 123, 'updated body');
+      expect(octokit.rest.issues.updateComment).toHaveBeenCalledWith({
+        owner: 'o', repo: 'r', comment_id: 123, body: 'updated body',
       });
     });
   });
