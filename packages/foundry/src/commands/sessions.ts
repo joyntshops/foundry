@@ -41,7 +41,7 @@ export async function runSessions(opts?: { all?: boolean; local?: boolean }): Pr
 
   // Header
   console.log('');
-  console.log(`  ${'#'.padEnd(6)} ${'Title'.padEnd(32)} ${'Status'.padEnd(22)} ${'Session'.padEnd(16)} ${'Worktree'.padEnd(9)} ${'PR'.padEnd(10)} ${opts?.local ? '' : 'Labels'}`);
+  console.log(`  ${'#'.padEnd(6)} ${'Title'.padEnd(32)} ${'Status'.padEnd(22)} ${'Tmux Session'.padEnd(16)} ${'Worktree'.padEnd(9)} ${'PR'.padEnd(10)} ${opts?.local ? '' : 'Labels'}`);
   console.log(`  ${'─'.repeat(6)} ${'─'.repeat(32)} ${'─'.repeat(22)} ${'─'.repeat(16)} ${'─'.repeat(9)} ${'─'.repeat(10)} ${opts?.local ? '' : '─'.repeat(30)}`);
 
   for (const task of filtered) {
@@ -340,21 +340,32 @@ async function resetSingleTask(config: FoundryConfig, task: TaskState, issueNum:
     log.info(`  PR: ${task.pr_url ?? 'none'} — ${task.pr_url ? 'not open' : 'N/A'}`);
   }
 
-  // 7. Labels — remove foundry labels, add ready
-  const labelsToRemove = [
+  // 7. Labels — remove foundry state labels, add ready
+  const stateLabels = [
     config.labels.in_progress,
     config.labels.waiting_for_input,
     config.labels.failed,
     config.labels.done,
     config.labels.ready_for_review,
   ];
-  logAction(dryRun, `Remove labels: ${labelsToRemove.join(', ')}`);
-  logAction(dryRun, `Add label: ${config.labels.ready}`);
   if (!dryRun) {
-    for (const label of labelsToRemove) {
+    let currentLabels: string[] = [];
+    try {
+      const issue = await github.getIssue(config.repo, issueNum);
+      currentLabels = issue.labels.map(l => l.name);
+    } catch {}
+    const toRemove = stateLabels.filter(l => currentLabels.includes(l));
+    for (const label of toRemove) {
+      logAction(dryRun, `Remove label: ${label}`);
       try { await github.removeLabel(config.repo, issueNum, label); } catch {}
     }
-    try { await github.addLabel(config.repo, issueNum, config.labels.ready); } catch {}
+    if (!currentLabels.includes(config.labels.ready)) {
+      logAction(dryRun, `Add label: ${config.labels.ready}`);
+      try { await github.addLabel(config.repo, issueNum, config.labels.ready); } catch {}
+    }
+  } else {
+    logAction(dryRun, `Remove labels (if present): ${stateLabels.join(', ')}`);
+    logAction(dryRun, `Add label: ${config.labels.ready}`);
   }
 
   // 8. State

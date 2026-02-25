@@ -25,6 +25,7 @@ vi.mock('../lib/git.js', () => ({
   deleteRemoteBranch: vi.fn(),
 }));
 vi.mock('../lib/github.js', () => ({
+  getIssue: vi.fn(),
   getPRStatus: vi.fn(),
   closePR: vi.fn(),
   removeLabel: vi.fn(),
@@ -161,6 +162,11 @@ describe('runReset', () => {
       vi.mocked(git.branchExists).mockReturnValue(true);
       vi.mocked(git.remoteBranchExists).mockReturnValue(true);
       vi.mocked(github.getPRStatus).mockResolvedValue({ state: 'OPEN', url: 'https://github.com/owner/repo/pull/10' });
+      vi.mocked(github.getIssue).mockResolvedValue({
+        number: 42, title: 'Fix the thing', body: '', state: 'open',
+        labels: [{ name: 'state:in-progress' }, { name: 'state:ready-for-human-review' }],
+        html_url: 'https://github.com/owner/repo/issues/42',
+      });
       vi.mocked(github.removeLabel).mockResolvedValue();
       vi.mocked(github.addLabel).mockResolvedValue();
       vi.mocked(github.closePR).mockResolvedValue();
@@ -174,7 +180,10 @@ describe('runReset', () => {
       expect(git.deleteBranch).toHaveBeenCalledWith('feature/42-fix-the-thing', '/repo');
       expect(git.deleteRemoteBranch).toHaveBeenCalledWith('feature/42-fix-the-thing', '/repo');
       expect(github.closePR).toHaveBeenCalledWith('owner/repo', 10);
-      expect(github.removeLabel).toHaveBeenCalledTimes(5); // 5 labels to remove
+      // Only removes labels actually present on the issue
+      expect(github.removeLabel).toHaveBeenCalledTimes(2);
+      expect(github.removeLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:in-progress');
+      expect(github.removeLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:ready-for-human-review');
       expect(github.addLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:ready');
       expect(state.removeTask).toHaveBeenCalledWith('owner/repo', 42);
     });
@@ -191,6 +200,11 @@ describe('runReset', () => {
       vi.mocked(git.worktreeExists).mockReturnValue(false);
       vi.mocked(git.branchExists).mockReturnValue(false);
       vi.mocked(git.remoteBranchExists).mockReturnValue(false);
+      vi.mocked(github.getIssue).mockResolvedValue({
+        number: 42, title: 'Fix the thing', body: '', state: 'open',
+        labels: [{ name: 'state:failed' }],
+        html_url: 'https://github.com/owner/repo/issues/42',
+      });
       vi.mocked(github.removeLabel).mockResolvedValue();
       vi.mocked(github.addLabel).mockResolvedValue();
     });
@@ -205,8 +219,9 @@ describe('runReset', () => {
       expect(git.deleteRemoteBranch).not.toHaveBeenCalled();
       expect(github.closePR).not.toHaveBeenCalled();
 
-      // Labels and state should still be cleaned
-      expect(github.removeLabel).toHaveBeenCalled();
+      // Only removes labels actually present, then adds ready
+      expect(github.removeLabel).toHaveBeenCalledTimes(1);
+      expect(github.removeLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:failed');
       expect(github.addLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:ready');
       expect(state.removeTask).toHaveBeenCalledWith('owner/repo', 42);
     });
