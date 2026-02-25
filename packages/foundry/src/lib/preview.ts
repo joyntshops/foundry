@@ -18,6 +18,7 @@ interface TemplateVars {
   issue: number;
   repo: string;
   pr_number: number | undefined;
+  sha: string;
 }
 
 function expandTemplate(template: string, vars: TemplateVars): string {
@@ -25,7 +26,8 @@ function expandTemplate(template: string, vars: TemplateVars): string {
     .replace(/\{branch\}/g, vars.branch)
     .replace(/\{issue\}/g, String(vars.issue))
     .replace(/\{repo\}/g, vars.repo)
-    .replace(/\{pr_number\}/g, String(vars.pr_number ?? ''));
+    .replace(/\{pr_number\}/g, String(vars.pr_number ?? ''))
+    .replace(/\{sha\}/g, vars.sha);
 }
 
 function makeEnvVars(vars: TemplateVars): Record<string, string> {
@@ -34,7 +36,16 @@ function makeEnvVars(vars: TemplateVars): Record<string, string> {
     FOUNDRY_ISSUE: String(vars.issue),
     FOUNDRY_REPO: vars.repo,
     FOUNDRY_PR_NUMBER: String(vars.pr_number ?? ''),
+    FOUNDRY_SHA: vars.sha,
   };
+}
+
+function resolveHeadSha(worktree: string): string {
+  try {
+    return execSync('git rev-parse HEAD', { cwd: worktree, encoding: 'utf-8', timeout: 10_000 }).trim();
+  } catch {
+    return '';
+  }
 }
 
 // ── URL resolution ───────────────────────────────────────────────────────
@@ -124,6 +135,7 @@ export async function previewUp(config: FoundryConfig, task: TaskState): Promise
     issue: task.issue,
     repo: config.repo,
     pr_number: task.pr_number,
+    sha: resolveHeadSha(task.worktree),
   };
 
   // Resolve URL — run provider command first (if configured), then fall back to url_template
@@ -195,6 +207,7 @@ export async function previewDown(config: FoundryConfig, task: TaskState): Promi
     issue: task.issue,
     repo: config.repo,
     pr_number: task.pr_number,
+    sha: resolveHeadSha(task.worktree),
   };
 
   // Run down command (provider mode only)

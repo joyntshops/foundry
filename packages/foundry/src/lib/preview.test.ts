@@ -102,12 +102,29 @@ function makeTask(overrides: Partial<TaskState> = {}): TaskState {
 
 // ── Tests ───────────────────────────────────────────────────────────────
 
+const MOCK_SHA = 'abc1234def5678';
+
+/**
+ * Helper: mock execSync so that `git rev-parse HEAD` returns MOCK_SHA,
+ * while any other command returns the provided value.
+ */
+function mockExecWithSha(providerReturn?: string | (() => string)): void {
+  vi.mocked(execSync).mockImplementation((cmd: string, ..._args: any[]) => {
+    if (cmd === 'git rev-parse HEAD') return MOCK_SHA + '\n';
+    if (providerReturn === undefined) return '';
+    if (typeof providerReturn === 'function') return providerReturn();
+    return providerReturn;
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   // Default: no existing comments
   vi.mocked(github.getComments).mockResolvedValue([]);
   vi.mocked(github.commentOnPR).mockResolvedValue(undefined);
   vi.mocked(github.updateComment).mockResolvedValue(undefined);
+  // Default: resolveHeadSha returns a test SHA, no provider command
+  mockExecWithSha();
 });
 
 describe('previewUp', () => {
@@ -222,7 +239,7 @@ describe('previewUp', () => {
 
   describe('provider mode', () => {
     it('calls execSync with expanded command and correct env vars', async () => {
-      vi.mocked(execSync).mockReturnValue('https://dynamic-preview.example.com\n');
+      mockExecWithSha('https://dynamic-preview.example.com\n');
 
       const config = makeConfig({
         preview: {
@@ -244,13 +261,14 @@ describe('previewUp', () => {
             FOUNDRY_ISSUE: '42',
             FOUNDRY_REPO: 'acme/webapp',
             FOUNDRY_PR_NUMBER: '99',
+            FOUNDRY_SHA: MOCK_SHA,
           }),
         }),
       );
     });
 
     it('captures plain URL from command output', async () => {
-      vi.mocked(execSync).mockReturnValue('https://preview-42.example.com\n');
+      mockExecWithSha('https://preview-42.example.com\n');
 
       const config = makeConfig({
         preview: {
@@ -271,7 +289,7 @@ describe('previewUp', () => {
     });
 
     it('parses JSON output with url field', async () => {
-      vi.mocked(execSync).mockReturnValue(
+      mockExecWithSha(
         JSON.stringify({ url: 'https://json-preview.example.com', id: 'abc' }),
       );
 
@@ -294,7 +312,7 @@ describe('previewUp', () => {
     });
 
     it('returns early when command output is not a URL', async () => {
-      vi.mocked(execSync).mockReturnValue('some random output\n');
+      mockExecWithSha('some random output\n');
 
       const config = makeConfig({
         preview: {
@@ -311,9 +329,7 @@ describe('previewUp', () => {
     });
 
     it('returns early when command throws', async () => {
-      vi.mocked(execSync).mockImplementation(() => {
-        throw new Error('command failed');
-      });
+      mockExecWithSha(() => { throw new Error('command failed'); });
 
       const config = makeConfig({
         preview: {
@@ -329,7 +345,7 @@ describe('previewUp', () => {
     });
 
     it('falls back to url_template when command output is not a URL', async () => {
-      vi.mocked(execSync).mockReturnValue('deploy successful\n');
+      mockExecWithSha('deploy successful\n');
 
       const config = makeConfig({
         preview: {
@@ -351,9 +367,7 @@ describe('previewUp', () => {
     });
 
     it('falls back to url_template when command throws', async () => {
-      vi.mocked(execSync).mockImplementation(() => {
-        throw new Error('command failed');
-      });
+      mockExecWithSha(() => { throw new Error('command failed'); });
 
       const config = makeConfig({
         preview: {
@@ -385,7 +399,9 @@ describe('previewUp', () => {
 
       await previewUp(config, task);
 
-      expect(execSync).not.toHaveBeenCalled();
+      // Only git rev-parse HEAD should run, not a provider command
+      expect(execSync).toHaveBeenCalledTimes(1);
+      expect(execSync).toHaveBeenCalledWith('git rev-parse HEAD', expect.anything());
       expect(state.updateTaskStatus).toHaveBeenCalledWith(
         'acme/webapp',
         42,
@@ -404,7 +420,9 @@ describe('previewUp', () => {
 
       await previewUp(config, task);
 
-      expect(execSync).not.toHaveBeenCalled();
+      // Only git rev-parse HEAD should run, not a provider command
+      expect(execSync).toHaveBeenCalledTimes(1);
+      expect(execSync).toHaveBeenCalledWith('git rev-parse HEAD', expect.anything());
       expect(state.updateTaskStatus).not.toHaveBeenCalled();
     });
   });
@@ -541,7 +559,7 @@ describe('previewUp', () => {
 
 describe('previewDown', () => {
   it('executes down_command in provider mode', async () => {
-    vi.mocked(execSync).mockReturnValue('');
+    mockExecWithSha('');
 
     const config = makeConfig({
       preview: {
@@ -643,7 +661,9 @@ describe('previewDown', () => {
 
     await previewDown(config, task);
 
-    expect(execSync).not.toHaveBeenCalled();
+    // Only git rev-parse HEAD should run, not the down_command
+    expect(execSync).toHaveBeenCalledTimes(1);
+    expect(execSync).toHaveBeenCalledWith('git rev-parse HEAD', expect.anything());
   });
 
   it('does not set deployment status when deployment_id is absent', async () => {
@@ -662,9 +682,7 @@ describe('previewDown', () => {
   });
 
   it('continues even if down_command throws', async () => {
-    vi.mocked(execSync).mockImplementation(() => {
-      throw new Error('teardown failed');
-    });
+    mockExecWithSha(() => { throw new Error('teardown failed'); });
 
     const config = makeConfig({
       preview: {

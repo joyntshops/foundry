@@ -86,8 +86,9 @@ The following variables are expanded in `url_template`, `up_command`, and `down_
 | `{issue}` | Issue number | `FOUNDRY_ISSUE` |
 | `{repo}` | Repository in `owner/repo` format | `FOUNDRY_REPO` |
 | `{pr_number}` | Pull request number (empty if PR not yet created) | `FOUNDRY_PR_NUMBER` |
+| `{sha}` | HEAD commit SHA of the worktree | `FOUNDRY_SHA` |
 
-All four environment variables are set in the command's environment automatically, so scripts can read them without relying on string interpolation.
+All five environment variables are set in the command's environment automatically, so scripts can read them without relying on string interpolation.
 
 ## GitHub Deployments Integration
 
