@@ -39,7 +39,23 @@ Foundry expands the template and posts the resulting URL as a PR comment. No dep
 
 ## Provider Mode
 
-Use provider mode when a command must be executed to trigger the deploy. The command's stdout is captured and parsed as the preview URL.
+Use provider mode when a command must be executed to trigger the deploy.
+
+```yaml
+preview:
+  mode: "provider"
+  url_template: "https://pr-{issue}.preview.example.com"
+  up_command: "./scripts/deploy-preview.sh {issue} {branch}"
+  down_command: "./scripts/teardown-preview.sh {issue} {branch}"
+```
+
+When `url_template` is also set, the command doesn't need to output anything -- the URL comes from the template. This is the common case: the command deploys, the URL is predictable.
+
+If `url_template` is **not** set, the command must print the URL to stdout as either:
+- A **plain URL** (`https://...`) -- the last line starting with `http://` or `https://` is used.
+- A **JSON object** with a `url` field -- `{ "url": "https://my-preview.vercel.app" }`.
+
+### Vercel example (URL from command output)
 
 ```yaml
 preview:
@@ -48,22 +64,17 @@ preview:
   down_command: "vercel rm {branch} --yes 2>/dev/null"
 ```
 
-The command output can be either:
-- A **plain URL** (`https://...`) -- the last line starting with `http://` or `https://` is used.
-- A **JSON object** with a `url` field -- `{ "url": "https://my-preview.vercel.app" }`.
-
-If the output does not match either form, Foundry logs a warning and skips the preview.
-
-### Custom script example
+### Custom script example (URL from template)
 
 ```yaml
 preview:
   mode: "provider"
-  up_command: "./scripts/deploy-preview.sh"
-  down_command: "./scripts/teardown-preview.sh"
+  url_template: "https://pr-{issue}.staging.example.com"
+  up_command: "./scripts/deploy-preview.sh {issue}"
+  down_command: "./scripts/teardown-preview.sh {issue}"
 ```
 
-The script receives template variables both as interpolated arguments and as environment variables (see below), and must print the URL to stdout.
+The script receives template variables both as interpolated arguments and as environment variables (see below).
 
 ## Template Variables
 

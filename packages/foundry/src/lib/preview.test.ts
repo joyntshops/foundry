@@ -328,7 +328,73 @@ describe('previewUp', () => {
       expect(state.updateTaskStatus).not.toHaveBeenCalled();
     });
 
-    it('does nothing when up_command is not set', async () => {
+    it('falls back to url_template when command output is not a URL', async () => {
+      vi.mocked(execSync).mockReturnValue('deploy successful\n');
+
+      const config = makeConfig({
+        preview: {
+          mode: 'provider',
+          up_command: 'deploy-preview',
+          url_template: 'https://pr-{issue}.example.com',
+        },
+      });
+      const task = makeTask();
+
+      await previewUp(config, task);
+
+      expect(state.updateTaskStatus).toHaveBeenCalledWith(
+        'acme/webapp',
+        42,
+        'pr-open',
+        { preview_url: 'https://pr-42.example.com' },
+      );
+    });
+
+    it('falls back to url_template when command throws', async () => {
+      vi.mocked(execSync).mockImplementation(() => {
+        throw new Error('command failed');
+      });
+
+      const config = makeConfig({
+        preview: {
+          mode: 'provider',
+          up_command: 'deploy-preview',
+          url_template: 'https://pr-{issue}.example.com',
+        },
+      });
+      const task = makeTask();
+
+      await previewUp(config, task);
+
+      expect(state.updateTaskStatus).toHaveBeenCalledWith(
+        'acme/webapp',
+        42,
+        'pr-open',
+        { preview_url: 'https://pr-42.example.com' },
+      );
+    });
+
+    it('uses url_template when up_command is not set', async () => {
+      const config = makeConfig({
+        preview: {
+          mode: 'provider',
+          url_template: 'https://pr-{issue}.example.com',
+        },
+      });
+      const task = makeTask();
+
+      await previewUp(config, task);
+
+      expect(execSync).not.toHaveBeenCalled();
+      expect(state.updateTaskStatus).toHaveBeenCalledWith(
+        'acme/webapp',
+        42,
+        'pr-open',
+        { preview_url: 'https://pr-42.example.com' },
+      );
+    });
+
+    it('does nothing when neither up_command nor url_template is set', async () => {
       const config = makeConfig({
         preview: {
           mode: 'provider',

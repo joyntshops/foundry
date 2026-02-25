@@ -106,9 +106,9 @@ agent_label_map:
 
 preview:
   mode: "template"                        # "template" = URL from config, "provider" = URL from command output
-  url_template: "https://pr-{issue}.preview.example.com"   # mode:template only
-  # up_command: "deploy.sh up {branch}"   # mode:provider — must output URL or JSON { url }
-  # down_command: "deploy.sh down {branch}"  # mode:provider
+  url_template: "https://pr-{issue}.preview.example.com"   # URL template (works in both modes)
+  # up_command: "deploy.sh up {issue} {branch}"   # mode:provider — deploy command
+  # down_command: "deploy.sh down {issue} {branch}"  # mode:provider — teardown command
   comment: true                           # Post/update PR comment (default true)
 
 # ── GitHub Deployments (optional) ───────────────────────────────────
@@ -182,10 +182,10 @@ Optional mapping from issue label names to backend names. When an issue has a ma
 ### `preview`
 Configuration for preview/staging environments deployed per-task.
 
-- `mode` — `"template"` or `"provider"`. In `template` mode, the preview URL is constructed from `url_template`. In `provider` mode, the URL is read from the output of `up_command`.
-- `url_template` — URL template used when `mode` is `"template"`. Template variables: `{branch}` (branch name), `{issue}` (issue number), `{repo}` (owner/repo), `{pr_number}` (pull request number).
-- `up_command` — Shell command to spin up the preview environment (mode `"provider"` only). Must print a URL or JSON `{ "url": "..." }` to stdout. Template variables: `{branch}`, `{issue}`, `{repo}`, `{pr_number}`.
-- `down_command` — Shell command to tear down the preview environment (mode `"provider"` only). Same template variables as `up_command`.
+- `mode` — `"template"` or `"provider"`. In `template` mode, the preview URL is constructed from `url_template` (no command executed). In `provider` mode, `up_command` is executed to deploy; the URL is taken from command output if provided, otherwise falls back to `url_template`.
+- `url_template` — URL template. Works in **both** modes: primary URL source in `template` mode, fallback in `provider` mode (so the command doesn't need to output the URL). Template variables: `{branch}`, `{issue}`, `{repo}`, `{pr_number}`. Also exposed as env vars `FOUNDRY_BRANCH`, `FOUNDRY_ISSUE`, `FOUNDRY_REPO`, `FOUNDRY_PR_NUMBER`.
+- `up_command` — Shell command to spin up the preview environment (`provider` mode). If `url_template` is also set, the command doesn't need to output anything. Otherwise, it must print a URL or JSON `{ "url": "..." }` to stdout. Same template variables as `url_template`.
+- `down_command` — Shell command to tear down the preview environment (`provider` mode). Same template variables.
 - `comment` — Whether to post/update a PR comment with the preview URL. Default `true`.
 
 ### `github_deployments`

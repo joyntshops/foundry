@@ -126,15 +126,17 @@ export async function previewUp(config: FoundryConfig, task: TaskState): Promise
     pr_number: task.pr_number,
   };
 
-  // Resolve URL
+  // Resolve URL — run provider command first (if configured), then fall back to url_template
   let url: string | null = null;
 
-  if (config.preview.mode === 'template') {
+  if (config.preview.mode === 'provider' && config.preview.up_command) {
+    url = runProviderCommand(config.preview.up_command, vars);
+  }
+
+  // url_template works in both modes: primary source for template mode,
+  // fallback for provider mode (command doesn't need to output the URL)
+  if (!url && config.preview.url_template) {
     url = resolveTemplateUrl(config, vars);
-  } else if (config.preview.mode === 'provider') {
-    if (config.preview.up_command) {
-      url = runProviderCommand(config.preview.up_command, vars);
-    }
   }
 
   if (!url) {
