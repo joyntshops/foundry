@@ -125,6 +125,10 @@ export class MockGitHubClient implements GitHubClient {
     this.record('commentOnPR', [repo, prNumber, body]);
   }
 
+  async updateComment(repo: string, commentId: number, body: string): Promise<void> {
+    this.record('updateComment', [repo, commentId, body]);
+  }
+
   async getRepoSlug(): Promise<string> {
     this.record('getRepoSlug', []);
     return this.repoSlug;

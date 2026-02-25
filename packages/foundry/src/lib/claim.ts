@@ -99,14 +99,14 @@ export async function claimIssue(
 ): Promise<boolean> {
   const runnerId = state.getRunnerId();
 
-  // Step 1: Swap labels
-  try {
-    await github.removeLabel(config.repo, issue.number, config.labels.ready);
-  } catch {
-    // may already be removed
-  }
-  try { await github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
-  await github.addLabel(config.repo, issue.number, config.labels.in_progress);
+  // Step 1: Swap labels — remove ready/failed (only if present), add in-progress
+  const currentLabels = issue.labels.map(l => l.name);
+  await github.transitionLabels(
+    config.repo, issue.number,
+    [config.labels.ready, config.labels.failed],
+    [config.labels.in_progress],
+    currentLabels,
+  );
 
   // Step 2: Post claim comment
   await github.addComment(config.repo, issue.number, buildClaimComment(claimInfo));
@@ -136,19 +136,15 @@ export async function claimIssueOnly(
   claimInfo: ClaimInfo,
 ): Promise<boolean> {
   const runnerId = state.getRunnerId();
-  const issueLabels = new Set(issue.labels.map(l => l.name));
 
   // Step 1: Swap labels — remove claim/ready/failed (only if present), add in-progress
-  if (issueLabels.has(config.labels.claim)) {
-    try { await github.removeLabel(config.repo, issue.number, config.labels.claim); } catch {}
-  }
-  if (issueLabels.has(config.labels.ready)) {
-    try { await github.removeLabel(config.repo, issue.number, config.labels.ready); } catch {}
-  }
-  if (issueLabels.has(config.labels.failed)) {
-    try { await github.removeLabel(config.repo, issue.number, config.labels.failed); } catch {}
-  }
-  await github.addLabel(config.repo, issue.number, config.labels.in_progress);
+  const currentLabels = issue.labels.map(l => l.name);
+  await github.transitionLabels(
+    config.repo, issue.number,
+    [config.labels.claim, config.labels.ready, config.labels.failed],
+    [config.labels.in_progress],
+    currentLabels,
+  );
 
   // Step 2: Post claim-only comment
   await github.addComment(config.repo, issue.number, buildClaimOnlyComment(claimInfo));
@@ -182,9 +178,11 @@ export function isClaimedByUs(config: FoundryConfig, issue: number): boolean {
  * Removes in_progress/waiting_for_input, adds the failed label.
  */
 export async function markFailed(config: FoundryConfig, issue: number): Promise<void> {
-  try { await github.removeLabel(config.repo, issue, config.labels.in_progress); } catch {}
-  try { await github.removeLabel(config.repo, issue, config.labels.waiting_for_input); } catch {}
-  try { await github.addLabel(config.repo, issue, config.labels.failed); } catch {}
+  await github.transitionLabels(
+    config.repo, issue,
+    [config.labels.in_progress, config.labels.waiting_for_input],
+    [config.labels.failed],
+  );
 }
 
 function sleep(ms: number): Promise<void> {

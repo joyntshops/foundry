@@ -173,8 +173,11 @@ export async function runStop(target: string, opts?: { ready?: boolean }): Promi
   if (issueNum && config) {
     state.updateTaskStatus(config.repo, issueNum, 'stopped');
     if (opts?.ready) {
-      try { await github.removeLabel(config.repo, issueNum, config.labels.in_progress); } catch {}
-      try { await github.addLabel(config.repo, issueNum, config.labels.ready); } catch {}
+      await github.transitionLabels(
+        config.repo, issueNum,
+        [config.labels.in_progress],
+        [config.labels.ready],
+      );
       log.info(`Task #${issueNum} stopped. Label restored to ${config.labels.ready}.`);
     } else {
       await claim.markFailed(config, issueNum);
@@ -349,20 +352,8 @@ async function resetSingleTask(config: FoundryConfig, task: TaskState, issueNum:
     config.labels.ready_for_review,
   ];
   if (!dryRun) {
-    let currentLabels: string[] = [];
-    try {
-      const issue = await github.getIssue(config.repo, issueNum);
-      currentLabels = issue.labels.map(l => l.name);
-    } catch {}
-    const toRemove = stateLabels.filter(l => currentLabels.includes(l));
-    for (const label of toRemove) {
-      logAction(dryRun, `Remove label: ${label}`);
-      try { await github.removeLabel(config.repo, issueNum, label); } catch {}
-    }
-    if (!currentLabels.includes(config.labels.ready)) {
-      logAction(dryRun, `Add label: ${config.labels.ready}`);
-      try { await github.addLabel(config.repo, issueNum, config.labels.ready); } catch {}
-    }
+    logAction(dryRun, `Transition labels → ${config.labels.ready}`);
+    await github.transitionLabels(config.repo, issueNum, stateLabels, [config.labels.ready]);
   } else {
     logAction(dryRun, `Remove labels (if present): ${stateLabels.join(', ')}`);
     logAction(dryRun, `Add label: ${config.labels.ready}`);

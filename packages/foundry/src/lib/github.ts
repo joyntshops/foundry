@@ -142,6 +142,44 @@ export function getRepoSlug(): Promise<string> {
   return _client.getRepoSlug();
 }
 
+// ── Label transitions ────────────────────────────────────────────────────
+
+/**
+ * Transition labels on an issue: fetch current labels, remove only those
+ * present, add only those missing. One `getIssue` call replaces N blind
+ * DELETE requests that would 404 when a label isn't present.
+ *
+ * @param currentLabels - If the caller already has the label set (e.g. from
+ *   a recently-fetched GitHubIssue), pass it to skip the extra API call.
+ */
+export async function transitionLabels(
+  repo: string,
+  issue: number,
+  remove: string[],
+  add: string[],
+  currentLabels?: string[],
+): Promise<void> {
+  if (remove.length === 0 && add.length === 0) return;
+
+  let labels = currentLabels;
+  if (!labels) {
+    const iss = await _client.getIssue(repo, issue);
+    labels = iss.labels.map(l => l.name);
+  }
+
+  const present = new Set(labels);
+  for (const label of remove) {
+    if (present.has(label)) {
+      try { await _client.removeLabel(repo, issue, label); } catch {}
+    }
+  }
+  for (const label of add) {
+    if (!present.has(label)) {
+      await _client.addLabel(repo, issue, label);
+    }
+  }
+}
+
 // ── Pure logic (no interface needed) ─────────────────────────────────────
 
 export function hasLabel(issue: GitHubIssue, label: string): boolean {

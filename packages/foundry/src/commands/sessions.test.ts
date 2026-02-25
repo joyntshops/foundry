@@ -10,6 +10,7 @@ vi.mock('../config.js', () => ({
 vi.mock('../lib/state.js', () => ({
   getAllTasks: vi.fn(),
   removeTask: vi.fn(),
+  listTaskIssueNumbers: vi.fn(),
 }));
 vi.mock('../lib/tmux.js', () => ({
   sessionExists: vi.fn(),
@@ -31,9 +32,13 @@ vi.mock('../lib/github.js', () => ({
   removeLabel: vi.fn(),
   addLabel: vi.fn(),
   closeIssue: vi.fn(),
+  transitionLabels: vi.fn(),
 }));
 vi.mock('../lib/claim.js', () => ({
   markFailed: vi.fn(),
+}));
+vi.mock('../lib/preview.js', () => ({
+  previewDown: vi.fn(),
 }));
 vi.mock('../lib/log.js', () => ({
   info: vi.fn(),
@@ -141,8 +146,7 @@ describe('runReset', () => {
       expect(git.deleteBranch).not.toHaveBeenCalled();
       expect(git.deleteRemoteBranch).not.toHaveBeenCalled();
       expect(github.closePR).not.toHaveBeenCalled();
-      expect(github.removeLabel).not.toHaveBeenCalled();
-      expect(github.addLabel).not.toHaveBeenCalled();
+      expect(github.transitionLabels).not.toHaveBeenCalled();
       expect(state.removeTask).not.toHaveBeenCalled();
     });
 
@@ -162,13 +166,7 @@ describe('runReset', () => {
       vi.mocked(git.branchExists).mockReturnValue(true);
       vi.mocked(git.remoteBranchExists).mockReturnValue(true);
       vi.mocked(github.getPRStatus).mockResolvedValue({ state: 'OPEN', url: 'https://github.com/owner/repo/pull/10' });
-      vi.mocked(github.getIssue).mockResolvedValue({
-        number: 42, title: 'Fix the thing', body: '', state: 'open',
-        labels: [{ name: 'state:in-progress' }, { name: 'state:ready-for-human-review' }],
-        html_url: 'https://github.com/owner/repo/issues/42',
-      });
-      vi.mocked(github.removeLabel).mockResolvedValue();
-      vi.mocked(github.addLabel).mockResolvedValue();
+      vi.mocked(github.transitionLabels).mockResolvedValue();
       vi.mocked(github.closePR).mockResolvedValue();
     });
 
@@ -180,11 +178,12 @@ describe('runReset', () => {
       expect(git.deleteBranch).toHaveBeenCalledWith('feature/42-fix-the-thing', '/repo');
       expect(git.deleteRemoteBranch).toHaveBeenCalledWith('feature/42-fix-the-thing', '/repo');
       expect(github.closePR).toHaveBeenCalledWith('owner/repo', 10);
-      // Only removes labels actually present on the issue
-      expect(github.removeLabel).toHaveBeenCalledTimes(2);
-      expect(github.removeLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:in-progress');
-      expect(github.removeLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:ready-for-human-review');
-      expect(github.addLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:ready');
+      // transitionLabels called with all state labels to remove and ready to add
+      expect(github.transitionLabels).toHaveBeenCalledWith(
+        'owner/repo', 42,
+        ['state:in-progress', 'state:waiting-for-input', 'state:failed', 'state:done', 'state:ready-for-human-review'],
+        ['state:ready'],
+      );
       expect(state.removeTask).toHaveBeenCalledWith('owner/repo', 42);
     });
   });
@@ -200,13 +199,7 @@ describe('runReset', () => {
       vi.mocked(git.worktreeExists).mockReturnValue(false);
       vi.mocked(git.branchExists).mockReturnValue(false);
       vi.mocked(git.remoteBranchExists).mockReturnValue(false);
-      vi.mocked(github.getIssue).mockResolvedValue({
-        number: 42, title: 'Fix the thing', body: '', state: 'open',
-        labels: [{ name: 'state:failed' }],
-        html_url: 'https://github.com/owner/repo/issues/42',
-      });
-      vi.mocked(github.removeLabel).mockResolvedValue();
-      vi.mocked(github.addLabel).mockResolvedValue();
+      vi.mocked(github.transitionLabels).mockResolvedValue();
     });
 
     it('gracefully skips missing resources', async () => {
@@ -219,10 +212,12 @@ describe('runReset', () => {
       expect(git.deleteRemoteBranch).not.toHaveBeenCalled();
       expect(github.closePR).not.toHaveBeenCalled();
 
-      // Only removes labels actually present, then adds ready
-      expect(github.removeLabel).toHaveBeenCalledTimes(1);
-      expect(github.removeLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:failed');
-      expect(github.addLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:ready');
+      // transitionLabels still called (it handles the label filtering internally)
+      expect(github.transitionLabels).toHaveBeenCalledWith(
+        'owner/repo', 42,
+        ['state:in-progress', 'state:waiting-for-input', 'state:failed', 'state:done', 'state:ready-for-human-review'],
+        ['state:ready'],
+      );
       expect(state.removeTask).toHaveBeenCalledWith('owner/repo', 42);
     });
   });

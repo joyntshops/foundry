@@ -110,6 +110,7 @@ export interface TaskState {
   updated_at: string;
   runner_id: string;
   session_id?: string;
+  permission_mode?: string;
   input_request_count?: number;
   last_agent_message?: string;
   preview_url?: string;

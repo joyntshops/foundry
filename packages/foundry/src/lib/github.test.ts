@@ -117,6 +117,55 @@ describe('facade delegation', () => {
   });
 });
 
+describe('transitionLabels', () => {
+  let mock: MockGitHubClient;
+  let originalClient: github.GitHubClient;
+
+  beforeEach(() => {
+    originalClient = github.getClient();
+    mock = new MockGitHubClient();
+    github.setClient(mock);
+  });
+
+  afterEach(() => {
+    github.setClient(originalClient);
+  });
+
+  it('fetches current labels when not provided', async () => {
+    mock.issue = { number: 1, title: 'T', body: '', labels: [{ name: 'state:in-progress' }], html_url: '', state: 'open' };
+    await github.transitionLabels('o/r', 1, ['state:in-progress'], ['state:ready']);
+    expect(mock.getCalls('getIssue')).toHaveLength(1);
+    expect(mock.getCalls('removeLabel')).toEqual([{ method: 'removeLabel', args: ['o/r', 1, 'state:in-progress'] }]);
+    expect(mock.getCalls('addLabel')).toEqual([{ method: 'addLabel', args: ['o/r', 1, 'state:ready'] }]);
+  });
+
+  it('skips getIssue when currentLabels provided', async () => {
+    await github.transitionLabels('o/r', 1, ['state:in-progress'], ['state:ready'], ['state:in-progress']);
+    expect(mock.getCalls('getIssue')).toHaveLength(0);
+    expect(mock.getCalls('removeLabel')).toHaveLength(1);
+    expect(mock.getCalls('addLabel')).toHaveLength(1);
+  });
+
+  it('only removes labels that are present', async () => {
+    mock.issue = { number: 1, title: 'T', body: '', labels: [{ name: 'state:failed' }], html_url: '', state: 'open' };
+    await github.transitionLabels('o/r', 1, ['state:in-progress', 'state:failed', 'state:plan-review'], ['state:ready']);
+    expect(mock.getCalls('removeLabel')).toEqual([{ method: 'removeLabel', args: ['o/r', 1, 'state:failed'] }]);
+  });
+
+  it('only adds labels that are missing', async () => {
+    mock.issue = { number: 1, title: 'T', body: '', labels: [{ name: 'state:ready' }], html_url: '', state: 'open' };
+    await github.transitionLabels('o/r', 1, [], ['state:ready']);
+    expect(mock.getCalls('addLabel')).toHaveLength(0);
+  });
+
+  it('does nothing when both lists are empty', async () => {
+    await github.transitionLabels('o/r', 1, [], []);
+    expect(mock.getCalls('getIssue')).toHaveLength(0);
+    expect(mock.getCalls('removeLabel')).toHaveLength(0);
+    expect(mock.getCalls('addLabel')).toHaveLength(0);
+  });
+});
+
 describe('initClient', () => {
   let originalClient: github.GitHubClient;
   const originalEnv = process.env.FOUNDRY_GITHUB_BACKEND;

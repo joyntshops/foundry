@@ -252,6 +252,7 @@ async function spawnTask(config: FoundryConfig, issue: GitHubIssue, repoDir: str
     tmux_session: tmuxSession,
     agent_backend: backend.name,
     agent_command: agentCommand,
+    permission_mode: permissionMode,
     status: 'agent-running',
     claimed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -408,6 +409,7 @@ async function launchAgentFromClaimed(config: FoundryConfig, task: TaskState, me
 
   state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
     agent_command: agentCommand,
+    permission_mode: permissionMode,
   });
   log.success(`Agent launched from claimed state for #${task.issue} in ${task.tmux_session}`);
 }
@@ -549,10 +551,11 @@ async function handleCommandStop(config: FoundryConfig, task: TaskState, repoDir
 
   // Update state and labels
   state.updateTaskStatus(config.repo, task.issue, 'failed');
-  await claim.markFailed(config, task.issue);
-
-  // Also remove plan-review and waiting labels if present
-  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
+  await github.transitionLabels(
+    config.repo, task.issue,
+    [config.labels.in_progress, config.labels.waiting_for_input, config.labels.plan_review],
+    [config.labels.failed],
+  );
 
   // Post confirmation
   try {
@@ -581,12 +584,12 @@ async function handleCommandRestart(config: FoundryConfig, task: TaskState, repo
   state.removeTask(config.repo, task.issue);
 
   // Reset labels: remove all state labels, set back to ready
-  try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.failed); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.ready_for_review); } catch {}
-  await github.addLabel(config.repo, task.issue, config.labels.ready);
+  await github.transitionLabels(
+    config.repo, task.issue,
+    [config.labels.in_progress, config.labels.failed, config.labels.waiting_for_input,
+     config.labels.plan_review, config.labels.ready_for_review],
+    [config.labels.ready],
+  );
 
   // Post confirmation
   try {
@@ -633,7 +636,9 @@ async function handleCommandReplan(config: FoundryConfig, task: TaskState, repoD
   }
   tmux.sendKeys(task.tmux_session, `${agentCommand}; exit`);
 
-  state.updateTaskStatus(config.repo, task.issue, 'agent-running');
+  state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
+    permission_mode: permissionMode,
+  });
 
   // Post confirmation
   try {
@@ -714,11 +719,15 @@ async function handleCommandPlan(config: FoundryConfig, task: TaskState, message
   tmux.sendKeys(task.tmux_session, `${agentCommand}; exit`);
 
   // Remove waiting/plan-review labels, ensure in-progress
-  try { await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
-  try { await github.addLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+  await github.transitionLabels(
+    config.repo, task.issue,
+    [config.labels.waiting_for_input, config.labels.plan_review],
+    [config.labels.in_progress],
+  );
 
-  state.updateTaskStatus(config.repo, task.issue, 'agent-running');
+  state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
+    permission_mode: '--permission-mode plan',
+  });
 
   // Post confirmation
   try {
@@ -745,10 +754,11 @@ async function handleCommandStart(config: FoundryConfig, task: TaskState, messag
   state.removeTask(config.repo, task.issue);
 
   // Reset labels to ready
-  try { await github.removeLabel(config.repo, task.issue, config.labels.failed); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input); } catch {}
-  await github.addLabel(config.repo, task.issue, config.labels.ready);
+  await github.transitionLabels(
+    config.repo, task.issue,
+    [config.labels.failed, config.labels.in_progress, config.labels.waiting_for_input],
+    [config.labels.ready],
+  );
 
   // If a message was provided, post it as context for the agent
   if (message) {
@@ -822,12 +832,8 @@ async function checkCompletedAgents(config: FoundryConfig, repoDir: string): Pro
         ? 'origin/integration'
         : 'origin/main';
 
-      // Determine the permission mode this task was launched with
-      const taskPermissionMode = resolvePermissionMode(
-        (await github.getIssue(config.repo, task.issue)).labels.map(l => l.name),
-        config,
-      );
-      const outcome = agentOutput.determineOutcome(logPath, task.worktree, baseBranch, { permissionMode: taskPermissionMode });
+      // Use the permission mode persisted at launch time (not current labels, which may have changed)
+      const outcome = agentOutput.determineOutcome(logPath, task.worktree, baseBranch, { permissionMode: task.permission_mode });
       log.info(`Outcome for #${task.issue}: ${outcome.type}`);
 
       // Persist session_id for future resumes
@@ -897,8 +903,11 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
       // PR already exists (resumed agent pushed updates) — just update status
       log.success(`PR already exists for #${task.issue}: ${task.pr_url}`);
       state.updateTaskStatus(config.repo, task.issue, 'pr-open');
-      await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
-      try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+      await github.transitionLabels(
+        config.repo, task.issue,
+        [config.labels.in_progress],
+        [config.labels.ready_for_review],
+      );
       await triggerPreviewUp(config, task);
     } else {
       try {
@@ -914,8 +923,11 @@ async function handleCompleted(config: FoundryConfig, task: TaskState, repoDir: 
           pr_url: prUrl,
           pr_number: prNumber ?? undefined,
         });
-        await github.addLabel(config.repo, task.issue, config.labels.ready_for_review);
-        try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+        await github.transitionLabels(
+          config.repo, task.issue,
+          [config.labels.in_progress],
+          [config.labels.ready_for_review],
+        );
 
         // Post instructions on the new PR
         if (prNumber) {
@@ -1034,8 +1046,11 @@ async function handlePlanCompleted(config: FoundryConfig, task: TaskState, outco
   await postToConversationTarget(config, task, planComment);
 
   // Update labels
-  try { await github.addLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
-  try { await github.removeLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+  await github.transitionLabels(
+    config.repo, task.issue,
+    [config.labels.in_progress],
+    [config.labels.plan_review],
+  );
 
   state.updateTaskStatus(config.repo, task.issue, 'plan-review', {
     session_id: outcome.session_id ?? task.session_id,
@@ -1096,8 +1111,11 @@ async function findPlanResponse(config: FoundryConfig, task: TaskState): Promise
 
 async function executeApprovedPlan(config: FoundryConfig, task: TaskState, humanResponse: string, repoDir: string): Promise<void> {
   // Remove plan-review label, add in-progress
-  try { await github.removeLabel(config.repo, task.issue, config.labels.plan_review); } catch {}
-  try { await github.addLabel(config.repo, task.issue, config.labels.in_progress); } catch {}
+  await github.transitionLabels(
+    config.repo, task.issue,
+    [config.labels.plan_review],
+    [config.labels.in_progress],
+  );
 
   // Resume the agent in auto mode with the human's response
   // The resume_command template already uses --dangerously-skip-permissions
@@ -1178,11 +1196,11 @@ async function getPRComments(repo: string, prNumber: number): Promise<Array<{ bo
 
 async function resumeAgent(config: FoundryConfig, task: TaskState, humanResponse: string, repoDir: string): Promise<void> {
   // Remove waiting label
-  try {
-    await github.removeLabel(config.repo, task.issue, config.labels.waiting_for_input);
-  } catch {
-    // best effort
-  }
+  await github.transitionLabels(
+    config.repo, task.issue,
+    [config.labels.waiting_for_input],
+    [],
+  );
 
   // Kill old tmux session if somehow still alive
   tmux.killSession(task.tmux_session);
@@ -1230,7 +1248,9 @@ async function resumeAgent(config: FoundryConfig, task: TaskState, humanResponse
   tmux.createSession(task.tmux_session, task.worktree);
   tmux.sendKeys(task.tmux_session, `${command}; exit`);
 
-  state.updateTaskStatus(config.repo, task.issue, 'agent-running');
+  state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
+    permission_mode: '--dangerously-skip-permissions',
+  });
   log.success(`Resumed agent for #${task.issue} in ${task.tmux_session}`);
 }
 
@@ -1367,6 +1387,7 @@ async function resumeAgentForPR(config: FoundryConfig, task: TaskState, feedback
 
   state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
     input_request_count: inputRound,
+    permission_mode: '--dangerously-skip-permissions',
   });
 
   // Post confirmation on the PR
