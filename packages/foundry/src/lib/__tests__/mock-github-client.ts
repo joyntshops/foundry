@@ -2,7 +2,7 @@
  * MockGitHubClient — call-recording mock with configurable returns.
  * Used across all test suites.
  */
-import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts } from '../github-client.js';
+import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts } from '../github-client.js';
 import type { GitHubIssue, GitHubComment } from '../../types.js';
 
 export interface MockCall {
@@ -25,6 +25,7 @@ export class MockGitHubClient implements GitHubClient {
   prReviews: PRReview[] = [];
   prReviewComments: PRReviewComment[] = [];
   repoSlug = 'owner/repo';
+  checkRunId = 12345;
 
   // Error injection
   errors: Map<string, Error> = new Map();
@@ -127,6 +128,19 @@ export class MockGitHubClient implements GitHubClient {
 
   async updateComment(repo: string, commentId: number, body: string): Promise<void> {
     this.record('updateComment', [repo, commentId, body]);
+  }
+
+  async createReactionForIssueComment(repo: string, commentId: number, reaction: string): Promise<void> {
+    this.record('createReactionForIssueComment', [repo, commentId, reaction]);
+  }
+
+  async createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
+    this.record('createCheckRun', [repo, opts]);
+    return this.checkRunId;
+  }
+
+  async updateCheckRun(repo: string, checkRunId: number, opts: UpdateCheckRunOpts): Promise<void> {
+    this.record('updateCheckRun', [repo, checkRunId, opts]);
   }
 
   async getRepoSlug(): Promise<string> {

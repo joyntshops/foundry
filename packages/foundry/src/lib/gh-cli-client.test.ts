@@ -265,6 +265,17 @@ describe('GhCliClient', () => {
     });
   });
 
+  describe('createReactionForIssueComment', () => {
+    it('calls gh api POST for reaction', async () => {
+      mockExec.mockReturnValue('');
+      await client.createReactionForIssueComment('o/r', 789, 'eyes');
+      expect(mockExec).toHaveBeenCalledWith('gh',
+        ['api', '--method', 'POST', 'repos/o/r/issues/comments/789/reactions', '-f', 'content=eyes'],
+        expect.anything(),
+      );
+    });
+  });
+
   describe('closeIssue', () => {
     it('calls gh issue close', async () => {
       mockExec.mockReturnValue('');

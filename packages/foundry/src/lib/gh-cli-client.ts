@@ -4,7 +4,7 @@
  * Extracted from the original github.ts. All `gh` calls go through this class.
  */
 import { execFileSync } from 'node:child_process';
-import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts } from './github-client.js';
+import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
 
 function gh(args: string[], cwd?: string): string {
@@ -212,6 +212,42 @@ export class GhCliClient implements GitHubClient {
 
   async updateComment(repo: string, commentId: number, body: string): Promise<void> {
     gh(['api', '--method', 'PATCH', `repos/${repo}/issues/comments/${commentId}`, '-f', `body=${body}`]);
+  }
+
+  async createReactionForIssueComment(repo: string, commentId: number, reaction: string): Promise<void> {
+    gh(['api', '--method', 'POST', `repos/${repo}/issues/comments/${commentId}/reactions`, '-f', `content=${reaction}`]);
+  }
+
+  // ── Check Runs ─────────────────────────────────────────────────────────
+
+  async createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
+    const args: string[] = [
+      'api', '--method', 'POST', `repos/${repo}/check-runs`,
+      '-f', `name=${opts.name}`,
+      '-f', `head_sha=${opts.head_sha}`,
+    ];
+    if (opts.status) args.push('-f', `status=${opts.status}`);
+    if (opts.conclusion) args.push('-f', `conclusion=${opts.conclusion}`);
+    if (opts.output) {
+      args.push('-f', `output[title]=${opts.output.title}`);
+      args.push('-f', `output[summary]=${opts.output.summary}`);
+    }
+    const raw = gh(args);
+    const data = JSON.parse(raw);
+    return data.id;
+  }
+
+  async updateCheckRun(repo: string, checkRunId: number, opts: UpdateCheckRunOpts): Promise<void> {
+    const args: string[] = [
+      'api', '--method', 'PATCH', `repos/${repo}/check-runs/${checkRunId}`,
+    ];
+    if (opts.status) args.push('-f', `status=${opts.status}`);
+    if (opts.conclusion) args.push('-f', `conclusion=${opts.conclusion}`);
+    if (opts.output) {
+      args.push('-f', `output[title]=${opts.output.title}`);
+      args.push('-f', `output[summary]=${opts.output.summary}`);
+    }
+    gh(args);
   }
 
   // ── Repository ─────────────────────────────────────────────────────────

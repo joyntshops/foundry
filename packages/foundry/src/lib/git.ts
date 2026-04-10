@@ -134,6 +134,10 @@ export function repoRoot(cwd?: string): string {
   return git(['rev-parse', '--show-toplevel'], cwd);
 }
 
+export function headSha(cwd?: string): string {
+  return git(['rev-parse', 'HEAD'], cwd);
+}
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()

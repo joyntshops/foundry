@@ -16,6 +16,7 @@ describe('buildManifest', () => {
       pull_requests: 'write',
       contents: 'write',
       metadata: 'read',
+      checks: 'write',
     });
   });
 
@@ -26,6 +27,7 @@ describe('buildManifest', () => {
     expect(manifest.default_events).toContain('issues');
     expect(manifest.default_events).toContain('pull_request');
     expect(manifest.default_events).toContain('pull_request_review');
+    expect(manifest.default_events).toContain('issue_comment');
   });
 
   it('sets the correct redirect URL', () => {
@@ -41,6 +43,17 @@ describe('buildManifest', () => {
   it('sets public to false', () => {
     const manifest = buildManifest('Foundry Bot myorg', 'http://localhost:9999/callback');
     expect(manifest.public).toBe(false);
+  });
+
+  it('sets webhook URL when serverUrl is provided', () => {
+    const manifest = buildManifest('Foundry Bot myorg', 'http://localhost:9999/callback', 'https://foundry.example.com/webhook');
+    expect(manifest.hook_attributes.url).toBe('https://foundry.example.com/webhook');
+    expect(manifest.hook_attributes.active).toBe(false);
+  });
+
+  it('uses placeholder webhook URL when serverUrl is omitted', () => {
+    const manifest = buildManifest('Foundry Bot myorg', 'http://localhost:9999/callback');
+    expect(manifest.hook_attributes.url).toBe('https://example.com/unused');
   });
 });
 

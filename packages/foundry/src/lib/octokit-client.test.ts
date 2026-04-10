@@ -31,6 +31,13 @@ function createMockOctokit() {
         listReviews: vi.fn(),
         listReviewComments: vi.fn(),
       },
+      reactions: {
+        createForIssueComment: vi.fn(),
+      },
+      checks: {
+        create: vi.fn(),
+        update: vi.fn(),
+      },
       git: {
         deleteRef: vi.fn(),
       },
@@ -306,6 +313,16 @@ describe('OctokitClient', () => {
       await client.updateComment('o/r', 123, 'updated body');
       expect(octokit.rest.issues.updateComment).toHaveBeenCalledWith({
         owner: 'o', repo: 'r', comment_id: 123, body: 'updated body',
+      });
+    });
+  });
+
+  describe('createReactionForIssueComment', () => {
+    it('calls reactions.createForIssueComment', async () => {
+      octokit.rest.reactions.createForIssueComment.mockResolvedValue({});
+      await client.createReactionForIssueComment('o/r', 456, 'eyes');
+      expect(octokit.rest.reactions.createForIssueComment).toHaveBeenCalledWith({
+        owner: 'o', repo: 'r', comment_id: 456, content: 'eyes',
       });
     });
   });

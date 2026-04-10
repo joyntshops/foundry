@@ -62,6 +62,14 @@ export interface FoundryConfig {
   poll_interval_seconds: number;              // default 30
   github_backend: 'gh-cli' | 'octokit';      // default "gh-cli"
 
+  worker?: {
+    type: 'local-tmux';               // extensible to 'container', 'cloud', etc.
+  };
+
+  state_store?: {
+    type: 'file';                     // extensible to 'sqlite', 'postgres', etc.
+  };
+
   preview?: {
     mode: 'template' | 'provider';
     url_template?: string;

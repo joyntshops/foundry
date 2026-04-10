@@ -31,11 +31,14 @@ interface AppManifest {
 /**
  * Build the GitHub App manifest JSON.
  */
-export function buildManifest(name: string, redirectUrl: string): AppManifest {
+export function buildManifest(name: string, redirectUrl: string, serverUrl?: string): AppManifest {
   return {
     name,
     url: 'https://github.com/joyntshops/foundry',
-    hook_attributes: { url: 'https://example.com/unused', active: false },
+    hook_attributes: {
+      url: serverUrl ?? 'https://example.com/unused',
+      active: false,
+    },
     redirect_url: redirectUrl,
     public: false,
     default_permissions: {
@@ -43,8 +46,9 @@ export function buildManifest(name: string, redirectUrl: string): AppManifest {
       pull_requests: 'write',
       contents: 'write',
       metadata: 'read',
+      checks: 'write',
     },
-    default_events: ['issues', 'pull_request', 'pull_request_review'],
+    default_events: ['issues', 'pull_request', 'pull_request_review', 'issue_comment'],
   };
 }
 
@@ -240,10 +244,14 @@ export function repoSlugFromRemote(): string | null {
   }
 }
 
+interface SetupBotOptions {
+  serverUrl?: string;
+}
+
 /**
  * Main setup-bot flow.
  */
-export async function runSetupBot(): Promise<void> {
+export async function runSetupBot(opts: SetupBotOptions = {}): Promise<void> {
   const config = loadConfigSafe();
   const repo = config?.repo || repoSlugFromRemote();
   if (!repo) {
@@ -263,11 +271,13 @@ export async function runSetupBot(): Promise<void> {
   let slug: string | undefined;
   let privateKey: string | undefined;
   let installationId: number | undefined;
+  let webhookSecret: string | undefined;
 
   if (fs.existsSync(jsonPath) && fs.existsSync(pemPath)) {
     const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
     appId = meta.appId;
     slug = meta.slug;
+    webhookSecret = meta.webhookSecret;
     privateKey = fs.readFileSync(pemPath, 'utf-8');
 
     if (meta.installationId) {
@@ -327,7 +337,7 @@ export async function runSetupBot(): Promise<void> {
 
     // Build manifest
     const appName = `Foundry Bot ${org}`;
-    const manifest = buildManifest(appName, redirectUrl);
+    const manifest = buildManifest(appName, redirectUrl, opts.serverUrl);
 
     // Serve the form page
     const manifestJsonForJs = JSON.stringify(JSON.stringify(manifest));
@@ -388,8 +398,9 @@ export async function runSetupBot(): Promise<void> {
     appId = appData.id;
     slug = appData.slug;
     privateKey = appData.pem;
+    webhookSecret = appData.webhook_secret;
 
-    const metaJson = { appId, slug };
+    const metaJson = { appId, slug, webhookSecret };
     fs.writeFileSync(jsonPath, JSON.stringify(metaJson, null, 2) + '\n');
     log.success(`App created: ${slug} (ID: ${appId})`);
   }
@@ -420,7 +431,7 @@ export async function runSetupBot(): Promise<void> {
 
   // ── Step 3: Save final state and verify ──
 
-  const fullMeta = { appId, slug, installationId };
+  const fullMeta = { appId, slug, installationId, webhookSecret };
   fs.writeFileSync(jsonPath, JSON.stringify(fullMeta, null, 2) + '\n');
 
   const ok = await verifyAppAuth(String(appId), privateKey!, String(installationId));
@@ -436,4 +447,10 @@ export async function runSetupBot(): Promise<void> {
   log.info(`  FOUNDRY_GITHUB_APP_ID=${appId}`);
   log.info(`  FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH=/path/to/key.pem`);
   log.info(`  FOUNDRY_GITHUB_APP_INSTALLATION_ID=${installationId}`);
+  if (webhookSecret) {
+    log.info(`  FOUNDRY_GITHUB_WEBHOOK_SECRET=<stored in ${jsonPath}>`);
+  }
+  log.info('');
+  log.info('NOTE: If you previously created this App, you may need to update its permissions');
+  log.info('via the GitHub UI to include "Checks: Write" and subscribe to "Issue comment" events.');
 }
