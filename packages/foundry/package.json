@@ -2,7 +2,7 @@
   "name": "@joyntshops/foundry",
   "version": "0.1.28",
   "description": "Developer automation: GitHub Issues → agent sessions → validated PRs",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "bin": {
     "foundry": "./dist/cli.js"
   },
