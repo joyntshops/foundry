@@ -311,6 +311,36 @@ describe('previewUp', () => {
       );
     });
 
+    it('prefers url_template over command output when both are set', async () => {
+      // Exactly what happened on the first real run: `gh workflow run` printed
+      // the Actions run URL, which was mistaken for the preview URL.
+      mockExecWithSha('https://github.com/acme/webapp/actions/runs/123456\n');
+
+      const config = makeConfig({
+        preview: {
+          mode: 'provider',
+          up_command: 'gh workflow run preview-up.yml -f pr={pr_number}',
+          url_template: 'https://acme.github.io/webapp/previews/pr-{pr_number}/',
+        },
+      });
+      const task = makeTask();
+
+      await previewUp(config, task);
+
+      // The deploy command still ran...
+      expect(execSync).toHaveBeenCalledWith(
+        'gh workflow run preview-up.yml -f pr=99',
+        expect.anything(),
+      );
+      // ...but the template is the URL.
+      expect(state.updateTaskStatus).toHaveBeenCalledWith(
+        'acme/webapp',
+        42,
+        'pr-open',
+        { preview_url: 'https://acme.github.io/webapp/previews/pr-99/' },
+      );
+    });
+
     it('returns early when command output is not a URL', async () => {
       mockExecWithSha('some random output\n');
 

@@ -49,7 +49,7 @@ preview:
   down_command: "./scripts/teardown-preview.sh {issue} {branch}"
 ```
 
-When `url_template` is also set, the command doesn't need to output anything -- the URL comes from the template. This is the common case: the command deploys, the URL is predictable.
+When `url_template` is also set, the URL always comes from the template and the command's output is ignored. This is the common case: the command deploys, the URL is predictable. It also matters for commands like `gh workflow run`, which print an Actions run URL that is a URL but not the preview.
 
 If `url_template` is **not** set, the command must print the URL to stdout as either:
 - A **plain URL** (`https://...`) -- the last line starting with `http://` or `https://` is used.
