@@ -39,9 +39,6 @@ on:
   pull_request:        { types: [closed] }
   pull_request_review: { types: [submitted] }
 
-concurrency:
-  group: foundry-${{ github.event.issue.number || github.event.pull_request.number }}
-  cancel-in-progress: false
 
 # The job's built-in token does all of Foundry's GitHub writes.
 permissions:
@@ -63,6 +60,9 @@ jobs:
       (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested')
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    concurrency:                                       # job-level, see gotchas
+      group: foundry-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
     env:
       FOUNDRY_APP_ID: ${{ secrets.FOUNDRY_APP_ID }}   # secrets aren't readable in step `if:`
     steps:
@@ -105,7 +105,7 @@ No GitHub credentials are *needed*. Inside a job, GitHub has already established
 - **A named bot.** Comments, labels, and PRs appear as `<YourApp>[bot]` instead of `github-actions[bot]`.
 - **CI on the PRs Foundry opens.** Pushes and PRs made with the built-in token do not trigger `push` or `pull_request` workflows, so a repo's CI would silently skip agent PRs and required checks could never pass. With an App token they run normally.
 
-The App from `foundry setup-bot` works. It needs **issues, pull_requests, contents, actions, deployments: write**; add `actions` and `deployments` in the App's settings and accept the permission update on the installation.
+The App from `foundry setup-bot` works. It needs **issues, pull_requests, contents, checks, actions, deployments: write**. Older Apps lack `checks` (verification results are posted as a Check Run; without it you get a non-fatal warning), `actions` (preview dispatch), and `deployments`. Add them in the App's settings, then **accept the permission update on the installation**: changing the App definition only creates a request, and jobs keep minting tokens with the old set until an org owner accepts it.
 
 The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` context is not available in a step's `if:`. Surfacing the App ID (not the key) into `env` makes the check possible; `steps.app.outputs.token || github.token` falls back when the step was skipped.
 
@@ -116,6 +116,8 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 **Consecutive transitions happen inside one job.** Claim → agent → verify → PR → preview-up is a single run. A new job is only needed when a human acts. This keeps runner spin-ups to one per human interaction.
 
 **Concurrency groups replace the claim race.** `concurrency.group: foundry-<issue>` makes GitHub serialise runs per issue. The claim protocol's one-second sleep and read-back existed for two pollers racing; here they cannot. The structured claim comment is kept as the audit record and as the source for task recovery.
+
+**Declare concurrency on the job, not the workflow.** GitHub keeps at most one *pending* run per group and cancels the rest. A workflow-level group admits every triggered run before the job `if:` is evaluated, so Foundry's own comments and labels (filtered out by `if:`) still enter the group, queue behind the active run, and cancel each other. A pending human `@foundry` command could be the one cancelled. Job-level concurrency is evaluated only for jobs that pass `if:`. Seen on the first real run as two "cancelled" Foundry runs.
 
 **Task state is rebuilt from GitHub every run.** The file store under `~/.joynt-foundry/` is empty in every fresh job. `lib/task-recovery.ts` reconstructs a `TaskState` from the latest claim comment (`<!-- foundry-claim-block -->`), the issue's current `state:*` label, the PR for the branch, and the preview comment (`<!-- foundry-preview -->`). This is why the single-state-label invariant (`setStateLabel`) is load-bearing: recovery reads the label to learn the status.
 
