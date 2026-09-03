@@ -20,6 +20,12 @@ export interface WorkerHandle {
 
   /** Interactively attach to the worker (optional — not all backends support it) */
   attach?(): Promise<void>;
+
+  /**
+   * Wait for the worker to exit and resolve with its exit code (optional —
+   * only in-process workers can offer this). Null if unknown or killed.
+   */
+  wait?(): Promise<number | null>;
 }
 
 export interface WorkerSpawnOpts {

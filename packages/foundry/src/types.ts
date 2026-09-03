@@ -63,7 +63,7 @@ export interface FoundryConfig {
   github_backend: 'gh-cli' | 'octokit';      // default "gh-cli"
 
   worker?: {
-    type: 'local-tmux';               // extensible to 'container', 'cloud', etc.
+    type: 'local-tmux' | 'subprocess'; // 'subprocess' is used by `foundry action`
   };
 
   state_store?: {
