@@ -34,9 +34,10 @@ program
 program
   .command('setup-bot')
   .description('Create a GitHub App for Foundry and install it on your repos')
-  .action(async () => {
+  .option('--server-url <url>', 'Webhook server URL for the GitHub App')
+  .action(async (opts) => {
     const { runSetupBot } = await import('./commands/setup-bot.js');
-    await runSetupBot();
+    await runSetupBot(opts);
   });
 
 // ── foundry init ──────────────────────────────────────────────────────
@@ -181,6 +182,18 @@ previewCmd
   .action(async (issue: string) => {
     const { runPreviewStatus } = await import('./commands/preview.js');
     await runPreviewStatus(issue);
+  });
+
+// ── foundry serve ────────────────────────────────────────────────────
+
+program
+  .command('serve')
+  .description('Start webhook server for event-driven operation')
+  .option('--port <port>', 'Server port', '3000')
+  .option('--host <host>', 'Server host', '0.0.0.0')
+  .action(async (opts) => {
+    const { runServe } = await import('./commands/serve.js');
+    await runServe(opts);
   });
 
 // ── foundry sync-integration ──────────────────────────────────────────

@@ -27,6 +27,34 @@ export interface CreatePROpts {
   base: string;
 }
 
+export interface CheckRunAnnotation {
+  path: string;
+  start_line: number;
+  end_line: number;
+  annotation_level: 'notice' | 'warning' | 'failure';
+  message: string;
+}
+
+export interface CheckRunOutput {
+  title: string;
+  summary: string;
+  annotations?: CheckRunAnnotation[];
+}
+
+export interface CreateCheckRunOpts {
+  name: string;
+  head_sha: string;
+  status?: 'queued' | 'in_progress' | 'completed';
+  conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'timed_out' | 'action_required';
+  output?: CheckRunOutput;
+}
+
+export interface UpdateCheckRunOpts {
+  status?: 'queued' | 'in_progress' | 'completed';
+  conclusion?: 'success' | 'failure' | 'neutral' | 'cancelled' | 'timed_out' | 'action_required';
+  output?: CheckRunOutput;
+}
+
 // ── GitHubClient interface ───────────────────────────────────────────────
 
 export interface GitHubClient {
@@ -60,6 +88,13 @@ export interface GitHubClient {
 
   // Comments
   updateComment(repo: string, commentId: number, body: string): Promise<void>;
+
+  // Reactions
+  createReactionForIssueComment(repo: string, commentId: number, reaction: string): Promise<void>;
+
+  // Check Runs
+  createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number>;
+  updateCheckRun(repo: string, checkRunId: number, opts: UpdateCheckRunOpts): Promise<void>;
 
   // Repository
   getRepoSlug(): Promise<string>;

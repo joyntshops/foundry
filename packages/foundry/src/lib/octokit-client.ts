@@ -12,7 +12,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { execFileSync } from 'node:child_process';
-import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts } from './github-client.js';
+import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
 
 const STATE_DIR = path.join(os.homedir(), '.joynt-foundry');
@@ -117,6 +117,13 @@ type OctokitLike = {
       merge(p: any): Promise<any>;
       listReviews(p: any): Promise<any>;
       listReviewComments(p: any): Promise<any>;
+    };
+    reactions: {
+      createForIssueComment(p: any): Promise<any>;
+    };
+    checks: {
+      create(p: any): Promise<any>;
+      update(p: any): Promise<any>;
     };
     repos: {
       createDeployment(p: any): Promise<any>;
@@ -466,6 +473,47 @@ export class OctokitClient implements GitHubClient {
       repo: repoName,
       comment_id: commentId,
       body,
+    });
+  }
+
+  async createReactionForIssueComment(repo: string, commentId: number, reaction: string): Promise<void> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    await ok.rest.reactions.createForIssueComment({
+      owner,
+      repo: repoName,
+      comment_id: commentId,
+      content: reaction,
+    });
+  }
+
+  // ── Check Runs ─────────────────────────────────────────────────────────
+
+  async createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    const { data } = await ok.rest.checks.create({
+      owner,
+      repo: repoName,
+      name: opts.name,
+      head_sha: opts.head_sha,
+      status: opts.status,
+      conclusion: opts.conclusion,
+      output: opts.output,
+    });
+    return data.id;
+  }
+
+  async updateCheckRun(repo: string, checkRunId: number, opts: UpdateCheckRunOpts): Promise<void> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    await ok.rest.checks.update({
+      owner,
+      repo: repoName,
+      check_run_id: checkRunId,
+      status: opts.status,
+      conclusion: opts.conclusion,
+      output: opts.output,
     });
   }
 

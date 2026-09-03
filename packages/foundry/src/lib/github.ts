@@ -5,13 +5,13 @@
  * call-sites (`github.addLabel(...)`) keep working. Tests inject a mock
  * via `setClient()`.
  */
-import type { GitHubClient, CreatePROpts, PRReview, PRReviewComment } from './github-client.js';
+import type { GitHubClient, CreatePROpts, PRReview, PRReviewComment, CreateCheckRunOpts, UpdateCheckRunOpts } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
 import type { FoundryConfig } from '../types.js';
 import { GhCliClient } from './gh-cli-client.js';
 
 // Re-export types that consumers may need
-export type { PRReview, PRReviewComment, CreatePROpts } from './github-client.js';
+export type { PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts, CheckRunAnnotation, CheckRunOutput } from './github-client.js';
 export type { GitHubClient } from './github-client.js';
 
 // ── Singleton ────────────────────────────────────────────────────────────
@@ -136,6 +136,18 @@ export function commentOnPR(repo: string, prNumber: number, body: string): Promi
 
 export function updateComment(repo: string, commentId: number, body: string): Promise<void> {
   return _client.updateComment(repo, commentId, body);
+}
+
+export function createReactionForIssueComment(repo: string, commentId: number, reaction: string): Promise<void> {
+  return _client.createReactionForIssueComment(repo, commentId, reaction);
+}
+
+export function createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
+  return _client.createCheckRun(repo, opts);
+}
+
+export function updateCheckRun(repo: string, checkRunId: number, opts: UpdateCheckRunOpts): Promise<void> {
+  return _client.updateCheckRun(repo, checkRunId, opts);
 }
 
 export function getRepoSlug(): Promise<string> {

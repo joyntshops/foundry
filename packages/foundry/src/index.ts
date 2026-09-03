@@ -13,3 +13,5 @@ export type {
 
 export { loadConfig, loadConfigSafe, findConfigPath } from './config.js';
 export { resolveBackend, resolveBackendForIssue } from './backends/index.js';
+export type { StateStore } from './lib/state-store.js';
+export { resolveStateStore, FileStateStore } from './lib/stores/index.js';
