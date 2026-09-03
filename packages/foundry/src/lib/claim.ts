@@ -6,7 +6,7 @@ import * as state from './state.js';
 import { setStateLabel } from './labels.js';
 import type { FoundryConfig, GitHubIssue, TaskState } from '../types.js';
 
-interface ClaimInfo {
+export interface ClaimInfo {
   runner_id: string;
   branch: string;
   worktree: string;
@@ -74,7 +74,7 @@ function buildClaimOnlyComment(info: ClaimInfo): string {
   ].join('\n');
 }
 
-function parseClaimComment(body: string): ClaimInfo | null {
+export function parseClaimComment(body: string): ClaimInfo | null {
   if (!body.includes('<!-- foundry-claim-block -->')) return null;
   const extract = (field: string): string => {
     const re = new RegExp('\\| ' + field + ' \\| `([^`]+)` \\|');

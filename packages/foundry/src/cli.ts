@@ -63,6 +63,18 @@ program
     await runRunner(opts);
   });
 
+// ── foundry action ────────────────────────────────────────────────────
+
+program
+  .command('action')
+  .description('Run the state machine for one GitHub event (GitHub Actions entry point)')
+  .option('--event-name <name>', 'GitHub event name (default: $GITHUB_EVENT_NAME)')
+  .option('--event-path <path>', 'Path to the event JSON payload (default: $GITHUB_EVENT_PATH)')
+  .action(async (opts) => {
+    const { runAction } = await import('./commands/action.js');
+    await runAction(opts);
+  });
+
 // ── foundry status ────────────────────────────────────────────────────
 
 program

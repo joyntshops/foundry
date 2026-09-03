@@ -12,8 +12,7 @@ import type { Worker } from './worker.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as log from './log.js';
-import * as agentOutput from './agent-output.js';
-import * as git from './git.js';
+import { buildAgentCompletedEvent } from './completion.js';
 import type { FoundryConfig, GitHubComment, TaskState } from '../types.js';
 import type { FoundryEvent } from './events.js';
 import { EventHandler } from './event-handler.js';
@@ -424,15 +423,7 @@ export class Poller {
       const handle = worker.handleFor(task.tmux_session);
       if (!(await handle.isRunning())) {
         log.info(`Agent for #${task.issue} has exited. Analyzing outcome...`);
-
-        const logPath = path.join(state.getLogDir(this.config.repo, task.issue), 'agent.log');
-        const baseBranch = git.remoteBranchExists('integration', this.repoDir)
-          ? 'origin/integration'
-          : 'origin/main';
-
-        const outcome = agentOutput.determineOutcome(logPath, task.worktree, baseBranch, { permissionMode: task.permission_mode });
-
-        events.push({ type: 'agent_completed', task, outcome });
+        events.push(buildAgentCompletedEvent(this.config, this.repoDir, task));
       }
     }
 

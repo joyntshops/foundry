@@ -1,0 +1,89 @@
+name: 'Joynt Foundry'
+description: 'GitHub Issues → coding agent → verified pull request. Runs the Foundry state machine for one GitHub event.'
+author: 'Joynt Shops'
+
+branding:
+  icon: 'git-pull-request'
+  color: 'orange'
+
+inputs:
+  github-token:
+    description: >-
+      Token Foundry uses for every GitHub write (labels, comments, PRs, workflow
+      dispatch). Use a GitHub App installation token, not the default
+      GITHUB_TOKEN: writes made with GITHUB_TOKEN do not trigger further
+      workflow runs, so the state machine would stall after one transition.
+    required: true
+  claude-code-oauth-token:
+    description: 'Claude subscription token from `claude setup-token` (Pro/Max/Team/Enterprise). Bills your plan, not the API.'
+    required: false
+  anthropic-api-key:
+    description: 'Claude API key. Alternative to claude-code-oauth-token.'
+    required: false
+  install-claude-code:
+    description: 'Install the Claude Code CLI on the runner before running.'
+    required: false
+    default: 'true'
+  node-version:
+    description: 'Node.js version for Foundry itself.'
+    required: false
+    default: '20'
+
+outputs:
+  issue:
+    description: 'Issue number the event was about, if any.'
+    value: ${{ steps.run.outputs.issue }}
+  status:
+    description: 'Task status after this event (e.g. pr-open, waiting-for-input, failed).'
+    value: ${{ steps.run.outputs.status }}
+  branch:
+    description: 'Feature branch for the task.'
+    value: ${{ steps.run.outputs.branch }}
+  pr-url:
+    description: 'Pull request URL, once one exists.'
+    value: ${{ steps.run.outputs.pr-url }}
+  log-dir:
+    description: 'Directory holding the agent transcript for this task. Upload it as an artifact if you want to keep it.'
+    value: ${{ steps.run.outputs.log-dir }}
+  log-path:
+    description: 'Path to the agent stream-json transcript.'
+    value: ${{ steps.run.outputs.log-path }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: ${{ github.action_path }}/package-lock.json
+
+    - name: Build Foundry
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        npm ci --no-audit --no-fund
+        npx tsc -p packages/foundry/tsconfig.json
+
+    - name: Install Claude Code
+      if: inputs.install-claude-code == 'true'
+      shell: bash
+      run: npm install -g @anthropic-ai/claude-code
+
+    - name: Configure git identity
+      shell: bash
+      run: |
+        git config user.name  >/dev/null 2>&1 || git config user.name  "foundry[bot]"
+        git config user.email >/dev/null 2>&1 || git config user.email "foundry[bot]@users.noreply.github.com"
+
+    - name: Run Foundry
+      id: run
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        FOUNDRY_GITHUB_BACKEND: octokit
+        CI: '1'
+      run: node "$GITHUB_ACTION_PATH/packages/foundry/dist/cli.js" action
