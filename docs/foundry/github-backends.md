@@ -1,206 +1,93 @@
-# GitHub Backends
+# GitHub Identity
 
-> **Running as a GitHub Action?** You need none of this. The job's built-in token authenticates every call; the Action sets `FOUNDRY_GITHUB_BACKEND=octokit` and passes the token as `GITHUB_TOKEN`. A GitHub App is optional there, for a named bot identity or so Foundry's pushes trigger other workflows. See [GitHub Action](github-action.md). The rest of this page is about the always-on runner.
+How Foundry authenticates to GitHub, and which API client it uses. Two separate questions.
 
-Foundry supports two GitHub API backends. Choose based on your environment.
+## Identity
 
-There are two separate concerns:
+### Under the Action: the job's token, or a GitHub App
 
-1. **Which backend** to use (`gh-cli` or `octokit`) — controlled by `FOUNDRY_GITHUB_BACKEND`
-2. **Authentication** — how the chosen backend authenticates with GitHub
+A GitHub Actions job already has an identity. `${{ github.token }}` is scoped to the repo, carries the permissions the workflow grants, and dies with the job. The workflow template passes it to the Action, and that is enough for every call Foundry makes: labels, comments, PRs, pushes, `gh workflow run` for previews, deployment records.
 
-## Quick Start — Recommended: `foundry setup-bot`
+A GitHub App is optional and adds two things:
 
-The fastest way to authenticate Foundry is with a GitHub App. One command, two browser clicks:
+- **A named bot.** Comments, labels, and PRs appear as `<YourApp>[bot]` instead of `github-actions[bot]`.
+- **Triggering other workflows.** Pushes and PRs made with the built-in token do not start `push` or `pull_request` workflows, so a repo's CI would silently skip agent PRs. Pushes made as an App do.
+
+The template mints an App token when `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets exist and falls back to the built-in token otherwise. See [GitHub Action](github-action.md#secrets).
+
+### Creating the App: `foundry setup-bot`
 
 ```bash
 foundry setup-bot
 ```
 
-This:
-- Creates a **GitHub App** scoped to your org with the right permissions
-- Installs it on your repos
-- Saves credentials locally (`~/.joynt-foundry/github-app-{org}.*`)
-- Auto-selects the `octokit` backend — no config changes needed
+Two browser clicks: GitHub's App manifest page, then the install page. Credentials land in `~/.joynt-foundry/github-app-{org}.json` and `.pem`. Copy the App ID and the `.pem` contents into the two secrets.
 
-After setup, `foundry run` authenticates automatically. Actions appear as `Foundry Bot[bot]` with a distinct identity — not your personal account.
-
-**No `gh auth login`, no `GITHUB_TOKEN`, no env vars needed for local dev.**
-
-## Choosing a Backend
-
-| Backend | Best for | Auth method |
-|---------|----------|-------------|
-| `octokit` (recommended) | All environments — auto-selected after `setup-bot` | GitHub App (auto-managed tokens) |
-| `gh-cli` | Quick start without `setup-bot` | `gh auth login` (personal account) |
-
-### Setting the backend
-
-Priority order (highest wins):
-
-1. `--github-backend <backend>` CLI flag
-2. `FOUNDRY_GITHUB_BACKEND` environment variable — values: `gh-cli` or `octokit`
-3. `github_backend` field in `.joynt-foundry.yml`
-4. Auto-detect: if GitHub App credentials exist for the current org → `octokit`
-5. Default: `gh-cli`
-
-Examples:
-
-```yaml
-# .joynt-foundry.yml
-github_backend: "octokit"
-```
+The manifest grants **issues, pull_requests, contents, checks: write** and **metadata: read**. Add **actions: write** (preview dispatch) and **deployments: write** (deployment records) in the App's settings afterwards, then **accept the permission update on the installation**. Changing the App only creates a request; installations keep the old set until an org owner accepts it. Check what jobs actually get:
 
 ```bash
-# Environment variable
-export FOUNDRY_GITHUB_BACKEND=octokit
-
-# CLI flag
-foundry run --github-backend octokit
+gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="YOUR_APP") | .permissions'
 ```
 
-## Authentication
+### For the CLI: resolution order
 
-### GitHub App auth (recommended)
+CLI commands (`reset`, `preview`, `review`, `release`, `init`) run on your machine and resolve credentials in this order:
 
-After running `foundry setup-bot`, credentials are stored per-org:
+1. `FOUNDRY_GITHUB_APP_ID` + `FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH` + `FOUNDRY_GITHUB_APP_INSTALLATION_ID` environment variables
+2. Saved App credentials from `setup-bot` for the repo's org
+3. `GITHUB_TOKEN` environment variable
+4. `gh auth token`
 
-- `~/.joynt-foundry/github-app-{org}.json` — App ID, installation ID, slug
-- `~/.joynt-foundry/github-app-{org}.pem` — private key (mode `0600`)
+With 3 or 4, actions appear as you.
 
-The `octokit` backend uses `@octokit/auth-app` to generate short-lived installation tokens from these credentials. Tokens are auto-refreshed — no manual management.
+## API client
 
-**Auth resolution order** (octokit backend):
+Foundry has two interchangeable GitHub clients behind one interface.
 
-1. **Env vars** (CI): `FOUNDRY_GITHUB_APP_ID` + `FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH` + `FOUNDRY_GITHUB_APP_INSTALLATION_ID`
-2. **Saved credentials**: `~/.joynt-foundry/github-app-{org}.*` (after `setup-bot`)
-3. **Personal token fallback**: `GITHUB_TOKEN` env var
-4. **gh CLI fallback**: `gh auth token`
+| Client | How it talks to GitHub | Notes |
+|---|---|---|
+| `octokit` (default) | `@octokit/rest` in-process | Required for App auth and for the Deployments API |
+| `gh-cli` | Shells out to `gh` | Handy locally if `gh` is already logged in; no App auth, no deployments |
 
-### CI configuration
+Selection, highest wins:
 
-For CI environments, set three env vars instead of running `setup-bot`:
+1. `--github-backend <client>` flag
+2. `FOUNDRY_GITHUB_BACKEND` environment variable
+3. `github_backend` in `.joynt-foundry.yml`
+4. Default: `octokit`
 
-```bash
-export FOUNDRY_GITHUB_APP_ID=12345
-export FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH=/path/to/key.pem
-export FOUNDRY_GITHUB_APP_INSTALLATION_ID=67890
-```
+The Action sets `FOUNDRY_GITHUB_BACKEND=octokit`.
 
-These take precedence over saved credentials.
+## Permissions reference
 
-### Personal token fallback
+| Call | Permission |
+|---|---|
+| Labels, issue comments, close issue | `issues: write` |
+| Open PR, PR comments, close PR | `pull-requests: write` |
+| Push branches, delete branches | `contents: write` |
+| `gh workflow run` for preview up/down | `actions: write` |
+| Deployment records for previews | `deployments: write` |
+| Check run with verification results | `checks: write` (non-fatal warning without it) |
 
-If no GitHub App is configured, the `octokit` backend falls back to personal tokens:
-
-```bash
-# Option 1: explicit token
-export GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-
-# Option 2: reuse gh CLI auth
-gh auth login   # octokit will call `gh auth token` automatically
-```
-
-### `gh-cli` backend
-
-No token config needed. Uses whatever `gh auth login` has configured. Actions appear as the `gh`-authenticated user.
-
-## Required Permissions
-
-### GitHub App (via `setup-bot`)
-
-`setup-bot` requests these automatically:
-- **Issues**: Read & Write
-- **Pull requests**: Read & Write
-- **Contents**: Read & Write
-- **Checks**: Read & Write (verification results as a Check Run)
-- **Metadata**: Read
-
-Add these by hand if you use preview environments; Apps created by older versions lack them:
-- **Actions**: Read & Write (`gh workflow run` for preview up/down)
-- **Deployments**: Read & Write (GitHub Deployment records)
-
-After changing an App's permissions, **accept the update on the installation** (org settings → GitHub Apps → the App). Until then tokens carry the old set.
-
-### Personal token (fallback)
-
-**Classic PAT:**
-- `repo` scope
-
-**Fine-grained PAT:**
-- **Issues**: Read & Write
-- **Pull requests**: Read & Write
-- **Metadata**: Read (auto-included)
-
-## Token Lifecycle
-
-**GitHub App tokens** (recommended): Managed automatically by `@octokit/auth-app`. JWTs are generated from the private key, exchanged for short-lived installation tokens, and refreshed transparently.
-
-**Personal tokens**: Resolved once at startup. If a token expires mid-session:
-- API calls will log errors
-- The runner retries on the next poll cycle
-- Restart the runner to re-resolve the token
+With the built-in token, grant these in the workflow's `permissions:` block. With an App, grant them on the App and accept on the installation. For a personal token used by the CLI, the classic `repo` scope covers all of them.
 
 ---
 
 <details>
-<summary>Advanced: manual GitHub App setup</summary>
+<summary>Manual GitHub App setup (instead of setup-bot)</summary>
 
-If you prefer to create the GitHub App manually instead of using `foundry setup-bot`:
-
-### Step 1: Create the App
-
-1. Go to your **GitHub org's** settings: `https://github.com/organizations/YOUR_ORG/settings/apps`
-   - For a personal repo (no org), go to: `https://github.com/settings/apps`
-2. Click **New GitHub App**
-3. Fill in:
-   - **Name**: e.g., `Foundry Bot` (must be globally unique on GitHub)
-   - **Homepage URL**: anything (e.g., your repo URL)
-   - **Webhooks**: uncheck **"Active"** unless you will run `foundry serve`, which receives them
-4. Under **Permissions → Repository permissions**, grant:
-   - **Issues**: Read & Write
-   - **Pull requests**: Read & Write
-   - **Contents**: Read & Write (for branch operations)
-   - **Metadata**: Read (auto-selected)
-5. Click **Create GitHub App**
-6. On the next page, note the **App ID** (a number near the top)
-7. Scroll to **Private keys** → click **Generate a private key**
-   - This downloads a `.pem` file
-
-### Step 2: Install the App on Your Repo
-
-1. From the App's settings page, click **Install App** in the left sidebar
-2. Choose the org (or your personal account) that owns the repo
-3. Select **"Only select repositories"** → pick the repo Foundry manages
-4. Click **Install**
-5. After installation, note the **Installation ID** from the URL:
-   `https://github.com/organizations/YOUR_ORG/settings/installations/INSTALLATION_ID`
-
-### Step 3: Save credentials manually
-
-Create the credential files in `~/.joynt-foundry/`:
+1. Org settings → Developer settings → GitHub Apps → **New GitHub App**. For a personal repo, https://github.com/settings/apps.
+2. Name it (globally unique), set any homepage URL, uncheck **Webhooks → Active**.
+3. Repository permissions: Issues, Pull requests, Contents, Checks, Actions, Deployments: Read & Write. Metadata: Read.
+4. Create. Note the **App ID**. Under Private keys, **Generate a private key** and download the `.pem`.
+5. **Install App** → choose the org → **Only select repositories** → the repos Foundry manages. The installation ID is the last path segment of the resulting URL.
+6. Add `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` as secrets. For CLI use, save them locally:
 
 ```bash
-# Save the private key (ensure secure permissions)
-cp /path/to/downloaded.pem ~/.joynt-foundry/github-app-YOUR_ORG.pem
-chmod 600 ~/.joynt-foundry/github-app-YOUR_ORG.pem
-
-# Create the metadata file
-cat > ~/.joynt-foundry/github-app-YOUR_ORG.json << 'EOF'
-{
-  "appId": 12345,
-  "installationId": 67890,
-  "slug": "foundry-bot"
-}
+cp downloaded.pem ~/.joynt-foundry/github-app-YOUR_ORG.pem && chmod 600 ~/.joynt-foundry/github-app-YOUR_ORG.pem
+cat > ~/.joynt-foundry/github-app-YOUR_ORG.json <<'EOF'
+{ "appId": 12345, "installationId": 67890, "slug": "your-app" }
 EOF
-```
-
-Or set env vars for CI:
-
-```bash
-export FOUNDRY_GITHUB_APP_ID=12345
-export FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH=/path/to/your-app.private-key.pem
-export FOUNDRY_GITHUB_APP_INSTALLATION_ID=67890
 ```
 
 </details>

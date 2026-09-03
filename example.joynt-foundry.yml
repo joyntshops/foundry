@@ -2,8 +2,7 @@
 #
 # Copy to .joynt-foundry.yml at your repo root. `foundry init` generates the
 # same file with project-specific defaults filled in. Every key shown with its
-# default can be omitted. Keys marked "runner only" are ignored by the GitHub
-# Action, where the job is the isolation boundary.
+# default can be omitted.
 
 # ── Required ──────────────────────────────────────────────────────────
 repo: "your-org/your-repo"
@@ -28,12 +27,9 @@ mode_labels:
 
 # ── Branches and worktrees ────────────────────────────────────────────
 branch_template: "feature/{issue}-{slug}"   # {issue} number, {slug} from title
-worktree_base: "./wts"                      # add to .gitignore
-tmux_template: "foundry-{issue}"            # runner only
+worktree_base: "./wts"                      # inside the checkout; add to .gitignore
 
-# ── Concurrency ───────────────────────────────────────────────────────
-max_sessions: 4            # runner only; the Action uses a per-issue concurrency group
-max_verify_parallel: 1     # runner only
+# ── Limits ────────────────────────────────────────────────────────────
 max_input_rounds: 3        # give up after this many human-input / review rounds
 
 # ── Verification: run in the worktree before any PR is opened ─────────
@@ -48,12 +44,12 @@ integration_rebuild: "npm run build"
 
 # ── Comment commands (defaults shown) ─────────────────────────────────
 comment_triggers:
-  continue: "@foundry continue"   # resume/relaunch with a message
+  continue: "@foundry continue"   # relaunch with a message
   plan: "@foundry plan"           # relaunch in plan mode
-  replan: "@foundry replan"       # kill, re-read the issue, relaunch
+  replan: "@foundry replan"       # re-read the issue, relaunch
   restart: "@foundry restart"     # discard everything, re-queue
   start: "@foundry start"         # re-queue a failed/stopped task
-  stop: "@foundry stop"           # kill and mark failed
+  stop: "@foundry stop"           # mark failed
   claim: "@foundry claim"         # claim without starting the agent
 
 # ── Unified versioning ────────────────────────────────────────────────
@@ -62,9 +58,6 @@ version_sources:
   - "package.json"
   # - "packages/api/package.json"
 tag_prefix: "v"
-
-# ── Polling (runner only) ─────────────────────────────────────────────
-poll_interval_seconds: 30
 
 # ── GitHub API client ─────────────────────────────────────────────────
 github_backend: "octokit"      # or "gh-cli"; env FOUNDRY_GITHUB_BACKEND overrides
@@ -76,17 +69,12 @@ agent_backends:
   claude-code:
     type: command
     # {permission_mode} is filled from the issue's mode:* label.
-    # Under the Action, CLAUDE_CODE_OAUTH_TOKEN in the job env authenticates the CLI.
+    # CLAUDE_CODE_OAUTH_TOKEN in the job environment authenticates the CLI.
     command: >-
       claude {permission_mode}
       -p "You are working on issue #{issue_number}: {title}.
       The issue is at {issue_url}. Read the issue body and implement the task.
       When done, create a commit with your changes."
-      --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log
-    # Runner only: resumes a live session. Sessions do not survive Actions jobs.
-    resume_command: >-
-      claude --dangerously-skip-permissions
-      -p '{prompt}' --resume "{session_id}"
       --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log
 
   # Any CLI works. Examples:
@@ -105,6 +93,7 @@ agent_label_map:
 # Foundry orchestrates; a command or workflow you own does the deploy.
 # When url_template is set it is always the preview URL; command output is ignored.
 # Variables: {branch} {issue} {repo} {pr_number} {sha}; also env FOUNDRY_*.
+# The job has `gh` and GH_TOKEN, so dispatching a workflow is the common shape.
 # preview:
 #   mode: "provider"               # "template" = URL only, no command
 #   url_template: "https://your-org.github.io/your-repo/previews/pr-{pr_number}/"
@@ -118,9 +107,3 @@ agent_label_map:
 #   environment: "preview"
 #   production: false
 #   auto_inactive: true
-
-# ── Execution (runner only; the Action always uses "subprocess") ─────
-# worker:
-#   type: "local-tmux"          # or "subprocess"
-# state_store:
-#   type: "file"                # ~/.joynt-foundry/

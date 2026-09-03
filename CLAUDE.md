@@ -1,26 +1,28 @@
 # Joynt Foundry
 
-Orchestration layer that turns GitHub Issues into verified PRs by running a coding agent. This file is for whoever works on the repo next, agent or human. It records what is not obvious from the code.
+Orchestration layer that turns GitHub Issues into verified PRs by running a coding agent. Foundry is a GitHub Action; there is no daemon. This file is for whoever works on the repo next, agent or human. It records what is not obvious from the code.
 
 ## Shape of the repo
 
 ```
-action.yml                   composite GitHub Action; the recommended way to run Foundry
+action.yml                   composite GitHub Action; how Foundry runs
 packages/foundry/src/
   cli.ts                     commander entry; every command is lazy-imported
-  commands/                  one file per CLI command; `action.ts` and `run.ts` are the two entry points
-  lib/event-handler.ts       the state machine; every transition lives here, used by both modes
-  lib/events.ts              FoundryEvent union; Poller, webhook.ts, and action.ts all produce these
-  lib/poller.ts              runner mode: turns GitHub polling into events
-  lib/webhook.ts             maps GitHub webhook / Actions payloads into events
-  lib/task-recovery.ts       rebuilds TaskState from GitHub when local state is empty (Action mode)
+  commands/action.ts         the Action entry point: event → recover task → EventHandler → wait on agent
+  commands/reset.ts          undo a task on GitHub from any checkout (remote-only)
+  commands/preview.ts        preview up/down/status by hand; rebuilds the task from GitHub
+  commands/init.ts, setup-bot.ts, review.ts, release.ts, sync.ts
+  lib/event-handler.ts       the state machine; every transition lives here
+  lib/events.ts              FoundryEvent union; webhook.ts and action.ts produce these
+  lib/webhook.ts             maps a GitHub event payload into FoundryEvents
+  lib/task-recovery.ts       rebuilds TaskState from GitHub (claim comment, label, PR, preview comment)
   lib/labels.ts              setStateLabel: the single-state-label invariant
   lib/claim.ts               claim protocol + structured claim comment (the task's durable record)
-  lib/completion.ts          exited agent → AgentCompletedEvent; shared by poller and action
+  lib/completion.ts          exited agent → AgentCompletedEvent
   lib/agent-output.ts        parses Claude Code stream-json; classifies outcomes
   lib/preview.ts             preview up/down; url_template always wins over command output
-  lib/workers/               how the agent process runs: local-tmux (runner) or subprocess (Action)
-  lib/stores/                StateStore; file-store is the only implementation
+  lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
+  lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/
   backends/                  agent backends; `command` is the only type, fully generic
 docs/foundry/                user docs; github-action.md carries the load-bearing decisions
 ```
@@ -42,10 +44,19 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 ## Invariants to keep
 
 - **One `state:*` label per issue.** Always go through `setStateLabel`. Task recovery reads the label to learn the status, so a second label is a corrupted record.
-- **Action mode is stateless.** Every job starts with an empty file store. Anything a later job needs must be on GitHub: labels, the claim comment, the PR, the preview comment. If you add task state, add it to the claim or status comment and to `task-recovery.ts`.
-- **Finish transitions in-job.** Events caused by the job's token do not start other runs, except `workflow_dispatch` and `repository_dispatch`. A transition that relies on "the next run will pick it up" stalls under the Action. `continueIfRequeued` in `commands/action.ts` is the pattern.
-- **Both modes share `EventHandler`.** Put behavior there, not in `run.ts` or `action.ts`. Those are composition only.
+- **Every job starts with nothing.** Anything a later job needs must be on GitHub before this one exits: labels, the claim comment, the status comment, the PR, the preview comment. If you add task state, add it to a comment and to `task-recovery.ts`.
+- **Finish transitions in-job.** Events caused by the job's token do not start other runs, except `workflow_dispatch` and `repository_dispatch`. A transition that relies on "the next run will pick it up" stalls. `continueIfRequeued` in `commands/action.ts` is the pattern.
+- **Behavior goes in `EventHandler`.** `action.ts` is composition only.
 - **Foundry is not the agent.** Backends are configured commands. Do not special-case Claude beyond parsing its transcript format.
+- **`url_template` wins.** Provider command output is only read as a URL when there is no template. `gh workflow run` prints a run URL and this bit us.
+
+## Known gaps, in priority order
+
+1. When a job ends with the task waiting for input, the agent's partial work is not pushed and the next job has no worktree to resume into. Fix: push (WIP-commit if dirty) before exit; `ensureWorktree` on resume.
+2. No verify-to-agent retry loop; a verification failure stops the task.
+3. `@foundry` commands on PR comments resolve to the PR number, not the issue.
+4. No `if: cancelled()` label cleanup in the template.
+5. `foundry review` is manual; automating it on PR approval is the Week 3 target.
 
 ## Testing a change for real
 

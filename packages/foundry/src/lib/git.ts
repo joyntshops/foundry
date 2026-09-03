@@ -157,8 +157,9 @@ export function resolveWorktreePath(base: string, issue: number, title: string, 
   return path.resolve(repoDir, base, name);
 }
 
-export function resolveTmuxName(template: string, issue: number): string {
-  return template.replace('{issue}', String(issue));
+/** Stable id for a task's worker process. Stored as `tmux_session` on the task for historical reasons. */
+export function workerId(issue: number): string {
+  return `foundry-${issue}`;
 }
 
 export function getLatestTag(prefix: string, cwd?: string): string | null {

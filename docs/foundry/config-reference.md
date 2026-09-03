@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Foundry is configured via `.joynt-foundry.yml` at the repo root. The same file serves both the GitHub Action and the always-on runner; keys that only make sense for a long-lived runner are marked **runner only** and are ignored by the Action.
+Foundry is configured via `.joynt-foundry.yml` at the repo root of the repository the Action runs in.
 
 ## Full Schema
 
@@ -31,13 +31,10 @@ mode_labels:
 # ── Branching & Worktrees ────────────────────────────────────────────
 
 branch_template: "feature/{issue}-{slug}"   # {issue} = number, {slug} = slugified title
-worktree_base: "./wts"                      # Relative to repo root or absolute
-tmux_template: "foundry-{issue}"            # {issue} = number
+worktree_base: "./wts"                      # Relative to repo root; add to .gitignore
 
-# ── Concurrency ──────────────────────────────────────────────────────
+# ── Limits ───────────────────────────────────────────────────────────
 
-max_sessions: 4                         # Max concurrent agent sessions
-max_verify_parallel: 1                  # Max concurrent verification pipelines
 max_input_rounds: 3                     # Max human-input rounds before giving up
 
 # ── Verification ─────────────────────────────────────────────────────
@@ -69,18 +66,6 @@ version_sources:                        # Ordered list of version file paths
   - "packages/web/package.json"
 
 tag_prefix: "v"                         # Release tag prefix (e.g. v1.2.3)
-
-# ── Polling (runner only) ────────────────────────────────────────────
-
-poll_interval_seconds: 30               # Seconds between issue polls in `foundry run`
-
-# ── Execution (runner only) ──────────────────────────────────────────
-
-worker:
-  type: "local-tmux"                    # or "subprocess"; the Action always uses subprocess
-
-state_store:
-  type: "file"                          # the only implementation; ~/.joynt-foundry/
 
 # ── GitHub Backend ──────────────────────────────────────────────────
 
@@ -145,15 +130,6 @@ Template for feature branch names. Variables: `{issue}` (number), `{slug}` (slug
 ### `worktree_base`
 Base directory for git worktrees. Resolved relative to the repo root. Default: `./wts` (inside the repo, gitignored).
 
-### `tmux_template` (runner only)
-Template for tmux session names. Variable: `{issue}` (number). The Action uses the same string as the worker id but no tmux is involved.
-
-### `max_sessions` (runner only)
-Maximum number of concurrent agent sessions on one runner. Under the Action, concurrency is one job per issue via the workflow's `concurrency` group.
-
-### `max_verify_parallel` (runner only)
-Maximum number of concurrent verification pipelines. Default 1 to avoid resource contention during builds.
-
 ### `max_input_rounds`
 Maximum number of human-input rounds (including PR review feedback rounds) before the agent gives up and marks the task failed. Default 3.
 
@@ -164,22 +140,13 @@ Ordered list of shell commands run in the task worktree before opening a PR. Fai
 Shell command run after merging into integration (via `foundry review`).
 
 ### `comment_triggers`
-Strings matched in issue comments to trigger agent commands. The runner checks on every poll cycle; the Action reacts to the `issue_comment` event immediately. Commands that accept a message (`continue`, `start`, `plan`) match as a prefix — everything after the trigger string becomes the message. See [Controlling Foundry](workflows.md#controlling-foundry) for the full command reference.
+Strings matched in issue comments to trigger agent commands; each comment is an `issue_comment` event and a job. Commands that accept a message (`continue`, `start`, `plan`) match as a prefix — everything after the trigger string becomes the message. See [Controlling Foundry](workflows.md#controlling-foundry) for the full command reference.
 
 ### `version_sources`
 **Ordered** list of version file paths (relative to repo root). All are bumped to the same version on `foundry release`. The first entry is the primary version source. Supported file types: `package.json`, `Cargo.toml`, `pyproject.toml`.
 
 ### `tag_prefix`
 Prefix for release tags. Default `v` produces tags like `v1.2.3`.
-
-### `poll_interval_seconds` (runner only)
-How often `foundry run` polls GitHub for ready issues. `foundry serve` and the Action are event-driven.
-
-### `worker` (runner only)
-How the agent process is executed. `local-tmux` (default) runs it in a tmux session you can `foundry attach` to. `subprocess` runs it as a child of the Foundry process, streaming output to stdout. `foundry action` always uses `subprocess` regardless of this setting.
-
-### `state_store` (runner only)
-Where task state is persisted. `file` (the only implementation) writes atomically under `~/.joynt-foundry/`. The Action starts every job with an empty store and rebuilds tasks from GitHub.
 
 ### `default_agent_backend`
 Name of the backend to use when no label-based match is found.
@@ -189,6 +156,8 @@ Map of backend definitions. Each backend has:
 - `type`: Must be `command`
 - `command`: Shell command with template variable interpolation
 - `env` (optional): Environment variables (also support template interpolation)
+
+There is no resume command. When a human answers or requests changes, the agent is relaunched with the message as its brief; sessions do not survive jobs.
 
 ### `agent_label_map`
 Optional mapping from issue label names to backend names. When an issue has a matching label, that backend is used instead of the default.

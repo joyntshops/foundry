@@ -1,6 +1,6 @@
 # Foundry as a GitHub Action
 
-`foundry action` runs the Foundry state machine for **one GitHub event** and exits. Packaged as the composite action at the repo root (`action.yml`), it replaces the always-on `foundry run` daemon with jobs that GitHub starts on demand. Nothing has to stay awake. State lives on GitHub.
+`foundry action` runs the Foundry state machine for **one GitHub event** and exits. Packaged as the composite action at the repo root (`action.yml`), it is how Foundry runs: jobs that GitHub starts on demand. Nothing has to stay awake. State lives on GitHub.
 
 This page is written for whoever picks this up next, human or agent. It records the non-obvious decisions so they are not rediscovered.
 
@@ -89,7 +89,7 @@ jobs:
           if-no-files-found: ignore
 ```
 
-`.joynt-foundry.yml` in the target repo is read exactly as `foundry run` reads it. The `worker` setting is ignored: the action always uses the `subprocess` worker.
+`.joynt-foundry.yml` in the target repo configures everything; see [Configuration Reference](config-reference.md).
 
 ## Secrets
 
@@ -98,7 +98,7 @@ jobs:
 | `CLAUDE_CODE_OAUTH_TOKEN` | yes | From `claude setup-token`. Runs bill the subscription of the person who generated it, not the API. Tied to that person; for an org-shared secret Anthropic recommends `ANTHROPIC_API_KEY` instead. |
 | `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY` | no | A GitHub App installed on the repo. When present, the template mints an installation token and Foundry acts as the App. When absent, the job's built-in token is used. |
 
-No GitHub credentials are *needed*. Inside a job, GitHub has already established identity: `${{ github.token }}` is scoped to the repo, carries the permissions the workflow grants, and dies with the job. This is the difference from `foundry run` on a laptop or server, which had no identity and needed `setup-bot` to create a GitHub App for it.
+No GitHub credentials are *needed*. Inside a job, GitHub has already established identity: `${{ github.token }}` is scoped to the repo, carries the permissions the workflow grants, and dies with the job.
 
 ### What the App adds
 
@@ -115,13 +115,13 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **Consecutive transitions happen inside one job.** Claim → agent → verify → PR → preview-up is a single run. A new job is only needed when a human acts. This keeps runner spin-ups to one per human interaction.
 
-**Concurrency groups replace the claim race.** `concurrency.group: foundry-<issue>` makes GitHub serialise runs per issue. The claim protocol's one-second sleep and read-back existed for two pollers racing; here they cannot. The structured claim comment is kept as the audit record and as the source for task recovery.
+**Concurrency groups replace the claim race.** `concurrency.group: foundry-<issue>` makes GitHub serialise runs per issue. The claim protocol's one-second sleep and read-back were written for two runners racing to claim; here that cannot happen. The structured claim comment is kept as the audit record and as the source for task recovery.
 
 **Declare concurrency on the job, not the workflow.** GitHub keeps at most one *pending* run per group and cancels the rest. A workflow-level group admits every triggered run before the job `if:` is evaluated, so Foundry's own comments and labels (filtered out by `if:`) still enter the group, queue behind the active run, and cancel each other. A pending human `@foundry` command could be the one cancelled. Job-level concurrency is evaluated only for jobs that pass `if:`. Seen on the first real run as two "cancelled" Foundry runs.
 
 **Task state is rebuilt from GitHub every run.** The file store under `~/.joynt-foundry/` is empty in every fresh job. `lib/task-recovery.ts` reconstructs a `TaskState` from the latest claim comment (`<!-- foundry-claim-block -->`), the issue's current `state:*` label, the PR for the branch, and the preview comment (`<!-- foundry-preview -->`). This is why the single-state-label invariant (`setStateLabel`) is load-bearing: recovery reads the label to learn the status.
 
-**Session resume does not survive jobs.** `claude --resume <session_id>` needs the session file from the runner that started it. That runner is gone. `@foundry continue` therefore relaunches the agent with the human's message and the issue as context rather than resuming. The `resume_command` in config is effectively unused under the action.
+**There is no session resume.** `claude --resume <session_id>` would need the session file from the runner that started it, and that runner is gone. `@foundry continue`, plan approval, and review feedback all relaunch the agent with the human's message and the issue as context.
 
 **Cancelling from the Actions UI is the supported way to stop a run.** `@foundry stop` on a running job cannot reach into the job. Press Cancel on the run. A cleanup step that fixes labels on cancel is a planned addition; until then, `@foundry restart` or `@foundry start` re-queues.
 

@@ -2,7 +2,11 @@
 /**
  * Joynt Foundry CLI
  *
- * Developer automation: GitHub Issues → agent sessions → validated PRs.
+ * GitHub Issues → coding agent → verified pull requests.
+ *
+ * Foundry runs as a GitHub Action (`foundry action`, packaged by action.yml at
+ * the repo root). The other commands set a repo up, operate on tasks from any
+ * checkout, or manage the integration branch.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -17,10 +21,10 @@ const program = new Command();
 
 program
   .name('foundry')
-  .description('Joynt Foundry — developer automation via GitHub Issues and pluggable coding agents')
+  .description('Joynt Foundry — GitHub Issues → coding agent → verified pull requests')
   .version(pkg.version)
   .option('-v, --verbose', 'Enable verbose/debug output')
-  .option('--github-backend <backend>', 'GitHub backend: gh-cli or octokit (env: FOUNDRY_GITHUB_BACKEND)')
+  .option('--github-backend <backend>', 'GitHub API client: gh-cli or octokit (env: FOUNDRY_GITHUB_BACKEND)')
   .hook('preAction', async (thisCommand) => {
     const opts = thisCommand.opts();
     if (opts.verbose) setVerbose(true);
@@ -29,22 +33,11 @@ program
     await initClient(config);
   });
 
-// ── foundry setup-bot ────────────────────────────────────────────────
-
-program
-  .command('setup-bot')
-  .description('Create a GitHub App for Foundry and install it on your repos')
-  .option('--server-url <url>', 'Webhook server URL for the GitHub App')
-  .action(async (opts) => {
-    const { runSetupBot } = await import('./commands/setup-bot.js');
-    await runSetupBot(opts);
-  });
-
-// ── foundry init ──────────────────────────────────────────────────────
+// ── Setup ─────────────────────────────────────────────────────────────
 
 program
   .command('init')
-  .description('Scaffold .joynt-foundry.yml and create required GitHub labels')
+  .description('Scaffold .joynt-foundry.yml, create the labels, create the integration branch')
   .option('--skip-labels', 'Skip creating GitHub labels')
   .option('--clean-labels', 'Remove non-Foundry labels before creating Foundry labels')
   .action(async (opts) => {
@@ -52,18 +45,16 @@ program
     await runInit(opts);
   });
 
-// ── foundry run ───────────────────────────────────────────────────────
-
 program
-  .command('run')
-  .description('Start the runner loop: poll → claim → spawn agent sessions')
-  .option('--once', 'Run a single poll cycle then exit')
+  .command('setup-bot')
+  .description('Create a GitHub App so Foundry acts under its own name (optional under the Action)')
+  .option('--server-url <url>', 'Webhook URL for the GitHub App (unused by the Action)')
   .action(async (opts) => {
-    const { runRunner } = await import('./commands/run.js');
-    await runRunner(opts);
+    const { runSetupBot } = await import('./commands/setup-bot.js');
+    await runSetupBot(opts);
   });
 
-// ── foundry action ────────────────────────────────────────────────────
+// ── The Action entry point ────────────────────────────────────────────
 
 program
   .command('action')
@@ -75,106 +66,24 @@ program
     await runAction(opts);
   });
 
-// ── foundry status ────────────────────────────────────────────────────
+// ── Operate on a task from any checkout ───────────────────────────────
 
 program
-  .command('status')
-  .description('Show active tasks, sessions, branches, PRs, and agent backends')
-  .action(async () => {
-    const { runStatus } = await import('./commands/status.js');
-    await runStatus();
-  });
-
-// ── foundry sessions ──────────────────────────────────────────────────
-
-program
-  .command('sessions')
-  .description('Show unified task dashboard (all tracked tasks and their resources)')
-  .option('--all', 'Include terminal tasks (done/failed/stopped)')
-  .option('--local', 'Skip GitHub API calls, only show local resource state')
-  .action(async (opts) => {
-    const { runSessions } = await import('./commands/sessions.js');
-    await runSessions(opts);
-  });
-
-// ── foundry attach ────────────────────────────────────────────────────
-
-program
-  .command('attach <target>')
-  .description('Attach to a Foundry agent session (issue number or session name)')
-  .action(async (target) => {
-    const { runAttach } = await import('./commands/sessions.js');
-    await runAttach(target);
-  });
-
-// ── foundry stop ──────────────────────────────────────────────────────
-
-program
-  .command('stop <target>')
-  .description('Stop a Foundry agent session (issue number or session name)')
-  .option('--ready', 'Restore the state:ready label so the runner re-claims immediately')
-  .action(async (target, opts) => {
-    const { runStop } = await import('./commands/sessions.js');
-    await runStop(target, opts);
-  });
-
-// ── foundry reset ─────────────────────────────────────────────────────
-
-program
-  .command('reset [issue]')
-  .description('Tear down all resources (local + remote) for a task and restore to state:ready')
+  .command('reset <issue>')
+  .description('Remove the branch, PR, and preview for a task and set it back to state:ready')
   .option('--force', 'Actually execute (default is dry-run)')
-  .option('--all', 'Reset all known tasks (iterates task directories)')
   .action(async (issue, opts) => {
-    if (!issue && !opts.all) {
-      console.error('Error: provide an issue number, or use --all to reset all tasks.');
-      process.exit(1);
-    }
-    const { runReset } = await import('./commands/sessions.js');
+    const { runReset } = await import('./commands/reset.js');
     await runReset(issue, opts);
   });
 
-// ── foundry prune ─────────────────────────────────────────────────────
-
-program
-  .command('prune')
-  .description('Clean local runner resources (tmux, worktrees, local branches, state) for completed/failed tasks')
-  .option('--all', 'Actually remove (default is dry-run)')
-  .option('--force', 'Alias for --all (backwards compat)')
-  .action(async (opts) => {
-    const { runPrune } = await import('./commands/prune.js');
-    await runPrune(opts);
-  });
-
-// ── foundry review ────────────────────────────────────────────────────
-
-program
-  .command('review <target>')
-  .description('Review and merge a PR into integration (PR number or URL)')
-  .action(async (target) => {
-    const { runReview } = await import('./commands/review.js');
-    await runReview(target);
-  });
-
-// ── foundry release ───────────────────────────────────────────────────
-
-program
-  .command('release <type>')
-  .description('Bump version across all version_sources (patch|minor|major)')
-  .action(async (type) => {
-    const { runRelease } = await import('./commands/release.js');
-    await runRelease(type);
-  });
-
-// ── foundry preview ──────────────────────────────────────────────────
-
 const previewCmd = program
   .command('preview')
-  .description('Manage preview environments for tasks');
+  .description('Manage a task\'s preview environment by hand');
 
 previewCmd
   .command('up <issue>')
-  .description('Trigger preview deployment for a task')
+  .description('Trigger the preview deployment for a task')
   .action(async (issue: string) => {
     const { runPreviewUp } = await import('./commands/preview.js');
     await runPreviewUp(issue);
@@ -182,7 +91,7 @@ previewCmd
 
 previewCmd
   .command('down <issue>')
-  .description('Tear down preview environment for a task')
+  .description('Tear down the preview environment for a task')
   .action(async (issue: string) => {
     const { runPreviewDown } = await import('./commands/preview.js');
     await runPreviewDown(issue);
@@ -190,29 +99,33 @@ previewCmd
 
 previewCmd
   .command('status <issue>')
-  .description('Show preview environment status for a task')
+  .description('Show preview URL, deployment id, and state for a task')
   .action(async (issue: string) => {
     const { runPreviewStatus } = await import('./commands/preview.js');
     await runPreviewStatus(issue);
   });
 
-// ── foundry serve ────────────────────────────────────────────────────
+// ── Integration branch ────────────────────────────────────────────────
 
 program
-  .command('serve')
-  .description('Start webhook server for event-driven operation')
-  .option('--port <port>', 'Server port', '3000')
-  .option('--host <host>', 'Server host', '0.0.0.0')
-  .action(async (opts) => {
-    const { runServe } = await import('./commands/serve.js');
-    await runServe(opts);
+  .command('review <target>')
+  .description('Rebase a PR onto integration, merge it, run the integration rebuild (PR number or URL)')
+  .action(async (target) => {
+    const { runReview } = await import('./commands/review.js');
+    await runReview(target);
   });
 
-// ── foundry sync-integration ──────────────────────────────────────────
+program
+  .command('release <type>')
+  .description('Bump the unified version across version_sources (patch|minor|major)')
+  .action(async (type) => {
+    const { runRelease } = await import('./commands/release.js');
+    await runRelease(type);
+  });
 
 program
   .command('sync-integration')
-  .description('Merge updated main into integration (after hotfix releases)')
+  .description('Merge main into integration after a hotfix release')
   .action(async () => {
     const { runSyncIntegration } = await import('./commands/sync.js');
     await runSyncIntegration();

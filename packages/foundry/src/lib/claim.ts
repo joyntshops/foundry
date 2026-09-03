@@ -24,7 +24,7 @@ function buildClaimComment(info: ClaimInfo): string {
     `| Runner | \`${info.runner_id}\` |`,
     `| Branch | \`${info.branch}\` |`,
     `| Worktree | \`${info.worktree}\` |`,
-    `| tmux Session | \`${info.tmux_session}\` |`,
+    `| Worker | \`${info.tmux_session}\` |`,
     `| Agent Backend | \`${info.agent_backend}\` |`,
     `| Claimed At | ${new Date().toISOString()} |`,
     '',
@@ -56,7 +56,7 @@ function buildClaimOnlyComment(info: ClaimInfo): string {
     `| Runner | \`${info.runner_id}\` |`,
     `| Branch | \`${info.branch}\` |`,
     `| Worktree | \`${info.worktree}\` |`,
-    `| tmux Session | \`${info.tmux_session}\` |`,
+    `| Worker | \`${info.tmux_session}\` |`,
     `| Agent Backend | \`${info.agent_backend}\` |`,
     `| Claimed At | ${new Date().toISOString()} |`,
     '',
@@ -85,7 +85,7 @@ export function parseClaimComment(body: string): ClaimInfo | null {
     runner_id: extract('Runner'),
     branch: extract('Branch'),
     worktree: extract('Worktree'),
-    tmux_session: extract('tmux Session'),
+    tmux_session: extract('Worker') || extract('tmux Session'),
     agent_backend: extract('Agent Backend'),
   };
 }

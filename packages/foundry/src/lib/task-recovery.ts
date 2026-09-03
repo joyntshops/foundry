@@ -125,7 +125,7 @@ export async function recoverTask(
     repo: config.repo,
     branch,
     worktree: git.resolveWorktreePath(config.worktree_base, issueNumber, iss.title, repoDir),
-    tmux_session: claim.tmux_session || git.resolveTmuxName(config.tmux_template, issueNumber),
+    tmux_session: claim.tmux_session || git.workerId(issueNumber),
     agent_backend: claim.agent_backend || config.default_agent_backend,
     permission_mode: permissionModeFromLabels(config, labels),
     status,

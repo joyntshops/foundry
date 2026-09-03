@@ -29,7 +29,7 @@ vi.mock('./github.js', () => ({
 vi.mock('./git.js', () => ({
   resolveBranchName: vi.fn().mockReturnValue('feature/42-fix'),
   resolveWorktreePath: vi.fn().mockReturnValue('/tmp/wts/42'),
-  resolveTmuxName: vi.fn().mockReturnValue('foundry-42'),
+  workerId: vi.fn().mockReturnValue('foundry-42'),
   fetchAll: vi.fn(),
   remoteBranchExists: vi.fn().mockReturnValue(false),
   worktreeExists: vi.fn().mockReturnValue(false),
@@ -100,7 +100,7 @@ const mockWorkerHandleFor = vi.fn().mockReturnValue({
 
 vi.mock('./workers/index.js', () => ({
   resolveWorker: vi.fn().mockReturnValue({
-    name: 'local-tmux',
+    name: 'subprocess',
     spawn: (...args: any[]) => mockWorkerSpawn(...args),
     handleFor: (...args: any[]) => mockWorkerHandleFor(...args),
   }),
@@ -110,13 +110,11 @@ vi.mock('../backends/index.js', () => ({
   resolveBackend: vi.fn().mockReturnValue({
     name: 'command',
     resolveCommand: vi.fn().mockReturnValue('claude --task "work"'),
-    resolveResumeCommand: vi.fn().mockReturnValue('claude --resume'),
     resolveEnv: vi.fn().mockReturnValue({}),
   }),
   resolveBackendForIssue: vi.fn().mockReturnValue({
     name: 'command',
     resolveCommand: vi.fn().mockReturnValue('claude --task "work"'),
-    resolveResumeCommand: vi.fn().mockReturnValue('claude --resume'),
     resolveEnv: vi.fn().mockReturnValue({}),
   }),
 }));
@@ -153,9 +151,6 @@ function makeConfig(): FoundryConfig {
     },
     branch_template: 'feature/{issue}-{slug}',
     worktree_base: '../wts',
-    tmux_template: 'foundry-{issue}',
-    max_sessions: 4,
-    max_verify_parallel: 1,
     max_input_rounds: 3,
     verify: [],
     integration_rebuild: '',
@@ -163,7 +158,6 @@ function makeConfig(): FoundryConfig {
     tag_prefix: 'v',
     default_agent_backend: 'command',
     agent_backends: {},
-    poll_interval_seconds: 30,
     github_backend: 'gh-cli',
   } as FoundryConfig;
 }

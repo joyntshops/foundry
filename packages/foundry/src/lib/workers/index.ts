@@ -1,20 +1,23 @@
 /**
- * Worker registry — resolves worker type strings to Worker implementations.
+ * Worker registry — resolves a worker type to a Worker implementation.
+ *
+ * Only `subprocess` exists: the agent runs as a child of the current process,
+ * which under the GitHub Action means the job is the isolation boundary. The
+ * Worker interface is kept so another execution model can be added without
+ * touching the EventHandler.
  */
 import type { Worker } from '../worker.js';
-import { LocalTmuxWorker } from './local-tmux.js';
 import { SubprocessWorker } from './subprocess.js';
 
-// The subprocess worker tracks children in memory, so it must be a
-// singleton within the process or handleFor() would lose them.
+// The subprocess worker tracks children in memory, so it must be a singleton
+// within the process or handleFor() would lose them.
 let subprocessSingleton: SubprocessWorker | undefined;
 
 const workers: Record<string, () => Worker> = {
-  'local-tmux': () => new LocalTmuxWorker(),
-  'subprocess': () => (subprocessSingleton ??= new SubprocessWorker()),
+  subprocess: () => (subprocessSingleton ??= new SubprocessWorker()),
 };
 
-export function resolveWorker(type: string = 'local-tmux'): Worker {
+export function resolveWorker(type: string = 'subprocess'): Worker {
   const factory = workers[type];
   if (!factory) {
     throw new Error(

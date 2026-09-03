@@ -2,8 +2,7 @@
  * Webhook tests — signature verification and GitHub event mapping.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as crypto from 'node:crypto';
-import { verifyWebhookSignature, webhookToEvents } from './webhook.js';
+import { webhookToEvents } from './webhook.js';
 import type { FoundryConfig, TaskState } from '../types.js';
 
 // Mock the state module so webhookToEvents can look up tasks
@@ -44,9 +43,6 @@ function makeConfig(overrides?: Partial<FoundryConfig>): FoundryConfig {
     },
     branch_template: 'feature/{issue}-{slug}',
     worktree_base: '../wts',
-    tmux_template: 'foundry-{issue}',
-    max_sessions: 4,
-    max_verify_parallel: 1,
     max_input_rounds: 3,
     verify: [],
     integration_rebuild: '',
@@ -54,7 +50,6 @@ function makeConfig(overrides?: Partial<FoundryConfig>): FoundryConfig {
     tag_prefix: 'v',
     default_agent_backend: 'command',
     agent_backends: {},
-    poll_interval_seconds: 30,
     github_backend: 'gh-cli',
     ...overrides,
   } as FoundryConfig;
@@ -76,48 +71,6 @@ function makeTask(overrides?: Partial<TaskState>): TaskState {
     ...overrides,
   };
 }
-
-// ── verifyWebhookSignature ───────────────────────────────────────────────
-
-describe('verifyWebhookSignature', () => {
-  const secret = 'test-webhook-secret';
-  const payload = '{"action":"created","issue":{"number":1}}';
-
-  it('returns true for a valid signature', () => {
-    const sig = makeSignature(payload, secret);
-    expect(verifyWebhookSignature(payload, sig, secret)).toBe(true);
-  });
-
-  it('returns false for an invalid signature', () => {
-    const sig = makeSignature(payload, 'wrong-secret');
-    expect(verifyWebhookSignature(payload, sig, secret)).toBe(false);
-  });
-
-  it('returns false for a malformed signature', () => {
-    expect(verifyWebhookSignature(payload, 'not-a-real-sig', secret)).toBe(false);
-  });
-
-  it('returns false for an empty signature', () => {
-    expect(verifyWebhookSignature(payload, '', secret)).toBe(false);
-  });
-
-  it('returns false when signature has wrong length', () => {
-    expect(verifyWebhookSignature(payload, 'sha256=abc', secret)).toBe(false);
-  });
-
-  it('is timing-safe (uses same code path for different payloads)', () => {
-    const payload2 = '{"different":"data"}';
-    const sig1 = makeSignature(payload, secret);
-    const sig2 = makeSignature(payload2, secret);
-
-    // Verify correct payload matches its own sig
-    expect(verifyWebhookSignature(payload, sig1, secret)).toBe(true);
-    expect(verifyWebhookSignature(payload2, sig2, secret)).toBe(true);
-
-    // Cross-check should fail
-    expect(verifyWebhookSignature(payload, sig2, secret)).toBe(false);
-  });
-});
 
 // ── webhookToEvents ──────────────────────────────────────────────────────
 

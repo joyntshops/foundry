@@ -1,6 +1,6 @@
 # Open-Source Strategy: Joynt Foundry
 
-> **Historical document.** Written in February 2026 against v0.1.17, when Foundry was only an always-on runner. Kept for the reasoning; not maintained. Since then Foundry gained an event-driven core, `foundry serve`, and a GitHub Action mode that needs no server, and the "no SaaS play" conclusion has been revisited. Treat specific numbers and architecture claims below as of that date.
+> **Historical document.** Written in February 2026 against v0.1.17, when Foundry was an always-on runner with tmux sessions. Kept for the reasoning; not maintained. Since then Foundry gained an event-driven core and became a GitHub Action; the runner was removed. Treat specific numbers and architecture claims below as of that date.
 
 *Internal strategy memo — Joynt leadership*
 *February 2026 | Foundry v0.1.17*

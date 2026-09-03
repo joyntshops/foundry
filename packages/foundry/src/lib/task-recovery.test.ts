@@ -24,7 +24,7 @@ const CLAIM = [
   '| Runner | `gha-123` |',
   '| Branch | `feature/42-add-login` |',
   '| Worktree | `/w/wts/42-add-login` |',
-  '| tmux Session | `foundry-42` |',
+  '| Worker | `foundry-42` |',
   '| Agent Backend | `claude-code` |',
   '| Claimed At | 2026-09-02T10:00:00.000Z |',
   '<!-- /foundry-claim-block -->',
@@ -148,6 +148,13 @@ describe('recoverTask', () => {
     expect(task!.runner_id).toBe('gha-123');
     expect(task!.pr_url).toBeUndefined();
     expect(task!.preview_url).toBeUndefined();
+  });
+
+  it('still parses claim comments written before the Worker row rename', async () => {
+    const legacy = CLAIM.replace('| Worker |', '| tmux Session |');
+    mock.comments = [{ id: 1, body: legacy, user: { login: 'b' }, created_at: '2026-09-02T10:00:00Z' }] as any;
+    const task = await recoverTask(config, '/w', 42);
+    expect(task!.tmux_session).toBe('foundry-42');
   });
 
   it('skips the issue fetch when the issue is provided', async () => {

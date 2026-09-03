@@ -34,60 +34,47 @@
 
 GitHub Issues are the task control plane. Label an issue `state:ready` and Foundry claims it, runs a coding agent in an isolated git worktree, verifies the result, opens a PR into a moving `integration` branch, and stands up a preview environment. Humans review on GitHub. Every control is an issue label or an `@foundry` comment.
 
-Foundry is the orchestration layer, not the agent. It runs Claude Code, aider, or any CLI you configure.
+Foundry is a **GitHub Action**. There is no server to run and no machine to keep awake. Every GitHub event that matters starts a job, the job performs one transition of the task's state machine, and state lives on GitHub: in labels, a structured claim comment, the PR, and the preview comment.
 
-## Two ways to run it
+Foundry is the orchestration layer, not the agent. It runs Claude Code, aider, or any CLI you configure, and bills your own Claude subscription through `CLAUDE_CODE_OAUTH_TOKEN`.
 
-| | **GitHub Action** (recommended) | **Always-on runner** |
-|---|---|---|
-| Where it runs | A GitHub Actions job per event. Nothing to host. | A machine you keep awake: `foundry run` (polling) or `foundry serve` (webhooks) |
-| What you install | Nothing on any machine; `uses: joyntshops/foundry@main` | `npm install -g @joyntshops/foundry`, plus git, tmux, gh |
-| GitHub identity | The job's built-in token, or a GitHub App | A GitHub App from `foundry setup-bot` |
-| Agent billing | Your Claude subscription via `CLAUDE_CODE_OAUTH_TOKEN` | Whatever the agent CLI is logged in as |
-| Reacts to events | Immediately, per event | Every `poll_interval_seconds` (`run`) or immediately (`serve`) |
-| Watch the agent | Job log + transcript artifact | `foundry attach` to the tmux session |
+## Quick start
 
-Start with the Action. The runner exists for machines that must stay inside a private network, or for interactive `attach` sessions.
+1. **Labels and config.** From a clone, run `npx @joyntshops/foundry init` (see [Installation](docs/foundry/installation.md) for registry auth). It creates the `state:*` and `mode:*` labels, a `.joynt-foundry.yml`, and the `integration` branch. Or do those by hand from [Onboarding](docs/foundry/onboarding.md).
+2. **Workflow.** Add `.github/workflows/foundry.yml` from the template in [GitHub Action](docs/foundry/github-action.md) and commit it to the default branch.
+3. **Secret.** Add `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Optionally add a GitHub App so Foundry's comments carry a bot name.
+4. **Go.** Open an issue, add the label `state:ready`, watch Actions → Foundry.
 
-## Quick start: GitHub Action
+## The loop
 
-1. **Labels.** Foundry needs its `state:*` and `mode:*` labels on the repo. Run `foundry init` once from a clone (see [Installation](docs/foundry/installation.md) for registry auth), or create them by hand from the list in [Onboarding](docs/foundry/onboarding.md).
-2. **Config.** Commit a `.joynt-foundry.yml` at the repo root. `foundry init` scaffolds one; [example.joynt-foundry.yml](example.joynt-foundry.yml) is a commented reference.
-3. **Workflow.** Add `.github/workflows/foundry.yml` from the template in [GitHub Action](docs/foundry/github-action.md).
-4. **Secret.** Add `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Optionally add a GitHub App for a named bot identity.
-5. **Go.** Open an issue, add the label `state:ready`, watch Actions.
-
-## Quick start: always-on runner
-
-```bash
-npm install -g @joyntshops/foundry
-cd your-repo
-foundry init          # config, labels, integration branch
-foundry setup-bot     # GitHub App identity, two browser clicks
-foundry run           # poll → claim → agent → verify → PR
+```
+issue labeled state:ready
+  → claim (label swap + claim comment)
+  → worktree from origin/integration
+  → agent runs; transcript is the job log
+  → outcome classified: completed · needs input · plan ready · errored
+  → verify (lint, typecheck, build, test); no PR until green
+  → PR into integration · state:ready-for-human-review · preview up
+human reviews, comments @foundry, or requests changes → agent resumes
+PR merged → state:done · issue closed · preview down
 ```
 
-## Commands
+## CLI
 
-| Command | Mode | Description |
-|---------|------|-------------|
-| `foundry init` | both | Scaffold config, create labels, create `integration` branch |
-| `foundry action` | Action | Run the state machine for one GitHub event (the Action's entry point) |
-| `foundry run` | runner | Poll → claim → spawn agent sessions |
-| `foundry serve` | runner | Webhook server with reconciliation polling |
-| `foundry setup-bot` | runner | Create and install a GitHub App for Foundry |
-| `foundry status` | runner | Active tasks, sessions, branches, PRs |
-| `foundry sessions` | runner | Unified task dashboard |
-| `foundry attach <issue>` | runner | Attach to an agent's tmux session |
-| `foundry stop <issue>` | runner | Stop a session safely |
-| `foundry reset [issue]` | runner | Tear down everything for a task and re-queue it |
-| `foundry prune` | runner | Clean stale local state and worktrees |
-| `foundry preview up/down/status <issue>` | runner | Manage a tracked task's preview environment by hand |
-| `foundry review <pr>` | both | Rebase, merge into `integration`, rebuild |
-| `foundry release <type>` | both | Unified version bump (patch/minor/major) |
-| `foundry sync-integration` | both | Merge `main` into `integration` after a hotfix |
+The CLI sets a repo up and operates on tasks from any checkout. It is not a daemon.
 
-"Runner" commands act on the local state of an always-on runner and have no meaning inside an Actions job. See [CLI Reference](docs/foundry/cli-reference.md).
+| Command | Description |
+|---------|-------------|
+| `foundry init` | Scaffold config, create labels, create `integration` branch |
+| `foundry setup-bot` | Create a GitHub App so Foundry acts under its own name (optional) |
+| `foundry action` | Run the state machine for one GitHub event; the Action's entry point |
+| `foundry reset <issue>` | Remove a task's branch, PR, and preview; set it back to `state:ready` |
+| `foundry preview up/down/status <issue>` | Manage a task's preview environment by hand |
+| `foundry review <pr>` | Rebase a PR onto `integration`, merge it, run the integration rebuild |
+| `foundry release <type>` | Unified version bump across `version_sources` |
+| `foundry sync-integration` | Merge `main` into `integration` after a hotfix |
+
+See [CLI Reference](docs/foundry/cli-reference.md).
 
 ## Documentation
 
@@ -99,7 +86,7 @@ foundry run           # poll → claim → agent → verify → PR
 - [Integration Strategy](docs/foundry/integration-strategy.md)
 - [Preview Environments](docs/foundry/preview-environments.md)
 - [Agent Backends](docs/foundry/agent-backends.md)
-- [GitHub Backends](docs/foundry/github-backends.md)
+- [GitHub Identity](docs/foundry/github-backends.md)
 - [CLI Reference](docs/foundry/cli-reference.md)
 - [Configuration Reference](docs/foundry/config-reference.md)
 - [Troubleshooting](docs/foundry/troubleshooting.md)

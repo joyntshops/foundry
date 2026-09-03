@@ -49,12 +49,6 @@ export async function runAction(opts: ActionOptions): Promise<void> {
   const config = loadConfig();
   const repoDir = getConfigDir();
 
-  // The job is the isolation boundary; always run the agent in-process.
-  if (config.worker?.type && config.worker.type !== 'subprocess') {
-    log.warn(`worker.type "${config.worker.type}" ignored: foundry action always uses "subprocess".`);
-  }
-  config.worker = { type: 'subprocess' };
-
   const payloadRepo: string | undefined = payload.repository?.full_name;
   if (payloadRepo && payloadRepo !== config.repo) {
     log.warn(`Event is for ${payloadRepo} but .joynt-foundry.yml says ${config.repo}.`);
