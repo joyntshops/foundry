@@ -43,12 +43,15 @@ foundry init
 foundry run
 ```
 
+Or run it with no server at all, as a GitHub Action driven by issue labels, comments, reviews, and merges. See [GitHub Action](docs/foundry/github-action.md).
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `foundry init` | Scaffold config and create GitHub labels |
-| `foundry run` | Poll → claim → spawn agent sessions |
+| `foundry run` | Poll → claim → spawn agent sessions (always-on runner) |
+| `foundry action` | Run the state machine for one GitHub event (GitHub Actions entry point) |
 | `foundry status` | Show active tasks and sessions |
 | `foundry sessions` | List tmux sessions |
 | `foundry attach <issue>` | Attach to an agent session |
@@ -65,6 +68,7 @@ foundry run
 - [Onboarding](docs/foundry/onboarding.md)
 - [Workflows](docs/foundry/workflows.md)
 - [Integration Strategy](docs/foundry/integration-strategy.md)
+- [GitHub Action](docs/foundry/github-action.md)
 - [Agent Backends](docs/foundry/agent-backends.md)
 - [CLI Reference](docs/foundry/cli-reference.md)
 - [Configuration Reference](docs/foundry/config-reference.md)
