@@ -1,125 +1,152 @@
 # Troubleshooting
 
-## Common Issues
+Two sections: one for the GitHub Action, one for the always-on runner. Start with the one you run.
+
+## GitHub Action
+
+Everything below was hit on real runs. Fixes are in the version noted where relevant.
+
+### Nothing happened after I added `state:ready`
+
+1. The workflow must be on the **default branch**. `issues` and `issue_comment` events only trigger workflows from there.
+2. The label must be exactly what `.joynt-foundry.yml` says under `labels.ready` (default `state:ready`).
+3. Check Actions → Foundry. A run marked **skipped** means the job's `if:` filtered the event; that is expected for labels Foundry adds itself.
+4. Check that `.joynt-foundry.yml` exists at the repo root on that branch.
+
+### `Some specified paths were not resolved, unable to cache dependencies`
+
+The `setup-node` step in the composite action tried to cache npm using a path under `_actions/`, outside the workspace. Fixed in v0.1.34. If you pin an older ref, move to `@main`.
+
+### `Resource not accessible by integration`
+
+The token lacks a permission for that call. Which one depends on the call:
+
+| Call | Needs |
+|---|---|
+| labels, comments | `issues: write` |
+| open PR, PR comments | `pull-requests: write` |
+| push | `contents: write` |
+| `gh workflow run` (preview up/down) | `actions: write` |
+| deployment records | `deployments: write` |
+| check run for verification results | `checks: write` (non-fatal warning without it) |
+
+With the built-in token, grant these in the workflow's `permissions:` block. With a GitHub App, add them on the App **and accept the permission update on the installation**. Changing the App only creates a request; installations keep the old set until an org owner accepts it. Check what jobs actually get:
+
+```bash
+gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="YOUR_APP") | .permissions'
+```
+
+### Two Foundry runs show as cancelled
+
+Foundry's own comments trigger `issue_comment` events. The job `if:` filters them, but a **workflow-level** `concurrency` group admits every run before the filter, and GitHub keeps only one pending run per group, so they cancel each other. A pending human `@foundry` command could be the one cancelled. Declare `concurrency` on the **job**, as the template does.
+
+### The preview comment shows an Actions run URL
+
+Before v0.1.34, a provider `up_command` whose stdout looked like a URL (`gh workflow run` prints one) was taken as the preview URL even when `url_template` was set. Now the template always wins. Upgrade.
+
+### The agent exited immediately, outcome `errored`
+
+Usually authentication. Open the run's transcript artifact (`foundry-issue-<n>-run-<id>`) or the job log and look at the first lines from `claude`. Confirm `CLAUDE_CODE_OAUTH_TOKEN` is set as a secret the repo can see:
+
+```bash
+gh api repos/OWNER/REPO/actions/organization-secrets --jq '.secrets[].name'   # org-level
+gh secret list --repo OWNER/REPO                                                # repo-level
+```
+
+The token is tied to the Claude subscription of whoever ran `claude setup-token`, and it expires; regenerate and update the secret.
+
+### `@foundry continue` on a PR comment did nothing
+
+Not yet supported: a comment on the PR carries the PR number, not the issue number. Comment on the issue instead.
+
+### `@foundry stop` did nothing
+
+A running job cannot be stopped by a comment. Press **Cancel** on the run in the Actions UI, then `@foundry restart` or `@foundry start` to fix labels and re-queue.
+
+### Where are the logs?
+
+- The job log is the full agent transcript, streamed live.
+- The same transcript (`agent.log`, stream-json) is uploaded as an artifact named `foundry-issue-<n>-run-<id>` when the template's upload step is present.
+- On the issue, the status comment records each transition.
+
+### How do I test a Foundry change before merging it?
+
+Point the workflow at a branch: `uses: joyntshops/foundry@your-branch`. Composite actions are built from whatever ref you name. Switch back to `@main` after merging.
+
+## Always-on runner
 
 ### "No .joynt-foundry.yml found"
 
-Run `foundry init` in your repo root, or check that you're running foundry from within the repo directory.
+Run `foundry init` in the repo root, or run Foundry from inside the repo.
 
-### Claim Failures
+### Claims are not happening
 
-If tasks aren't being claimed:
+1. `gh auth status`, or check the GitHub App credentials under `~/.joynt-foundry/`.
+2. The repo needs Foundry's labels (`foundry init` creates them).
+3. Issues must be open and labeled `state:ready`.
+4. `foundry status` for capacity (`max_sessions`).
 
-1. Check `gh auth status` — ensure you're authenticated
-2. Check the repo has the required labels (`foundry init` creates them)
-3. Check issues are labeled `state:ready` and are open
-4. Check `foundry status` for capacity (`max_sessions`)
+Two runners racing is handled by the claim protocol; the loser skips the task on its next poll.
 
-If two runners race to claim:
-- This is handled by the claim protocol (comment-based verification)
-- The loser silently skips the task on the next poll
-
-### tmux Session Not Found
+### tmux session not found
 
 ```bash
-# List all tmux sessions
 tmux list-sessions
-
-# List Foundry sessions specifically
 foundry sessions
 ```
 
-If a session died unexpectedly:
-- `foundry run` reconciles on startup (marks dead sessions as stopped)
-- `foundry prune --force` cleans up stale state
+`foundry run` reconciles on startup and marks dead sessions stopped. `foundry prune --all` removes stale local state.
 
-### Agent Not Launching
+### Agent not launching
 
-1. Check the backend command in `.joynt-foundry.yml`
-2. Attach to the tmux session to see errors: `foundry attach <issue>`
-3. Check logs at `~/.joynt-foundry/logs/<repo>/<issue>/`
+1. Check the backend command in `.joynt-foundry.yml`.
+2. `foundry attach <issue>` to see the session.
+3. Logs are at `~/.joynt-foundry/logs/<org>__<repo>/<issue>/agent.log`.
 
-### Verification Failures
+### Verification failed
 
-When verification fails, Foundry:
-- Marks the task as `failed`
-- Posts a comment on the issue with failure details
+Foundry marks the task `state:failed` and posts the failing command's output on the issue. To debug, `cd` into the worktree (path in `foundry status`), run the verify commands by hand, then `@foundry restart`.
 
-To debug:
-1. `cd` into the worktree: check `foundry status` for the path
-2. Run verify commands manually
-3. Fix and re-run, or `@foundry restart` the task
-
-### Worktree Conflicts
-
-If a worktree already exists:
+### Worktree conflicts
 
 ```bash
-# List worktrees
 git worktree list
-
-# Remove a stale worktree
 git worktree remove /path/to/worktree --force
-
-# Or use Foundry's prune
-foundry prune --force
+foundry prune --all
 ```
 
-### PR Creation Fails
+### PR creation failed
 
-Check:
-- The `integration` branch exists on the remote
-- The feature branch has been pushed
-- You have write access to the repo
-- `gh pr create` works manually
+- `integration` must exist on the remote.
+- The feature branch must be pushed.
+- The identity Foundry uses needs write access.
 
-### Release Command Errors
+### Release or sync-integration errors
 
-- Must be on `integration` branch
-- `version_sources` must be configured and files must exist
-- All package.json files must have valid `version` fields
-
-### Sync Integration Merge Conflicts
-
-If `foundry sync-integration` fails:
+`foundry release` must run on `integration` with `version_sources` configured and valid. If `foundry sync-integration` hits conflicts:
 
 ```bash
 git checkout integration
 git merge origin/main
-# Resolve conflicts
-git add .
-git commit
-git push
+# resolve, then
+git add . && git commit && git push
 ```
 
-## Local State
-
-Foundry stores state in `~/.joynt-foundry/`:
+### Local state
 
 ```
 ~/.joynt-foundry/
-├── runner-id              # Unique runner identifier
-├── state-org__repo.json   # Task state per repo
-├── logs/
-│   └── org__repo/
-│       └── 42/            # Logs per task
-│           └── agent.log
-└── tasks/
-    └── org__repo/
-        └── 42/            # Task state dir
+├── runner-id
+├── state-<org>__<repo>.json
+├── github-app-<org>.json / .pem
+├── logs/<org>__<repo>/<issue>/agent.log
+└── tasks/<org>__<repo>/<issue>/
 ```
 
-To reset state completely:
+`rm -rf ~/.joynt-foundry/` resets everything, including App credentials.
 
-```bash
-rm -rf ~/.joynt-foundry/
-```
-
-## Debug Mode
+### Debug output
 
 ```bash
 foundry --verbose run
-foundry --verbose status
 ```
-
-Verbose mode shows debug-level log messages including poll timing and state transitions.

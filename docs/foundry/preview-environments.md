@@ -142,7 +142,7 @@ Displays the preview URL, GitHub Deployment ID, and state (`active`, `inactive`,
 
 ## Automatic Lifecycle
 
-When the runner (`foundry run`) is active, previews are managed automatically:
+Previews are managed automatically by whichever mode is running Foundry (the Action or `foundry run` / `foundry serve`):
 
 | Event | Action |
 |-------|--------|

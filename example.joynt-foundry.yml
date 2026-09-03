@@ -1,89 +1,126 @@
-# Joynt Foundry — Example Configuration
-# Copy to .joynt-foundry.yml in your repo root and customize.
+# Joynt Foundry — example configuration
+#
+# Copy to .joynt-foundry.yml at your repo root. `foundry init` generates the
+# same file with project-specific defaults filled in. Every key shown with its
+# default can be omitted. Keys marked "runner only" are ignored by the GitHub
+# Action, where the job is the isolation boundary.
 
-# GitHub repository (required)
+# ── Required ──────────────────────────────────────────────────────────
 repo: "your-org/your-repo"
 
-# Label names used by Foundry
+# ── Labels (defaults shown) ───────────────────────────────────────────
+# Exactly one state:* label is on an issue at any time.
 labels:
-  ready: "state:ready"
-  in_progress: "state:in-progress"
+  ready: "state:ready"                              # eligible for claiming
+  in_progress: "state:in-progress"                  # claimed; agent running
+  waiting_for_input: "state:waiting-for-input"      # agent asked a question
+  plan_review: "state:plan-review"                  # plan posted, awaiting approval
+  ready_for_review: "state:ready-for-human-review"  # PR open
+  failed: "state:failed"
   done: "state:done"
-  ready_for_review: "state:ready-for-human-review"
-  spec_changed: "spec:changed"
+  claim: "state:claim"                              # claim + branch, no agent
 
-# Branch naming — {issue} = number, {slug} = slugified title
-branch_template: "feature/{issue}-{slug}"
+# Applied by humans to choose the agent's permission mode for an issue.
+mode_labels:
+  plan: "mode:plan"          # plan first, implement after @foundry continue
+  auto: "mode:auto"          # full permissions (default when no mode label)
+  default: "mode:default"    # agent's own default permission mode
 
-# Worktree base directory (relative to repo root)
-worktree_base: "./wts"
+# ── Branches and worktrees ────────────────────────────────────────────
+branch_template: "feature/{issue}-{slug}"   # {issue} number, {slug} from title
+worktree_base: "./wts"                      # add to .gitignore
+tmux_template: "foundry-{issue}"            # runner only
 
-# tmux session naming — {issue} = number
-tmux_template: "foundry-{issue}"
+# ── Concurrency ───────────────────────────────────────────────────────
+max_sessions: 4            # runner only; the Action uses a per-issue concurrency group
+max_verify_parallel: 1     # runner only
+max_input_rounds: 3        # give up after this many human-input / review rounds
 
-# Concurrency limits
-max_sessions: 4
-max_verify_parallel: 1
-
-# Verification commands (run in worktree before PR creation)
+# ── Verification: run in the worktree before any PR is opened ─────────
 verify:
   - "npm run lint"
   - "npm run typecheck"
   - "npm run build"
   - "npm test"
 
-# Command run after merging into integration (via foundry review)
+# Run after `foundry review` merges into integration.
 integration_rebuild: "npm run build"
 
-# Comment triggers
+# ── Comment commands (defaults shown) ─────────────────────────────────
 comment_triggers:
-  replan: "@foundry replan"
-  restart: "@foundry restart"
+  continue: "@foundry continue"   # resume/relaunch with a message
+  plan: "@foundry plan"           # relaunch in plan mode
+  replan: "@foundry replan"       # kill, re-read the issue, relaunch
+  restart: "@foundry restart"     # discard everything, re-queue
+  start: "@foundry start"         # re-queue a failed/stopped task
+  stop: "@foundry stop"           # kill and mark failed
+  claim: "@foundry claim"         # claim without starting the agent
 
-# Unified monorepo versioning
-# List ALL package.json files that share one version.
-# First entry = primary (version is read from here for tagging).
+# ── Unified versioning ────────────────────────────────────────────────
+# Every file that shares one version. First entry is the primary.
 version_sources:
   - "package.json"
   # - "packages/api/package.json"
-  # - "packages/web/package.json"
-
-# Release tag prefix
 tag_prefix: "v"
 
-# Polling interval
+# ── Polling (runner only) ─────────────────────────────────────────────
 poll_interval_seconds: 30
 
-# Default agent backend (used when no label match)
+# ── GitHub API client ─────────────────────────────────────────────────
+github_backend: "octokit"      # or "gh-cli"; env FOUNDRY_GITHUB_BACKEND overrides
+
+# ── Agent backends ────────────────────────────────────────────────────
 default_agent_backend: "claude-code"
 
-# Agent backend definitions
 agent_backends:
   claude-code:
     type: command
+    # {permission_mode} is filled from the issue's mode:* label.
+    # Under the Action, CLAUDE_CODE_OAUTH_TOKEN in the job env authenticates the CLI.
     command: >-
-      claude --dangerously-skip-permissions
+      claude {permission_mode}
       -p "You are working on issue #{issue_number}: {title}.
       The issue is at {issue_url}. Read the issue body and implement the task.
       When done, create a commit with your changes."
-      --output-format stream-json 2>&1 | tee {log_dir}/agent.log
+      --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log
+    # Runner only: resumes a live session. Sessions do not survive Actions jobs.
+    resume_command: >-
+      claude --dangerously-skip-permissions
+      -p '{prompt}' --resume "{session_id}"
+      --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log
 
-  # Example: generic command backend
-  command:
-    type: command
-    command: "echo 'Replace this with your agent command'"
-
-  # Example: aider backend
+  # Any CLI works. Examples:
   # aider:
   #   type: command
-  #   command: >-
-  #     aider --yes --message "Implement issue #{issue_number}: {title}. See {issue_url}"
-  #     2>&1 | tee {log_dir}/agent.log
+  #   command: aider --yes --message "Implement issue #{issue_number}: {title}. See {issue_url}" 2>&1 | tee {log_dir}/agent.log
   #   env:
-  #     AIDER_MODEL: "claude-3-5-sonnet-20241022"
+  #     AIDER_MODEL: "claude-sonnet-5"
 
-# Optional: map issue labels to specific backends
+# Route issues to a backend by label. Foundry creates these labels when 2+ are listed.
 agent_label_map:
   "agent:claude": "claude-code"
-  # "agent:cursor": "cursor"
   # "agent:aider": "aider"
+
+# ── Preview environments (optional) ───────────────────────────────────
+# Foundry orchestrates; a command or workflow you own does the deploy.
+# When url_template is set it is always the preview URL; command output is ignored.
+# Variables: {branch} {issue} {repo} {pr_number} {sha}; also env FOUNDRY_*.
+# preview:
+#   mode: "provider"               # "template" = URL only, no command
+#   url_template: "https://your-org.github.io/your-repo/previews/pr-{pr_number}/"
+#   up_command:   "gh workflow run preview-up.yml -f pr={pr_number} -f sha={sha} -f branch={branch}"
+#   down_command: "gh workflow run preview-down.yml -f pr={pr_number}"
+#   comment: true
+
+# GitHub Deployment records for previews (optional; needs deployments: write).
+# github_deployments:
+#   enabled: true
+#   environment: "preview"
+#   production: false
+#   auto_inactive: true
+
+# ── Execution (runner only; the Action always uses "subprocess") ─────
+# worker:
+#   type: "local-tmux"          # or "subprocess"
+# state_store:
+#   type: "file"                # ~/.joynt-foundry/

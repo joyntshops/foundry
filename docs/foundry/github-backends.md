@@ -1,5 +1,7 @@
 # GitHub Backends
 
+> **Running as a GitHub Action?** You need none of this. The job's built-in token authenticates every call; the Action sets `FOUNDRY_GITHUB_BACKEND=octokit` and passes the token as `GITHUB_TOKEN`. A GitHub App is optional there, for a named bot identity or so Foundry's pushes trigger other workflows. See [GitHub Action](github-action.md). The rest of this page is about the always-on runner.
+
 Foundry supports two GitHub API backends. Choose based on your environment.
 
 There are two separate concerns:
@@ -111,7 +113,14 @@ No token config needed. Uses whatever `gh auth login` has configured. Actions ap
 - **Issues**: Read & Write
 - **Pull requests**: Read & Write
 - **Contents**: Read & Write
+- **Checks**: Read & Write (verification results as a Check Run)
 - **Metadata**: Read
+
+Add these by hand if you use preview environments; Apps created by older versions lack them:
+- **Actions**: Read & Write (`gh workflow run` for preview up/down)
+- **Deployments**: Read & Write (GitHub Deployment records)
+
+After changing an App's permissions, **accept the update on the installation** (org settings → GitHub Apps → the App). Until then tokens carry the old set.
 
 ### Personal token (fallback)
 
@@ -147,7 +156,7 @@ If you prefer to create the GitHub App manually instead of using `foundry setup-
 3. Fill in:
    - **Name**: e.g., `Foundry Bot` (must be globally unique on GitHub)
    - **Homepage URL**: anything (e.g., your repo URL)
-   - **Webhooks**: uncheck **"Active"** — Foundry polls, it doesn't need webhooks
+   - **Webhooks**: uncheck **"Active"** unless you will run `foundry serve`, which receives them
 4. Under **Permissions → Repository permissions**, grant:
    - **Issues**: Read & Write
    - **Pull requests**: Read & Write

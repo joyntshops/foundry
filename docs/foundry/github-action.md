@@ -129,6 +129,8 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **Stacked PRs only retarget if the base branch is deleted.** Learned the hard way: a PR stacked on a feature branch merged into that branch instead of `main` because the feature branch was kept at merge time. Merge with "Delete branch" or expect to open a follow-up PR.
 
+Symptoms and fixes from real runs are collected in [Troubleshooting](troubleshooting.md#github-action).
+
 ## Known limitations (as of first version)
 
 - `@foundry` commands left as **PR comments** are not yet resolved to their issue. Comment on the issue.

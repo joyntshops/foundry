@@ -1,79 +1,71 @@
 # Installation
 
-## Prerequisites
+## If you use the GitHub Action
 
-- **Node.js** ≥ 18
-- **npm** ≥ 8
+There is nothing to install on any machine. The workflow references `joyntshops/foundry@main` and the Action builds itself inside the job. The runner image already has Node, git, and `gh`; the Action installs the Claude Code CLI.
+
+You still need the Foundry labels on the repo and a `.joynt-foundry.yml` at its root. `foundry init` creates both, which means running the CLI once from a clone. Either install it as below, or create the labels by hand from the list in [Onboarding](onboarding.md) and copy [example.joynt-foundry.yml](../../example.joynt-foundry.yml).
+
+Then continue with [GitHub Action](github-action.md).
+
+## If you run the always-on runner
+
+### Prerequisites
+
+- **Node.js** ≥ 18 and **npm** ≥ 8
 - **git** ≥ 2.20
-- **tmux** ≥ 3.0
-- **GitHub CLI** (`gh`) — authenticated via `gh auth login`
-- **SSH keys** configured for GitHub access
+- **tmux** ≥ 3.0 (the runner executes agents in tmux sessions)
+- **GitHub CLI** (`gh`), authenticated via `gh auth login`
+- **SSH keys** or HTTPS credentials for pushing to GitHub
 
-## Install from GitHub Packages
+```bash
+# macOS
+brew install tmux gh
 
-### 1. Create a GitHub Personal Access Token
+# Ubuntu/Debian
+sudo apt install tmux gh
+```
 
-1. Go to **GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)**
-   — direct link: https://github.com/settings/tokens
-2. Click **"Generate new token (classic)"**
-3. Give it a name (e.g., `foundry-packages`)
-4. Select the **`read:packages`** scope
-5. Click **Generate token** and copy it immediately — you won't see it again
+### Authenticate with GitHub Packages
 
-### 2. Authenticate with GitHub Packages
+The package is published to GitHub Packages, which requires a token even for public packages.
+
+1. Create a classic Personal Access Token at https://github.com/settings/tokens with the **`read:packages`** scope.
+2. Log in to the registry:
 
 ```bash
 npm login --registry=https://npm.pkg.github.com --scope=@joyntshops
-# Username: your-github-username
-# Password: <paste your token>
+# Username: your GitHub username
+# Password: the token
 ```
 
-### 3. Install globally
+### Install
 
 ```bash
 npm install -g @joyntshops/foundry
+foundry --version
 ```
 
-### 4. Or use via npx
+Or without installing:
 
 ```bash
 npx @joyntshops/foundry --help
 ```
 
-## Verify Installation
-
-```bash
-foundry --version
-foundry --help
-```
-
-## Upgrade
+### Upgrade
 
 ```bash
 npm update -g @joyntshops/foundry
 ```
 
-## Dependencies Check
+Merges to `main` publish a new patch version automatically.
 
-Verify all required tools are available:
+### Check dependencies
 
 ```bash
 git --version      # ≥ 2.20
 tmux -V            # ≥ 3.0
-gh --version       # any recent version
 gh auth status     # must be authenticated
 ```
 
-## tmux
-
-Foundry uses tmux for session management. Install if needed:
-
-```bash
-# macOS
-brew install tmux
-
-# Ubuntu/Debian
-sudo apt install tmux
-```
-
-Foundry works in macOS Terminal, iTerm2, VS Code terminal, and both bash and zsh.
+Foundry works in macOS Terminal, iTerm2, the VS Code terminal, and under bash or zsh.
