@@ -22,6 +22,7 @@ import { webhookToEvents } from '../lib/webhook.js';
 import { recoverTask, issueNumberFromPayload } from '../lib/task-recovery.js';
 import { buildAgentCompletedEvent, agentLogPath } from '../lib/completion.js';
 import { resolveWorker } from '../lib/workers/index.js';
+import * as github from '../lib/github.js';
 import * as state from '../lib/state.js';
 import * as log from '../lib/log.js';
 import type { FoundryConfig, TaskState } from '../types.js';
@@ -86,7 +87,33 @@ export async function runAction(opts: ActionOptions): Promise<void> {
     await driveToCompletion(config, repoDir, handler);
   }
 
+  await continueIfRequeued(config, repoDir, handler, issueNumber);
+
   writeOutputs(config, issueNumber);
+}
+
+/**
+ * `@foundry restart` and `@foundry start` end by dropping the task and putting
+ * `state:ready` back on the issue, expecting the next poll to pick it up. In a
+ * job there is no next poll, and a label added with the job's own token does
+ * not start another run. So if the issue we acted on is now ready and
+ * untracked, carry straight on into issue_ready here.
+ */
+async function continueIfRequeued(
+  config: FoundryConfig,
+  repoDir: string,
+  handler: EventHandler,
+  issueNumber: number | null,
+): Promise<void> {
+  if (issueNumber === null) return;
+  if (state.getTask(config.repo, issueNumber)) return;
+
+  const issue = await github.getIssue(config.repo, issueNumber);
+  if (!github.hasLabel(issue, config.labels.ready)) return;
+
+  log.info(`#${issueNumber} was re-queued. Continuing into issue_ready in this job.`);
+  await handler.handleEvent({ type: 'issue_ready', issue });
+  await driveToCompletion(config, repoDir, handler);
 }
 
 /**

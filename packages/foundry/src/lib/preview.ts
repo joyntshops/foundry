@@ -55,7 +55,15 @@ function resolveTemplateUrl(config: FoundryConfig, vars: TemplateVars): string |
   return expandTemplate(config.preview.url_template, vars);
 }
 
-function runProviderCommand(command: string, vars: TemplateVars): string | null {
+/**
+ * Run the provider's up command. Returns the URL it printed, or null.
+ *
+ * When `expectUrl` is false the caller has a url_template and only needs the
+ * command to run; its output is ignored and no warning is logged about it.
+ * This matters because commands like `gh workflow run` print an Actions run
+ * URL, which is a URL but not the preview.
+ */
+function runProviderCommand(command: string, vars: TemplateVars, expectUrl: boolean): string | null {
   const expanded = expandTemplate(command, vars);
   const env = { ...process.env, ...makeEnvVars(vars) };
 
@@ -65,6 +73,8 @@ function runProviderCommand(command: string, vars: TemplateVars): string | null 
       timeout: 120_000,
       env,
     }).trim();
+
+    if (!expectUrl) return null;
 
     // Try to parse as JSON with a `url` field
     try {
@@ -138,16 +148,17 @@ export async function previewUp(config: FoundryConfig, task: TaskState): Promise
     sha: resolveHeadSha(task.worktree),
   };
 
-  // Resolve URL — run provider command first (if configured), then fall back to url_template
+  // Resolve URL. url_template, when set, is always the preview URL: the
+  // provider command still runs (it does the deploy) but its output is not
+  // consulted. Only without a template do we read the URL from the command.
+  const hasTemplate = Boolean(config.preview.url_template);
   let url: string | null = null;
 
   if (config.preview.mode === 'provider' && config.preview.up_command) {
-    url = runProviderCommand(config.preview.up_command, vars);
+    url = runProviderCommand(config.preview.up_command, vars, !hasTemplate);
   }
 
-  // url_template works in both modes: primary source for template mode,
-  // fallback for provider mode (command doesn't need to output the URL)
-  if (!url && config.preview.url_template) {
+  if (hasTemplate) {
     url = resolveTemplateUrl(config, vars);
   }
 
