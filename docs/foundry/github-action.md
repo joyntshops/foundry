@@ -43,8 +43,13 @@ concurrency:
   group: foundry-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
 
+# The job's built-in token does all of Foundry's GitHub writes.
 permissions:
-  contents: read
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write        # gh workflow run for preview up/down
+  deployments: write    # GitHub Deployment records for previews
 
 jobs:
   foundry:
@@ -58,20 +63,23 @@ jobs:
       (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested')
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      FOUNDRY_APP_ID: ${{ secrets.FOUNDRY_APP_ID }}   # secrets aren't readable in step `if:`
     steps:
-      - id: app
+      - id: app                                        # skipped when no App is configured
+        if: env.FOUNDRY_APP_ID != ''
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.FOUNDRY_APP_ID }}
           private-key: ${{ secrets.FOUNDRY_APP_PRIVATE_KEY }}
       - uses: actions/checkout@v4
         with:
-          token: ${{ steps.app.outputs.token }}
+          token: ${{ steps.app.outputs.token || github.token }}
           fetch-depth: 0
       - id: foundry
         uses: joyntshops/foundry@main
         with:
-          github-token: ${{ steps.app.outputs.token }}
+          github-token: ${{ steps.app.outputs.token || github.token }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       - if: always() && steps.foundry.outputs.log-dir != ''
         uses: actions/upload-artifact@v4
@@ -85,14 +93,25 @@ jobs:
 
 ## Secrets
 
-| Secret | What it is |
-|---|---|
-| `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY` | A GitHub App installed on the repo with **issues, pull_requests, contents, actions, deployments: write**. `foundry setup-bot` creates one; add `actions` and `deployments` to it. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | From `claude setup-token`. Runs bill the subscription of the person who generated it, not the API. Tied to that person; for an org-shared secret Anthropic recommends `ANTHROPIC_API_KEY` instead. |
+| Secret | Required | What it is |
+|---|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | yes | From `claude setup-token`. Runs bill the subscription of the person who generated it, not the API. Tied to that person; for an org-shared secret Anthropic recommends `ANTHROPIC_API_KEY` instead. |
+| `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY` | no | A GitHub App installed on the repo. When present, the template mints an installation token and Foundry acts as the App. When absent, the job's built-in token is used. |
+
+No GitHub credentials are *needed*. Inside a job, GitHub has already established identity: `${{ github.token }}` is scoped to the repo, carries the permissions the workflow grants, and dies with the job. This is the difference from `foundry run` on a laptop or server, which had no identity and needed `setup-bot` to create a GitHub App for it.
+
+### What the App adds
+
+- **A named bot.** Comments, labels, and PRs appear as `<YourApp>[bot]` instead of `github-actions[bot]`.
+- **CI on the PRs Foundry opens.** Pushes and PRs made with the built-in token do not trigger `push` or `pull_request` workflows, so a repo's CI would silently skip agent PRs and required checks could never pass. With an App token they run normally.
+
+The App from `foundry setup-bot` works. It needs **issues, pull_requests, contents, actions, deployments: write**; add `actions` and `deployments` in the App's settings and accept the permission update on the installation.
+
+The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` context is not available in a step's `if:`. Surfacing the App ID (not the key) into `env` makes the check possible; `steps.app.outputs.token || github.token` falls back when the step was skipped.
 
 ## Decisions and gotchas
 
-**Writes must come from a GitHub App, never `GITHUB_TOKEN`.** GitHub does not fire workflow events for changes made with the default token. If Foundry labelled an issue with `GITHUB_TOKEN`, the `issues.labeled` event would never fire and the state machine would stall after one step. The App token is minted per job with `actions/create-github-app-token` and passed to both `actions/checkout` (so pushes are made as the App) and the action (so labels, comments, PRs, and `gh workflow run` are).
+**Nothing Foundry does may depend on triggering another run.** Events caused by the job's built-in token do not start workflow runs, with two exceptions: `workflow_dispatch` and `repository_dispatch`. Preview up/down use `gh workflow run`, which is `workflow_dispatch`, so they are fine. Merges are done by humans, so `pull_request.closed` fires. The only paths that used to rely on a follow-up run were `@foundry restart` and `@foundry start`, which re-add `state:ready`; `foundry action` now detects a re-queued issue and continues straight into `issue_ready` in the same job. Design any new transition the same way: finish it in-job, or make it a dispatch.
 
 **Consecutive transitions happen inside one job.** Claim → agent → verify → PR → preview-up is a single run. A new job is only needed when a human acts. This keeps runner spin-ups to one per human interaction.
 

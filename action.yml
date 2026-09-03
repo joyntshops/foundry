@@ -9,11 +9,13 @@ branding:
 inputs:
   github-token:
     description: >-
-      Token Foundry uses for every GitHub write (labels, comments, PRs, workflow
-      dispatch). Use a GitHub App installation token, not the default
-      GITHUB_TOKEN: writes made with GITHUB_TOKEN do not trigger further
-      workflow runs, so the state machine would stall after one transition.
-    required: true
+      Token Foundry uses for every GitHub call (labels, comments, PRs, workflow
+      dispatch). Defaults to the job's built-in token, which is enough for the
+      full issue → agent → PR → preview flow. Pass a GitHub App installation
+      token instead when you want Foundry's pushes and PRs to trigger other
+      workflows (CI on agent PRs) or a named bot identity.
+    required: false
+    default: ${{ github.token }}
   claude-code-oauth-token:
     description: 'Claude subscription token from `claude setup-token` (Pro/Max/Team/Enterprise). Bills your plan, not the API.'
     required: false
