@@ -1,6 +1,6 @@
 {
   "name": "@joyntshops/foundry",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "Developer automation: GitHub Issues → agent sessions → validated PRs",
   "license": "MIT",
   "bin": {
