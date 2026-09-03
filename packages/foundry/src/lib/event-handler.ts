@@ -10,6 +10,7 @@ import { resolveWorker } from './workers/index.js';
 import type { Worker } from './worker.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
+import { setStateLabel } from './labels.js';
 import * as log from './log.js';
 import * as verify from './verify.js';
 import * as agentOutput from './agent-output.js';
@@ -328,7 +329,7 @@ export class EventHandler {
 
     await triggerPreviewDown(config, task);
 
-    try { await github.addLabel(config.repo, task.issue, config.labels.done); } catch {}
+    try { await setStateLabel(config, task.issue, 'done'); } catch {}
     try { await github.closeIssue(config.repo, task.issue); } catch {}
 
     try { git.removeWorktree(task.worktree, repoDir); } catch {}
@@ -416,11 +417,7 @@ export class EventHandler {
 
     log.info(`Plan approval/feedback for #${task.issue}. Resuming in auto mode...`);
 
-    await github.transitionLabels(
-      config.repo, task.issue,
-      [config.labels.plan_review],
-      [config.labels.in_progress],
-    );
+    await setStateLabel(config, task.issue, 'in_progress');
 
     await this.resumeAgent(task, response);
   }
@@ -438,11 +435,7 @@ export class EventHandler {
     await triggerPreviewDown(config, task);
 
     state.updateTaskStatus(config.repo, task.issue, 'failed');
-    await github.transitionLabels(
-      config.repo, task.issue,
-      [config.labels.in_progress, config.labels.waiting_for_input, config.labels.plan_review],
-      [config.labels.failed],
-    );
+    await setStateLabel(config, task.issue, 'failed');
 
     const stoppedTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
     await statusComment.updateStatusComment(config.repo, task.issue, {
@@ -471,12 +464,7 @@ export class EventHandler {
 
     state.removeTask(config.repo, task.issue);
 
-    await github.transitionLabels(
-      config.repo, task.issue,
-      [config.labels.in_progress, config.labels.failed, config.labels.waiting_for_input,
-       config.labels.plan_review, config.labels.ready_for_review],
-      [config.labels.ready],
-    );
+    await setStateLabel(config, task.issue, 'ready');
 
     await statusComment.updateStatusComment(config.repo, task.issue, {
       task: { ...task, status: 'stopped' },
@@ -606,11 +594,7 @@ export class EventHandler {
       env: agentEnv,
     });
 
-    await github.transitionLabels(
-      config.repo, task.issue,
-      [config.labels.waiting_for_input, config.labels.plan_review],
-      [config.labels.in_progress],
-    );
+    await setStateLabel(config, task.issue, 'in_progress');
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
       permission_mode: '--permission-mode plan',
@@ -642,11 +626,7 @@ export class EventHandler {
 
     state.removeTask(config.repo, task.issue);
 
-    await github.transitionLabels(
-      config.repo, task.issue,
-      [config.labels.failed, config.labels.in_progress, config.labels.waiting_for_input],
-      [config.labels.ready],
-    );
+    await setStateLabel(config, task.issue, 'ready');
 
     if (message) {
       try {
@@ -731,11 +711,7 @@ export class EventHandler {
       if (task.pr_url) {
         log.success(`PR already exists for #${task.issue}: ${task.pr_url}`);
         state.updateTaskStatus(config.repo, task.issue, 'pr-open');
-        await github.transitionLabels(
-          config.repo, task.issue,
-          [config.labels.in_progress],
-          [config.labels.ready_for_review],
-        );
+        await setStateLabel(config, task.issue, 'ready_for_review');
         await triggerPreviewUp(config, task);
         const prOpenTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'pr-open' as const };
         await statusComment.updateStatusComment(config.repo, task.issue, {
@@ -757,11 +733,7 @@ export class EventHandler {
             pr_url: prUrl,
             pr_number: prNumber ?? undefined,
           });
-          await github.transitionLabels(
-            config.repo, task.issue,
-            [config.labels.in_progress],
-            [config.labels.ready_for_review],
-          );
+          await setStateLabel(config, task.issue, 'ready_for_review');
           await triggerPreviewUp(config, task);
           const newPrTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'pr-open' as const };
           await statusComment.updateStatusComment(config.repo, task.issue, {
@@ -856,7 +828,7 @@ export class EventHandler {
     log.info(`#${task.issue} needs input (round ${inputRound}).`);
 
     try {
-      await github.addLabel(config.repo, task.issue, config.labels.waiting_for_input);
+      await setStateLabel(config, task.issue, 'waiting_for_input');
     } catch {}
 
     state.updateTaskStatus(config.repo, task.issue, 'waiting-for-input', {
@@ -894,11 +866,7 @@ export class EventHandler {
 
     await postToConversationTarget(config, task, planComment);
 
-    await github.transitionLabels(
-      config.repo, task.issue,
-      [config.labels.in_progress],
-      [config.labels.plan_review],
-    );
+    await setStateLabel(config, task.issue, 'plan_review');
 
     state.updateTaskStatus(config.repo, task.issue, 'plan-review', {
       session_id: outcome.session_id ?? task.session_id,
@@ -966,11 +934,7 @@ export class EventHandler {
   private async resumeAgent(task: TaskState, humanResponse: string): Promise<void> {
     const config = this.config;
 
-    await github.transitionLabels(
-      config.repo, task.issue,
-      [config.labels.waiting_for_input],
-      [],
-    );
+    await setStateLabel(config, task.issue, 'in_progress');
 
     const worker = getWorker(config);
     await worker.handleFor(task.tmux_session).kill();
