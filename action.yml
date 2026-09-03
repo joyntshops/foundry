@@ -52,11 +52,12 @@ outputs:
 runs:
   using: composite
   steps:
+    # No npm cache: setup-node resolves cache-dependency-path relative to the
+    # workspace and cannot see the action's own checkout under _actions/.
+    # The install is ~1s, so nothing is lost.
     - uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
-        cache: npm
-        cache-dependency-path: ${{ github.action_path }}/package-lock.json
 
     - name: Build Foundry
       shell: bash
