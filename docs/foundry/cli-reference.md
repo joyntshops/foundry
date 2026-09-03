@@ -14,9 +14,37 @@ Options:
 
 ---
 
-## `foundry setup-bot`
+Commands marked **runner** act on the local state of an always-on `foundry run` / `foundry serve` process and have no meaning inside a GitHub Actions job. Everything else works in both modes.
 
-Create a GitHub App for Foundry and install it on your repos. This is the **recommended** way to authenticate Foundry — after running this command, no other auth setup is needed.
+---
+
+## `foundry action`
+
+Run the state machine for **one GitHub event** and exit. This is the entry point of the composite GitHub Action (`action.yml`); you rarely invoke it by hand.
+
+```bash
+foundry action [--event-name <name>] [--event-path <file>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--event-name` | GitHub event name. Default: `$GITHUB_EVENT_NAME` |
+| `--event-path` | Path to the event JSON payload. Default: `$GITHUB_EVENT_PATH` |
+
+**What it does:**
+1. Loads `.joynt-foundry.yml` from the current directory (the checkout)
+2. Rebuilds the referenced task from GitHub (claim comment, labels, PR, preview comment) since local state is empty in a fresh job
+3. Maps the payload to Foundry events and dispatches them through the same handler `run` uses
+4. If a handler launched an agent, waits for it as a subprocess, classifies the outcome, and continues
+5. Writes `issue`, `status`, `branch`, `pr-url`, `log-dir`, `log-path` to `$GITHUB_OUTPUT`
+
+Useful locally as a dry run against a saved payload: any event that maps to nothing exits 0 after recovery, which checks auth and config. See [GitHub Action](github-action.md).
+
+---
+
+## `foundry setup-bot` (runner)
+
+Create a GitHub App for Foundry and install it on your repos. For the always-on runner this is the **recommended** way to authenticate — after running this command, no other auth setup is needed. Under the GitHub Action it is optional: the job's own token works, and an App adds a named bot identity.
 
 ```bash
 foundry setup-bot
@@ -45,26 +73,28 @@ export FOUNDRY_GITHUB_APP_INSTALLATION_ID=<installation-id>
 
 ## `foundry init`
 
-Scaffold `.joynt-foundry.yml` and create required GitHub labels.
+Scaffold `.joynt-foundry.yml`, create required GitHub labels, and create the `integration` branch.
 
 ```bash
-foundry init [--skip-labels]
+foundry init [--skip-labels] [--clean-labels]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--skip-labels` | Skip creating GitHub labels |
+| `--clean-labels` | Remove non-Foundry labels before creating Foundry labels |
 
 **What it does:**
 - Detects the GitHub repo from `gh repo view`
 - Creates `.joynt-foundry.yml` with sensible defaults
-- Creates required labels: `state:ready`, `state:in-progress`, `state:done`, `state:ready-for-human-review`, `spec:changed`, `agent:claude`, `agent:cursor`
+- Creates the `state:*` and `mode:*` labels (see [Onboarding](onboarding.md) for the list), plus `agent:*` labels when `agent_label_map` has two or more entries
+- Creates and pushes the `integration` branch if missing
 
 ---
 
-## `foundry run`
+## `foundry run` (runner)
 
-Start the runner loop: poll for ready issues, claim, spawn agent sessions.
+Start the runner loop: poll for ready issues, claim, spawn agent sessions in tmux.
 
 ```bash
 foundry run [--once]
@@ -86,7 +116,19 @@ foundry run [--once]
 
 ---
 
-## `foundry status`
+## `foundry serve` (runner)
+
+Start an HTTP server that receives GitHub webhooks and dispatches them as events, with a reconciliation poll every five minutes as a fallback for missed deliveries.
+
+```bash
+foundry serve [--port 3000] [--host 0.0.0.0]
+```
+
+Endpoints: `POST /webhook` (signature verified with the App's webhook secret from `~/.joynt-foundry/github-app-{org}.json`), `GET /health`, `GET /status`. The machine must be reachable from GitHub; for a laptop or a box behind NAT, use the GitHub Action instead.
+
+---
+
+## `foundry status` (runner)
 
 Show active tasks, sessions, branches, PRs, and agent backends.
 
@@ -98,7 +140,7 @@ Displays per-task: issue number, title, status, branch, worktree, tmux session (
 
 ---
 
-## `foundry sessions`
+## `foundry sessions` (runner)
 
 Show a unified task dashboard for all tracked tasks and their resources.
 
@@ -117,7 +159,7 @@ foundry sessions --local       # skip GitHub API calls, show local state only
 
 ---
 
-## `foundry attach <target>`
+## `foundry attach <target>` (runner)
 
 Attach to a Foundry tmux session.
 
@@ -128,7 +170,7 @@ foundry attach foundry-42      # by session name
 
 ---
 
-## `foundry stop <target>`
+## `foundry stop <target>` (runner)
 
 Stop a Foundry session safely.
 
@@ -146,7 +188,7 @@ Sends Ctrl+C, waits 2 seconds, then kills the tmux session. Without `--ready`, m
 
 ---
 
-## `foundry reset [issue]`
+## `foundry reset [issue]` (runner)
 
 Tear down all resources (local + remote) for a task and restore the issue to `state:ready`. This is the "nuclear option" — full cleanup including GitHub resources.
 
@@ -175,7 +217,7 @@ When using `--all`, Foundry discovers issues from `~/.joynt-foundry/tasks/{repo}
 
 ---
 
-## `foundry prune`
+## `foundry prune` (runner)
 
 Clean **local** runner resources (tmux sessions, worktrees, local branches, state) for completed/failed/stopped tasks. Does **not** touch remote branches, PRs, or GitHub labels — use `foundry reset` for full teardown.
 

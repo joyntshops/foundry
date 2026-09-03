@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Foundry is configured via `.joynt-foundry.yml` at the repo root.
+Foundry is configured via `.joynt-foundry.yml` at the repo root. The same file serves both the GitHub Action and the always-on runner; keys that only make sense for a long-lived runner are marked **runner only** and are ignored by the Action.
 
 ## Full Schema
 
@@ -70,9 +70,17 @@ version_sources:                        # Ordered list of version file paths
 
 tag_prefix: "v"                         # Release tag prefix (e.g. v1.2.3)
 
-# ── Polling ──────────────────────────────────────────────────────────
+# ── Polling (runner only) ────────────────────────────────────────────
 
-poll_interval_seconds: 30               # Seconds between issue polls
+poll_interval_seconds: 30               # Seconds between issue polls in `foundry run`
+
+# ── Execution (runner only) ──────────────────────────────────────────
+
+worker:
+  type: "local-tmux"                    # or "subprocess"; the Action always uses subprocess
+
+state_store:
+  type: "file"                          # the only implementation; ~/.joynt-foundry/
 
 # ── GitHub Backend ──────────────────────────────────────────────────
 
@@ -100,13 +108,13 @@ agent_backends:
 
 agent_label_map:
   "agent:claude": "claude-code"
-  "agent:cursor": "cursor"
+  # "agent:aider": "aider"          # any backend defined above
 
 # ── Preview Environments (optional) ─────────────────────────────────
 
 preview:
-  mode: "template"                        # "template" = URL from config, "provider" = URL from command output
-  url_template: "https://pr-{issue}.preview.example.com"   # URL template (works in both modes)
+  mode: "template"                        # "template" = URL only, no command; "provider" = run up/down commands
+  url_template: "https://pr-{issue}.preview.example.com"   # when set, always the URL (both modes)
   # up_command: "deploy.sh up {issue} {branch}"   # mode:provider — deploy command
   # down_command: "deploy.sh down {issue} {branch}"  # mode:provider — teardown command
   comment: true                           # Post/update PR comment (default true)
@@ -137,13 +145,13 @@ Template for feature branch names. Variables: `{issue}` (number), `{slug}` (slug
 ### `worktree_base`
 Base directory for git worktrees. Resolved relative to the repo root. Default: `./wts` (inside the repo, gitignored).
 
-### `tmux_template`
-Template for tmux session names. Variable: `{issue}` (number).
+### `tmux_template` (runner only)
+Template for tmux session names. Variable: `{issue}` (number). The Action uses the same string as the worker id but no tmux is involved.
 
-### `max_sessions`
-Maximum number of concurrent agent sessions. Set based on machine resources.
+### `max_sessions` (runner only)
+Maximum number of concurrent agent sessions on one runner. Under the Action, concurrency is one job per issue via the workflow's `concurrency` group.
 
-### `max_verify_parallel`
+### `max_verify_parallel` (runner only)
 Maximum number of concurrent verification pipelines. Default 1 to avoid resource contention during builds.
 
 ### `max_input_rounds`
@@ -156,7 +164,7 @@ Ordered list of shell commands run in the task worktree before opening a PR. Fai
 Shell command run after merging into integration (via `foundry review`).
 
 ### `comment_triggers`
-Strings matched in issue/PR comments to trigger agent commands. Foundry checks for these on every poll cycle. Commands that accept a message (`continue`, `start`, `plan`) match as a prefix — everything after the trigger string becomes the message. See [Controlling Foundry](workflows.md#controlling-foundry) for the full command reference.
+Strings matched in issue comments to trigger agent commands. The runner checks on every poll cycle; the Action reacts to the `issue_comment` event immediately. Commands that accept a message (`continue`, `start`, `plan`) match as a prefix — everything after the trigger string becomes the message. See [Controlling Foundry](workflows.md#controlling-foundry) for the full command reference.
 
 ### `version_sources`
 **Ordered** list of version file paths (relative to repo root). All are bumped to the same version on `foundry release`. The first entry is the primary version source. Supported file types: `package.json`, `Cargo.toml`, `pyproject.toml`.
@@ -164,8 +172,14 @@ Strings matched in issue/PR comments to trigger agent commands. Foundry checks f
 ### `tag_prefix`
 Prefix for release tags. Default `v` produces tags like `v1.2.3`.
 
-### `poll_interval_seconds`
-How often the runner polls GitHub for ready issues.
+### `poll_interval_seconds` (runner only)
+How often `foundry run` polls GitHub for ready issues. `foundry serve` and the Action are event-driven.
+
+### `worker` (runner only)
+How the agent process is executed. `local-tmux` (default) runs it in a tmux session you can `foundry attach` to. `subprocess` runs it as a child of the Foundry process, streaming output to stdout. `foundry action` always uses `subprocess` regardless of this setting.
+
+### `state_store` (runner only)
+Where task state is persisted. `file` (the only implementation) writes atomically under `~/.joynt-foundry/`. The Action starts every job with an empty store and rebuilds tasks from GitHub.
 
 ### `default_agent_backend`
 Name of the backend to use when no label-based match is found.
@@ -182,9 +196,9 @@ Optional mapping from issue label names to backend names. When an issue has a ma
 ### `preview`
 Configuration for preview/staging environments deployed per-task.
 
-- `mode` — `"template"` or `"provider"`. In `template` mode, the preview URL is constructed from `url_template` (no command executed). In `provider` mode, `up_command` is executed to deploy; the URL is taken from command output if provided, otherwise falls back to `url_template`.
-- `url_template` — URL template. Works in **both** modes: primary URL source in `template` mode, fallback in `provider` mode (so the command doesn't need to output the URL). Template variables: `{branch}`, `{issue}`, `{repo}`, `{pr_number}`. Also exposed as env vars `FOUNDRY_BRANCH`, `FOUNDRY_ISSUE`, `FOUNDRY_REPO`, `FOUNDRY_PR_NUMBER`.
-- `up_command` — Shell command to spin up the preview environment (`provider` mode). If `url_template` is also set, the command doesn't need to output anything. Otherwise, it must print a URL or JSON `{ "url": "..." }` to stdout. Same template variables as `url_template`.
+- `mode` — `"template"` or `"provider"`. In `template` mode no command runs; the URL comes from `url_template`. In `provider` mode `up_command` runs to deploy and `down_command` to tear down.
+- `url_template` — When set, this is **always** the preview URL in either mode; command output is ignored. Only when it is absent does provider mode read the URL from the command's stdout. Template variables: `{branch}`, `{issue}`, `{repo}`, `{pr_number}`, `{sha}`. Also exposed as env vars `FOUNDRY_BRANCH`, `FOUNDRY_ISSUE`, `FOUNDRY_REPO`, `FOUNDRY_PR_NUMBER`, `FOUNDRY_SHA`.
+- `up_command` — Shell command to spin up the preview environment (`provider` mode). Without `url_template` it must print a URL, or JSON `{ "url": "..." }`, to stdout. Same template variables. Under the Action, `gh` is available and `GH_TOKEN` is set, so `gh workflow run your-deploy.yml -f pr={pr_number}` is the common shape; it needs `actions: write`.
 - `down_command` — Shell command to tear down the preview environment (`provider` mode). Same template variables.
 - `comment` — Whether to post/update a PR comment with the preview URL. Default `true`.
 

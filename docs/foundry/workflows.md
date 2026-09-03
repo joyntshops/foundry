@@ -1,16 +1,18 @@
 # Workflows
 
+Everything on this page is driven from GitHub: labels start work, comments steer it, reviews send it back, merges finish it. It reads the same whether Foundry runs as a GitHub Action or as an always-on runner; where the two differ, it says so.
+
 ## Standard Development Flow
 
 ```
 1. Create GitHub Issue
 2. Label: state:ready
-3. foundry run claims → creates worktree → launches agent
+3. Foundry claims → creates worktree → launches agent
 4. Agent implements task
 5. Foundry verifies (lint/build/test)
 6. PR opened → integration
 7. Human reviews PR
-8. foundry review <pr> merges into integration
+8. Approve and merge the PR into integration (foundry review <pr> from a runner rebases first)
 9. PR integration → test (manual)
 10. PR integration → main (manual)
 ```
@@ -66,7 +68,7 @@ Claimed tasks do not consume a `max_sessions` slot (no agent is running), and th
 
 ## Controlling Foundry
 
-Comment `@foundry <command>` on an issue or PR to control the agent. Foundry checks for commands on every poll cycle.
+Comment `@foundry <command>` on an issue to control the agent. The runner checks for commands on every poll cycle; the Action reacts to each comment as it is posted.
 
 ### Command Reference
 
@@ -89,8 +91,8 @@ Also add a test for the edge case where the input is empty.
 
 ### Where to comment
 
-- **Issue comments** — always work for any command
-- **PR comments** — work once a PR exists (Foundry checks the PR when `task.pr_number` is set)
+- **Issue comments** — always work for any command, in both modes
+- **PR comments** — work under the runner once a PR exists. Not yet under the Action, where a PR comment carries the PR number rather than the issue number; comment on the issue instead.
 
 ### How PR feedback works
 
@@ -113,6 +115,8 @@ Two ways to send the agent back to work on a PR:
 2. Foundry stops the agent, removes the worktree, and re-creates from scratch
 
 ## Review Flow
+
+`foundry review` is a CLI command run from a checkout with the `integration` branch available; it is not yet triggered automatically by PR approval under the Action.
 
 ```bash
 foundry review 42
@@ -156,12 +160,10 @@ foundry reset --all --force    # reset every tracked task
 | `foundry reset <issue>` | Single task | Yes | Yes | Yes → `state:ready` |
 | `foundry reset --all` | All tasks | Yes | Yes | Yes → `state:ready` |
 
-## Concurrent Sessions
+## Concurrent Tasks
 
-Foundry supports multiple tasks in parallel (default: 4). Each task gets its own:
-- Git worktree
-- Feature branch
-- tmux session
-- Agent process
+Each task gets its own git worktree, feature branch, and agent process.
 
-Configure `max_sessions` in `.joynt-foundry.yml` to match your machine's capacity.
+**Runner:** up to `max_sessions` tasks run in parallel on one machine (default 4), each in its own tmux session. Set it to match the machine.
+
+**Action:** every issue gets its own job, serialised per issue by the workflow's `concurrency` group. Parallelism across issues is bounded only by your GitHub plan's concurrent-job limit.
