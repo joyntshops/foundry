@@ -213,10 +213,12 @@ describe('EventHandler', () => {
       expect(mockWorkerHandleFor).toHaveBeenCalledWith('foundry-42');
       expect(mockWorkerKill).toHaveBeenCalled();
       expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'failed');
+      // setStateLabel strips every other state label, then adds the target.
       expect(github.transitionLabels).toHaveBeenCalledWith(
         'owner/repo', 42,
-        expect.arrayContaining(['state:in-progress']),
+        expect.arrayContaining(['state:in-progress', 'state:waiting-for-input', 'state:plan-review']),
         ['state:failed'],
+        undefined,
       );
     });
 
@@ -305,7 +307,12 @@ describe('EventHandler', () => {
         task,
       });
 
-      expect(github.addLabel).toHaveBeenCalledWith('owner/repo', 42, 'state:done');
+      expect(github.transitionLabels).toHaveBeenCalledWith(
+        'owner/repo', 42,
+        expect.arrayContaining(['state:ready-for-human-review', 'state:in-progress']),
+        ['state:done'],
+        undefined,
+      );
       expect(github.closeIssue).toHaveBeenCalledWith('owner/repo', 42);
       expect(state.removeTask).toHaveBeenCalledWith('owner/repo', 42);
     });
@@ -433,8 +440,9 @@ describe('EventHandler', () => {
 
       expect(github.transitionLabels).toHaveBeenCalledWith(
         'owner/repo', 42,
-        ['state:plan-review'],
+        expect.arrayContaining(['state:plan-review']),
         ['state:in-progress'],
+        undefined,
       );
       expect(mockWorkerSpawn).toHaveBeenCalled();
     });
