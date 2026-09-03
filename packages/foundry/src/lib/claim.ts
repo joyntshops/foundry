@@ -3,6 +3,7 @@
  */
 import * as github from './github.js';
 import * as state from './state.js';
+import { setStateLabel } from './labels.js';
 import type { FoundryConfig, GitHubIssue, TaskState } from '../types.js';
 
 interface ClaimInfo {
@@ -99,14 +100,9 @@ export async function claimIssue(
 ): Promise<boolean> {
   const runnerId = state.getRunnerId();
 
-  // Step 1: Swap labels — remove ready/failed (only if present), add in-progress
+  // Step 1: Make in-progress the sole state label
   const currentLabels = issue.labels.map(l => l.name);
-  await github.transitionLabels(
-    config.repo, issue.number,
-    [config.labels.ready, config.labels.failed],
-    [config.labels.in_progress],
-    currentLabels,
-  );
+  await setStateLabel(config, issue.number, 'in_progress', currentLabels);
 
   // Step 2: Post claim comment
   await github.addComment(config.repo, issue.number, buildClaimComment(claimInfo));
@@ -137,14 +133,9 @@ export async function claimIssueOnly(
 ): Promise<boolean> {
   const runnerId = state.getRunnerId();
 
-  // Step 1: Swap labels — remove claim/ready/failed (only if present), add in-progress
+  // Step 1: Make in-progress the sole state label
   const currentLabels = issue.labels.map(l => l.name);
-  await github.transitionLabels(
-    config.repo, issue.number,
-    [config.labels.claim, config.labels.ready, config.labels.failed],
-    [config.labels.in_progress],
-    currentLabels,
-  );
+  await setStateLabel(config, issue.number, 'in_progress', currentLabels);
 
   // Step 2: Post claim-only comment
   await github.addComment(config.repo, issue.number, buildClaimOnlyComment(claimInfo));
@@ -174,15 +165,10 @@ export function isClaimedByUs(config: FoundryConfig, issue: number): boolean {
 }
 
 /**
- * Mark an issue as failed on GitHub.
- * Removes in_progress/waiting_for_input, adds the failed label.
+ * Mark an issue as failed on GitHub: `failed` becomes the sole state label.
  */
 export async function markFailed(config: FoundryConfig, issue: number): Promise<void> {
-  await github.transitionLabels(
-    config.repo, issue,
-    [config.labels.in_progress, config.labels.waiting_for_input],
-    [config.labels.failed],
-  );
+  await setStateLabel(config, issue, 'failed');
 }
 
 function sleep(ms: number): Promise<void> {
