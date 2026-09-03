@@ -58,3 +58,7 @@ export function getAllTasks(repo: string): TaskState[] {
 export function listTaskIssueNumbers(repo: string): number[] {
   return store.listTaskIssueNumbers(repo);
 }
+
+export function getTask(repo: string, issue: number): TaskState | undefined {
+  return store.getTask(repo, issue);
+}
