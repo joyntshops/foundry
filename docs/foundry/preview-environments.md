@@ -142,7 +142,7 @@ Displays the preview URL, GitHub Deployment ID, and state (`active`, `inactive`,
 
 ## Automatic Lifecycle
 
-Previews are managed automatically by whichever mode is running Foundry (the Action or `foundry run` / `foundry serve`):
+Previews are managed automatically by the Action:
 
 | Event | Action |
 |-------|--------|
@@ -151,7 +151,7 @@ Previews are managed automatically by whichever mode is running Foundry (the Act
 | `@foundry stop` / `@foundry restart` / `@foundry start` | `previewDown` -- tear down before stopping or restarting |
 | `foundry reset` | `previewDown` -- tear down as part of full cleanup |
 
-No manual `foundry preview up/down` calls are needed during normal operation. The CLI subcommands exist for debugging and one-off use.
+No manual `foundry preview up/down` calls are needed during normal operation. The CLI subcommands exist for debugging and one-off use; they rebuild the task from the issue, so they work from any checkout.
 
 ## Manual Test Checklist
 

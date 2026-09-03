@@ -7,7 +7,6 @@
 export interface AgentBackendDef {
   type: 'command';
   command: string;
-  resume_command?: string;   // template with {session_id}, {prompt}, {log_dir}
   env?: Record<string, string>;
 }
 
@@ -33,10 +32,7 @@ export interface FoundryConfig {
 
   branch_template: string;              // default "feature/{issue}-{slug}"
   worktree_base: string;                // default "../wts"
-  tmux_template: string;               // default "foundry-{issue}"
 
-  max_sessions: number;                 // default 4
-  max_verify_parallel: number;          // default 1
   max_input_rounds: number;             // default 3
 
   verify: string[];                     // e.g. ["npm run lint", "npm run build", "npm test"]
@@ -59,16 +55,8 @@ export interface FoundryConfig {
   agent_backends: Record<string, AgentBackendDef>;
 
   agent_label_map?: Record<string, string>;   // label → backend name
-  poll_interval_seconds: number;              // default 30
   github_backend: 'gh-cli' | 'octokit';      // default "gh-cli"
 
-  worker?: {
-    type: 'local-tmux' | 'subprocess'; // 'subprocess' is used by `foundry action`
-  };
-
-  state_store?: {
-    type: 'file';                     // extensible to 'sqlite', 'postgres', etc.
-  };
 
   preview?: {
     mode: 'template' | 'provider';
@@ -108,7 +96,7 @@ export interface TaskState {
   repo: string;
   branch: string;
   worktree: string;
-  tmux_session: string;
+  tmux_session: string;                 // worker id (`foundry-<issue>`); name kept for claim-comment compatibility
   pr_url?: string;
   pr_number?: number;
   agent_backend: string;
@@ -146,15 +134,9 @@ export interface AgentLaunchParams {
   permission_mode: string;
 }
 
-export interface ResumeParams extends AgentLaunchParams {
-  session_id: string;
-  prompt: string;
-}
-
 export interface AgentBackend {
   name: string;
   resolveCommand(params: AgentLaunchParams): string;
-  resolveResumeCommand(params: ResumeParams): string | null;
   resolveEnv(params: AgentLaunchParams): Record<string, string>;
 }
 

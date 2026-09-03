@@ -55,9 +55,6 @@ function makeConfig(overrides: Partial<FoundryConfig> = {}): FoundryConfig {
     },
     branch_template: 'feature/{issue}-{slug}',
     worktree_base: '../wts',
-    tmux_template: 'foundry-{issue}',
-    max_sessions: 4,
-    max_verify_parallel: 1,
     max_input_rounds: 3,
     verify: ['npm test'],
     integration_rebuild: 'npm run build',
@@ -76,7 +73,6 @@ function makeConfig(overrides: Partial<FoundryConfig> = {}): FoundryConfig {
     agent_backends: {
       command: { type: 'command', command: 'echo hello' },
     },
-    poll_interval_seconds: 30,
     github_backend: 'gh-cli',
     ...overrides,
   };

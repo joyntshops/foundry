@@ -1,12 +1,12 @@
 /**
- * Worker interface — abstracts agent execution away from tmux.
+ * Worker interface — how an agent process is executed.
  *
- * Implementations: LocalTmuxWorker (local tmux sessions),
- * future: ContainerWorker, CloudWorker, etc.
+ * Implementation: SubprocessWorker (agent as a child of the job).
+ * The interface is kept so another execution model can be added later.
  */
 
 export interface WorkerHandle {
-  /** Unique worker identifier (e.g. tmux session name) */
+  /** Unique worker identifier (e.g. `foundry-42`) */
   id: string;
 
   /** Check if the worker process is still running */
@@ -43,7 +43,7 @@ export interface WorkerSpawnOpts {
 }
 
 export interface Worker {
-  /** Worker backend name (e.g. 'local-tmux') */
+  /** Worker backend name (e.g. 'subprocess') */
   name: string;
 
   /** Spawn a new worker process and return a handle to it */

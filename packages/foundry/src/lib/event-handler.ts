@@ -17,7 +17,7 @@ import * as agentOutput from './agent-output.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
-import type { FoundryConfig, TaskState, AgentLaunchParams, AgentOutcome, ResumeParams } from '../types.js';
+import type { FoundryConfig, TaskState, AgentLaunchParams, AgentOutcome } from '../types.js';
 import type {
   FoundryEvent,
   CommandEvent,
@@ -40,8 +40,8 @@ function resolvePermissionMode(issueLabels: string[], config: FoundryConfig): st
   return '--dangerously-skip-permissions';
 }
 
-function getWorker(config: FoundryConfig): Worker {
-  return resolveWorker(config.worker?.type);
+function getWorker(_config: FoundryConfig): Worker {
+  return resolveWorker('subprocess');
 }
 
 async function postToConversationTarget(config: FoundryConfig, task: TaskState, body: string): Promise<void> {
@@ -135,7 +135,7 @@ export class EventHandler {
     const runnerId = state.getRunnerId();
     const branch = git.resolveBranchName(config.branch_template, issue.number, issue.title);
     const worktree = git.resolveWorktreePath(config.worktree_base, issue.number, issue.title, repoDir);
-    const tmuxSession = git.resolveTmuxName(config.tmux_template, issue.number);
+    const workerId = git.workerId(issue.number);
     const issueLabels = issue.labels.map(l => l.name);
     const backend = resolveBackendForIssue(config, issueLabels);
 
@@ -145,7 +145,7 @@ export class EventHandler {
       runner_id: runnerId,
       branch,
       worktree,
-      tmux_session: tmuxSession,
+      tmux_session: workerId,
       agent_backend: backend.name,
     });
 
@@ -207,7 +207,7 @@ export class EventHandler {
 
     const worker = getWorker(config);
     await worker.spawn({
-      id: tmuxSession,
+      id: workerId,
       cwd: worktree,
       command: agentCommand,
       env: agentEnv,
@@ -219,7 +219,7 @@ export class EventHandler {
       repo: config.repo,
       branch,
       worktree,
-      tmux_session: tmuxSession,
+      tmux_session: workerId,
       agent_backend: backend.name,
       agent_command: agentCommand,
       permission_mode: permissionMode,
@@ -237,7 +237,7 @@ export class EventHandler {
       historyEntry: 'Agent started',
     });
 
-    log.success(`Agent launched in ${tmuxSession}`);
+    log.success(`Agent launched in ${workerId}`);
   }
 
   // ── Issue Claim (claim only, no agent) ───────────────────────────────
@@ -250,7 +250,7 @@ export class EventHandler {
     const runnerId = state.getRunnerId();
     const branch = git.resolveBranchName(config.branch_template, issue.number, issue.title);
     const worktree = git.resolveWorktreePath(config.worktree_base, issue.number, issue.title, repoDir);
-    const tmuxSession = git.resolveTmuxName(config.tmux_template, issue.number);
+    const workerId = git.workerId(issue.number);
     const issueLabels = issue.labels.map(l => l.name);
     const backend = resolveBackendForIssue(config, issueLabels);
 
@@ -260,7 +260,7 @@ export class EventHandler {
       runner_id: runnerId,
       branch,
       worktree,
-      tmux_session: tmuxSession,
+      tmux_session: workerId,
       agent_backend: backend.name,
     });
 
@@ -306,7 +306,7 @@ export class EventHandler {
       repo: config.repo,
       branch,
       worktree,
-      tmux_session: tmuxSession,
+      tmux_session: workerId,
       agent_backend: backend.name,
       status: 'claimed',
       claimed_at: new Date().toISOString(),
@@ -956,25 +956,9 @@ export class EventHandler {
       permission_mode: '--dangerously-skip-permissions',
     };
 
-    let command: string;
-
-    if (task.session_id) {
-      const resumeParams: ResumeParams = {
-        ...launchParams,
-        session_id: task.session_id,
-        prompt: humanResponse.replace(/'/g, "'\\''"),
-      };
-      const resumeCmd = backend.resolveResumeCommand(resumeParams);
-      if (resumeCmd) {
-        command = resumeCmd;
-      } else {
-        log.warn(`Backend "${backend.name}" has no resume_command. Re-launching with feedback.`);
-        command = backend.resolveCommand(launchParams);
-      }
-    } else {
-      log.warn(`No session_id for #${task.issue}. Re-launching agent with feedback.`);
-      command = backend.resolveCommand(launchParams);
-    }
+    // The agent is relaunched with the human's message as its brief. Sessions
+    // do not survive Actions jobs, so there is nothing to resume into.
+    const command = backend.resolveCommand(launchParams);
 
     await worker.spawn({
       id: task.tmux_session,
@@ -1025,25 +1009,7 @@ export class EventHandler {
       permission_mode: '--dangerously-skip-permissions',
     };
 
-    let command: string;
-
-    if (task.session_id) {
-      const resumeParams: ResumeParams = {
-        ...launchParams,
-        session_id: task.session_id,
-        prompt: feedback.replace(/'/g, "'\\''"),
-      };
-      const resumeCmd = backend.resolveResumeCommand(resumeParams);
-      if (resumeCmd) {
-        command = resumeCmd;
-      } else {
-        log.warn(`Backend "${backend.name}" has no resume_command. Re-launching with feedback.`);
-        command = backend.resolveCommand(launchParams);
-      }
-    } else {
-      log.warn(`No session_id for #${task.issue}. Re-launching agent with PR feedback.`);
-      command = backend.resolveCommand(launchParams);
-    }
+    const command = backend.resolveCommand(launchParams);
 
     await worker.spawn({
       id: task.tmux_session,

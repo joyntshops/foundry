@@ -1,27 +1,10 @@
 /**
- * Webhook processing — signature verification and GitHub event mapping.
- *
- * Converts incoming GitHub webhook payloads into FoundryEvent instances,
- * the same types produced by the Poller in polling mode.
+ * GitHub event mapping — converts a GitHub event payload (as delivered to a
+ * GitHub Actions job in $GITHUB_EVENT_PATH) into FoundryEvent instances.
  */
-import * as crypto from 'node:crypto';
 import type { FoundryEvent } from './events.js';
 import type { FoundryConfig, TaskState, GitHubIssue } from '../types.js';
 import * as state from './state.js';
-
-// ── Signature verification ──────────────────────────────────────────────
-
-/**
- * Verify the X-Hub-Signature-256 header from GitHub webhooks.
- */
-export function verifyWebhookSignature(payload: string, signature: string, secret: string): boolean {
-  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(payload).digest('hex');
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-  } catch {
-    return false;
-  }
-}
 
 // ── Event mapping ───────────────────────────────────────────────────────
 

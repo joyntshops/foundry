@@ -1,19 +1,24 @@
 /**
- * foundry preview — manage preview environments.
+ * foundry preview — manage a task's preview environment by hand.
  *
- * foundry preview up <issue>      — trigger preview deploy
- * foundry preview down <issue>    — tear down preview
- * foundry preview status <issue>  — show preview URL, deployment ID, state
+ * foundry preview up <issue>      — trigger the preview deploy
+ * foundry preview down <issue>    — tear the preview down
+ * foundry preview status <issue>  — show URL, deployment id, state
+ *
+ * The task is rebuilt from GitHub when there is no local state, so these
+ * work from any checkout of the repo.
  */
-import { loadConfigSafe } from '../config.js';
+import { loadConfigSafe, getConfigDir } from '../config.js';
 import * as state from '../lib/state.js';
 import * as preview from '../lib/preview.js';
+import { recoverTask } from '../lib/task-recovery.js';
 import * as log from '../lib/log.js';
+import type { FoundryConfig, TaskState } from '../types.js';
 
-function findTask(issueArg: string) {
+async function findTask(issueArg: string): Promise<{ config: FoundryConfig; task: TaskState } | null> {
   const config = loadConfigSafe();
   if (!config) {
-    log.error('No config found. Run `foundry init` first.');
+    log.error('No .joynt-foundry.yml found. Run from the repo root.');
     return null;
   }
 
@@ -23,15 +28,14 @@ function findTask(issueArg: string) {
     return null;
   }
 
-  const tasks = state.getAllTasks(config.repo);
-  const task = tasks.find(t => t.issue === issueNum);
-  if (!task) {
-    log.error(`No task found for issue #${issueNum} in state.`);
+  if (!config.preview) {
+    log.error('No `preview` section in .joynt-foundry.yml.');
     return null;
   }
 
-  if (!config.preview) {
-    log.error('No preview configuration found in .joynt-foundry.yml.');
+  const task = state.getTask(config.repo, issueNum) ?? await recoverTask(config, getConfigDir(), issueNum);
+  if (!task) {
+    log.error(`#${issueNum} has never been claimed by Foundry (no claim comment).`);
     return null;
   }
 
@@ -39,7 +43,7 @@ function findTask(issueArg: string) {
 }
 
 export async function runPreviewUp(issueArg: string): Promise<void> {
-  const ctx = findTask(issueArg);
+  const ctx = await findTask(issueArg);
   if (!ctx) return;
 
   log.info(`Triggering preview up for #${ctx.task.issue}...`);
@@ -48,7 +52,7 @@ export async function runPreviewUp(issueArg: string): Promise<void> {
 }
 
 export async function runPreviewDown(issueArg: string): Promise<void> {
-  const ctx = findTask(issueArg);
+  const ctx = await findTask(issueArg);
   if (!ctx) return;
 
   if (!ctx.task.preview_url) {
@@ -62,7 +66,7 @@ export async function runPreviewDown(issueArg: string): Promise<void> {
 }
 
 export async function runPreviewStatus(issueArg: string): Promise<void> {
-  const ctx = findTask(issueArg);
+  const ctx = await findTask(issueArg);
   if (!ctx) return;
 
   const status = preview.getPreviewStatus(ctx.config, ctx.task);

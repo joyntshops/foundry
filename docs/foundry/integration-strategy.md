@@ -15,7 +15,7 @@ feature/63-add-api  ───┘
 | Branch | Purpose | Who merges |
 |--------|---------|------------|
 | `feature/*` | Individual task branches | Foundry (via PR) |
-| `integration` | Collects all features | Human approval, then merge (`foundry review` from a runner rebases first; not yet automated under the Action) |
+| `integration` | Collects all features | Human approval, then merge. `foundry review <pr>` from a checkout rebases first; automating it on approval is planned. |
 | `test` | Staging/QA | Manual PR from integration |
 | `main` | Production | Manual PR from integration |
 

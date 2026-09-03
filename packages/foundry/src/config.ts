@@ -27,9 +27,6 @@ const DEFAULTS: FoundryConfig = {
   },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
-  tmux_template: 'foundry-{issue}',
-  max_sessions: 4,
-  max_verify_parallel: 1,
   max_input_rounds: 3,
   verify: [],
   integration_rebuild: '',
@@ -51,7 +48,6 @@ const DEFAULTS: FoundryConfig = {
       command: 'echo "No agent command configured. Set agent_backends in .joynt-foundry.yml"',
     },
   },
-  poll_interval_seconds: 30,
   github_backend: 'octokit' as const,
 };
 

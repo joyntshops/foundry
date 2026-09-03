@@ -108,9 +108,6 @@ const DEFAULT_CONFIG = {
   },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
-  tmux_template: 'foundry-{issue}',
-  max_sessions: 4,
-  max_verify_parallel: 1,
   verify: [] as string[],
   integration_rebuild: '',
   comment_triggers: {
@@ -124,13 +121,11 @@ const DEFAULT_CONFIG = {
   },
   version_sources: [] as string[],
   tag_prefix: 'v',
-  poll_interval_seconds: 30,
   default_agent_backend: 'claude-code',
   agent_backends: {
     'claude-code': {
       type: 'command',
       command: 'claude --dangerously-skip-permissions -p "You are working on issue #{issue_number}: {title}. The issue is at {issue_url}. Read the issue body and implement the task. When done, create a commit with your changes." --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
-      resume_command: 'claude --dangerously-skip-permissions -p \'{prompt}\' --resume "{session_id}" --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
     },
     command: {
       type: 'command',
