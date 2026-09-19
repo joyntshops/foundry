@@ -6,7 +6,10 @@
 
 export interface AgentBackendDef {
   type: 'command';
-  command: string;
+  /** Use a command Foundry maintains instead of copying one into config, where it would drift. */
+  preset?: 'claude-code';
+  /** Required unless `preset` is set. Overrides the preset's command when both are given. */
+  command?: string;
   env?: Record<string, string>;
 }
 
@@ -160,7 +163,7 @@ export interface GitHubComment {
 
 // ── Agent Outcome ────────────────────────────────────────────────────────
 
-export type AgentOutcomeType = 'completed' | 'needs-input' | 'errored' | 'indeterminate' | 'plan-completed';
+export type AgentOutcomeType = 'completed' | 'needs-input' | 'plan-completed' | 'blocked' | 'errored';
 
 export interface AskUserQuestionOption {
   label: string;
@@ -176,6 +179,11 @@ export interface AskUserQuestionData {
 export interface AgentOutcome {
   type: AgentOutcomeType;
   session_id: string | null;
+  /** Text to show a human: the report summary, the plan, or a failure explanation. Never branched on. */
   final_message: string | null;
   ask_user_questions: AskUserQuestionData[] | null;
+  /** The agent's typed report, when it submitted a valid one. */
+  report?: import('./lib/agent-report.js').AgentReport | null;
+  /** Why the task failed or is blocked, for `errored` and `blocked`. */
+  reason?: string;
 }

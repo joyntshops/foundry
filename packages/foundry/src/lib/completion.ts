@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import * as state from './state.js';
 import * as git from './git.js';
 import * as agentOutput from './agent-output.js';
+import { reportFilePath } from './agent-report.js';
 import type { FoundryConfig, TaskState } from '../types.js';
 import type { AgentCompletedEvent } from './events.js';
 
@@ -30,6 +31,7 @@ export function buildAgentCompletedEvent(
   const baseBranch = resolveBaseBranch(repoDir);
   const outcome = agentOutput.determineOutcome(logPath, task.worktree, baseBranch, {
     permissionMode: task.permission_mode,
+    reportFile: reportFilePath(state.getTaskStateDir(config.repo, task.issue)),
   });
   return { type: 'agent_completed', task, outcome };
 }

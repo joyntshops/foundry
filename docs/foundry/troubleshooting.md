@@ -43,6 +43,14 @@ gh secret list --repo OWNER/REPO                                                
 
 The token is tied to the Claude subscription of whoever ran `claude setup-token`, and it expires; regenerate and update the secret.
 
+## `The agent finished without submitting a report`
+
+Foundry decides what happens next from a typed report, never from the agent's prose, and fails closed without one. A custom backend `command` written before v0.1.36 lacks it. Either switch to `preset: claude-code`, or add `--json-schema "$FOUNDRY_REPORT_SCHEMA"` to a Claude Code command, or have another agent run `foundry report` before exiting. See [The agent report](agent-backends.md#the-agent-report).
+
+## `The agent reported the task done, but the branch has no commits`
+
+Exactly that: the report said `done` and git disagrees. Usually the agent edited files and never committed. `@foundry restart`, and say "commit your changes" in the issue if it recurs.
+
 ## Verification failed
 
 Foundry labels the task `state:failed` and posts each command's result and the failing output on the issue. Fix the cause (often the verify command itself, or a dependency the runner image lacks) and `@foundry restart`, or check the branch out locally and run the commands by hand. A verify-to-agent retry loop is planned; today a failure stops the task.

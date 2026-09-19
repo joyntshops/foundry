@@ -125,7 +125,7 @@ const DEFAULT_CONFIG = {
   agent_backends: {
     'claude-code': {
       type: 'command',
-      command: 'claude --dangerously-skip-permissions -p "You are working on issue #{issue_number}: {title}. The issue is at {issue_url}. Read the issue body and implement the task. When done, create a commit with your changes." --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log',
+      preset: 'claude-code',
     },
     command: {
       type: 'command',

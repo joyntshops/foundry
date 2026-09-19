@@ -80,10 +80,7 @@ default_agent_backend: "claude-code"    # Backend used when no label match
 agent_backends:
   claude-code:
     type: command
-    command: >-
-      claude --dangerously-skip-permissions
-      -p "Implement issue #{issue_number}: {title}. See {issue_url}"
-      2>&1 | tee {log_dir}/agent.log
+    preset: claude-code      # Foundry's maintained Claude Code command; see Agent Backends
 
   command:
     type: command
@@ -154,7 +151,8 @@ Name of the backend to use when no label-based match is found.
 ### `agent_backends`
 Map of backend definitions. Each backend has:
 - `type`: Must be `command`
-- `command`: Shell command with template variable interpolation
+- `preset`: `claude-code` uses the command Foundry maintains, so config never carries a stale copy
+- `command`: Shell command with template variable interpolation. Required without `preset`; overrides it when both are set. It must end the run with an [agent report](agent-backends.md#the-agent-report).
 - `env` (optional): Environment variables (also support template interpolation)
 
 There is no resume command. When a human answers or requests changes, the agent is relaunched with the message as its brief; sessions do not survive jobs.
