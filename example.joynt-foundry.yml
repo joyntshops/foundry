@@ -68,19 +68,16 @@ default_agent_backend: "claude-code"
 agent_backends:
   claude-code:
     type: command
-    # {permission_mode} is filled from the issue's mode:* label.
-    # CLAUDE_CODE_OAUTH_TOKEN in the job environment authenticates the CLI.
-    command: >-
-      claude {permission_mode}
-      -p "You are working on issue #{issue_number}: {title}.
-      The issue is at {issue_url}. Read the issue body and implement the task.
-      When done, create a commit with your changes."
-      --verbose --output-format stream-json 2>&1 | tee {log_dir}/agent.log
+    preset: claude-code      # Foundry's maintained Claude Code command; see Agent Backends
+    # To customise, replace `preset` with your own `command`. It must end the run
+    # with a report: pass --json-schema "$FOUNDRY_REPORT_SCHEMA" (Claude Code) or
+    # have the agent run `foundry report`. Take the issue title from
+    # "$FOUNDRY_ISSUE_TITLE", never from an interpolated {title} outside double quotes.
 
   # Any CLI works. Examples:
   # aider:
   #   type: command
-  #   command: aider --yes --message "Implement issue #{issue_number}: {title}. See {issue_url}" 2>&1 | tee {log_dir}/agent.log
+  #   command: aider --yes --message "Implement issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. See {issue_url}. When you stop, run: foundry report --status done|needs_input|blocked --summary '...'" 2>&1 | tee {log_dir}/agent.log
   #   env:
   #     AIDER_MODEL: "claude-sonnet-5"
 

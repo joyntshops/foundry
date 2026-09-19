@@ -7,8 +7,42 @@ Foundry is **not coupled to any specific coding agent**. It uses a pluggable bac
 1. Foundry claims a task and creates a git worktree
 2. Foundry resolves the agent backend (from config or an `agent:*` issue label)
 3. Foundry launches the backend's command in the worktree
-4. The agent runs until it exits
-5. Foundry classifies the outcome from the transcript and runs verification
+4. The agent runs until it exits, and submits a **report**
+5. Foundry branches on the report's `status`, checked against facts it can see itself (did the run error, are there commits), then runs verification
+
+## The agent report
+
+Foundry never reads an agent's prose to decide what happens next. The agent ends its run with a typed report:
+
+| Field | |
+|---|---|
+| `status` | `done` · `needs_input` · `plan_ready` · `blocked` |
+| `summary` | What was done or why it stopped. Becomes the PR description. |
+| `assumptions[]` | Decisions made without asking. Listed in the PR for the reviewer. |
+| `questions[]` | For `needs_input`: `question`, optional `options[{label, description}]`, optional `multi_select`. |
+| `plan` | For `plan_ready`: the plan in Markdown. |
+
+What Foundry does with it:
+
+| Evidence | Transition |
+|---|---|
+| The run itself failed (`is_error`, non-`success` subtype) | `state:failed` |
+| No report, or an invalid one | `state:failed`, with the reason. Foundry fails closed; it never guesses. |
+| `needs_input` | questions posted, `state:waiting-for-input` (even if commits exist: partial work is not completion) |
+| `plan_ready`, or `done` in plan mode | plan posted, `state:plan-review` |
+| `blocked` | `state:failed`, summary posted |
+| `done` but no commits beyond the base | `state:failed`: a contradiction |
+| `done` with commits | verify → PR |
+
+Two transports feed the same report:
+
+- **Structured output (Claude Code).** Every launch has `FOUNDRY_REPORT_SCHEMA` in its environment. Passing `--json-schema "$FOUNDRY_REPORT_SCHEMA"` makes Claude Code validate the report itself and attach it to the final `result` event. The preset does this.
+- **`foundry report` (anything else).** The agent runs it before exiting; it validates, writes `$FOUNDRY_REPORT_FILE`, and exits non-zero with a precise message on bad input so the agent can retry:
+
+```bash
+foundry report --status needs_input --summary "Two layouts are possible." \
+  --question "Which layout? | Tabs; Single form"
+```
 
 ## Backend Types
 
@@ -40,13 +74,22 @@ default_agent_backend: claude-code
 agent_backends:
   claude-code:
     type: command
-    command: >-
-      claude --dangerously-skip-permissions
-      -p "You are working on issue #{issue_number}: {title}.
-      The issue is at {issue_url}. Read the issue body and implement the task.
-      When done, create a commit with your changes."
-      --output-format stream-json 2>&1 | tee {log_dir}/agent.log
+    preset: claude-code
 ```
+
+The preset expands to:
+
+```
+claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. …"
+  --json-schema "$FOUNDRY_REPORT_SCHEMA" --disallowedTools AskUserQuestion
+  --verbose --output-format stream-json < /dev/null 2>&1 | tee {log_dir}/agent.log
+```
+
+`AskUserQuestion` is disallowed because nobody is there to answer it; questions go in the report. `< /dev/null` stops the CLI waiting three seconds for stdin.
+
+### Untrusted text in commands
+
+Issue titles and bodies are written by whoever opened the issue and end up on a shell command line. Every launch gets `FOUNDRY_ISSUE_TITLE`, `FOUNDRY_ISSUE_BODY`, `FOUNDRY_ISSUE_NUMBER`, and `FOUNDRY_ISSUE_URL` in its environment; `"$FOUNDRY_ISSUE_TITLE"` is never re-evaluated by the shell, so prefer it. `{title}` and `{body}` still work and are escaped for use **inside double quotes only**.
 
 ### Multiple Backends
 
@@ -56,10 +99,7 @@ default_agent_backend: claude-code
 agent_backends:
   claude-code:
     type: command
-    command: >-
-      claude --dangerously-skip-permissions
-      -p "Implement issue #{issue_number}: {title}. Issue: {issue_url}"
-      2>&1 | tee {log_dir}/agent.log
+    preset: claude-code
 
   cursor:
     type: command
@@ -70,7 +110,7 @@ agent_backends:
   aider:
     type: command
     command: >-
-      aider --yes --message "Implement issue #{issue_number}: {title}. See {issue_url}"
+      aider --yes --message "Implement issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. See {issue_url}. When you stop, run foundry report."
       2>&1 | tee {log_dir}/agent.log
     env:
       AIDER_MODEL: claude-3-5-sonnet-20241022

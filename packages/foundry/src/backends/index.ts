@@ -15,7 +15,14 @@ export function resolveBackend(config: FoundryConfig, backendName?: string): Age
   }
 
   if (def.type === 'command') {
-    return createCommandBackend(name, def);
+    if (def.preset && def.preset !== 'claude-code') {
+      throw new Error(`Agent backend "${name}": unknown preset "${def.preset}". Available: claude-code`);
+    }
+    const command = def.command ?? (def.preset === 'claude-code' ? CLAUDE_CODE_PRESET.command : undefined);
+    if (!command) {
+      throw new Error(`Agent backend "${name}" needs a \`command\` or \`preset: claude-code\`.`);
+    }
+    return createCommandBackend(name, { ...def, command });
   }
 
   throw new Error(`Unknown backend type: ${def.type}`);

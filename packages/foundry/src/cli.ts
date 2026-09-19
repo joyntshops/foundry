@@ -19,14 +19,20 @@ const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'
 
 const program = new Command();
 
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
 program
   .name('foundry')
   .description('Joynt Foundry — GitHub Issues → coding agent → verified pull requests')
   .version(pkg.version)
   .option('-v, --verbose', 'Enable verbose/debug output')
   .option('--github-backend <backend>', 'GitHub API client: gh-cli or octokit (env: FOUNDRY_GITHUB_BACKEND)')
-  .hook('preAction', async (thisCommand) => {
+  .hook('preAction', async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
+    // `report` is run by the agent itself and must not need GitHub credentials.
+    if (actionCommand.name() === 'report') return;
     if (opts.verbose) setVerbose(true);
     if (opts.githubBackend) process.env.FOUNDRY_GITHUB_BACKEND = opts.githubBackend;
     const config = loadConfigSafe() ?? undefined;
@@ -64,6 +70,21 @@ program
   .action(async (opts) => {
     const { runAction } = await import('./commands/action.js');
     await runAction(opts);
+  });
+
+program
+  .command('report')
+  .description('Submit the agent\'s outcome report (run by the agent, for backends without structured output)')
+  .requiredOption('--status <status>', 'done | needs_input | plan_ready | blocked')
+  .requiredOption('--summary <text>', 'What was done, or why the agent stopped')
+  .option('--assumption <text>', 'A decision made without asking (repeatable)', collect, [])
+  .option('--question <text>', 'A question for the human; options after " | " separated by ";" (repeatable)', collect, [])
+  .option('--plan <text>', 'The plan, for plan_ready')
+  .option('--plan-file <path>', 'Read the plan from a file')
+  .option('--file <path>', 'Where to write the report (default: $FOUNDRY_REPORT_FILE)')
+  .action(async (opts) => {
+    const { runReport } = await import('./commands/report.js');
+    await runReport(opts);
   });
 
 // ── Operate on a task from any checkout ───────────────────────────────

@@ -73,6 +73,19 @@ foundry action [--event-name <name>] [--event-path <file>]
 
 Useful locally as a dry run against a saved payload: any event that maps to nothing exits 0 after recovery, which checks auth and config. See [GitHub Action](github-action.md).
 
+### `foundry report`
+
+Run **by the agent**, not by you: how a backend without structured output tells Foundry what happened. Needs no GitHub credentials.
+
+```bash
+foundry report --status done --summary "Added the greeting." --assumption "Placed it last."
+foundry report --status needs_input --summary "Two layouts are possible." --question "Which layout? | Tabs; Single form"
+foundry report --status plan_ready --summary "Plan attached." --plan-file plan.md
+foundry report --status blocked --summary "The package registry is unreachable."
+```
+
+Validates, writes `$FOUNDRY_REPORT_FILE` (or `--file`), exits 2 with the reason on invalid input. See [The agent report](agent-backends.md#the-agent-report).
+
 ---
 
 ## Operate on a task

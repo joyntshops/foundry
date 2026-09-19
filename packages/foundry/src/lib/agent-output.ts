@@ -1,13 +1,23 @@
 /**
- * Stream-json log parser and agent outcome determination.
+ * Agent outcome determination.
  *
- * Claude Code in `-p --output-format stream-json` mode emits NDJSON events.
- * This module reads those logs and determines whether the agent completed work,
- * needs human input, or errored out.
+ * What happens after an agent exits is decided from three kinds of evidence,
+ * none of which is the agent's prose:
+ *
+ *   - facts Foundry can check itself: did the run error, are there commits;
+ *   - the agent's typed report (see agent-report.ts): done, needs_input,
+ *     plan_ready, or blocked;
+ *   - contradictions between the two, which fail closed.
+ *
+ * Claude Code in `-p --output-format stream-json` mode emits NDJSON events;
+ * this module reads them for the result event, the session id, and the
+ * structured report. Agents that emit nothing parseable are still supported
+ * through the report file.
  */
 import * as fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import type { AgentOutcome, AgentOutcomeType, AskUserQuestionData, AskUserQuestionOption } from '../types.js';
+import type { AgentOutcome, AskUserQuestionData } from '../types.js';
+import { validateReport, readReportFile, type AgentReport, type ReportResult } from './agent-report.js';
 
 // ── Stream-JSON Event Types ──────────────────────────────────────────────
 
@@ -15,6 +25,10 @@ interface StreamEvent {
   type: string;
   subtype?: string;
   session_id?: string;
+  /** Non-null on events that belong to a subagent rather than the main conversation. */
+  parent_tool_use_id?: string | null;
+  is_error?: boolean;
+  structured_output?: unknown;
   message?: {
     role?: string;
     content?: Array<{
@@ -23,9 +37,6 @@ interface StreamEvent {
       name?: string;
       input?: Record<string, any>;
     }>;
-  };
-  result?: {
-    subtype?: string;
   };
   [key: string]: any;
 }
@@ -44,7 +55,7 @@ export function parseStreamJsonLog(logPath: string): StreamEvent[] {
     try {
       events.push(JSON.parse(trimmed));
     } catch {
-      // skip corrupted lines
+      // Not every line is an event (stderr is tee'd into the same file).
     }
   }
 
@@ -60,10 +71,16 @@ export function extractSessionId(events: StreamEvent[]): string | null {
   return null;
 }
 
+/**
+ * The last text the main conversation produced. Subagent events are skipped:
+ * a subagent's closing sentence is not the agent's conclusion. Used for
+ * display and diagnostics only, never for branching.
+ */
 export function extractFinalAssistantMessage(events: StreamEvent[]): string | null {
   let lastAssistantText: string | null = null;
 
   for (const event of events) {
+    if (event.parent_tool_use_id) continue;
     if (event.type === 'assistant' && event.message?.role === 'assistant') {
       const textParts = (event.message.content ?? [])
         .filter(c => c.type === 'text' && c.text)
@@ -77,73 +94,21 @@ export function extractFinalAssistantMessage(events: StreamEvent[]): string | nu
   return lastAssistantText;
 }
 
-export function hasAskUserQuestion(events: StreamEvent[]): boolean {
-  for (const event of events) {
-    if (event.type === 'assistant' && event.message?.content) {
-      for (const block of event.message.content) {
-        if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
-          return true;
-        }
-      }
-    }
+/** The final `result` event of the main conversation, if the run got that far. */
+export function findResultEvent(events: StreamEvent[]): StreamEvent | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'result' && !events[i].parent_tool_use_id) return events[i];
   }
-  return false;
+  return null;
 }
 
-export function extractAskUserQuestions(events: StreamEvent[]): AskUserQuestionData[] {
-  const questions: AskUserQuestionData[] = [];
-
-  for (const event of events) {
-    if (event.type !== 'assistant' || !event.message?.content) continue;
-
-    for (const block of event.message.content) {
-      if (block.type !== 'tool_use' || block.name !== 'AskUserQuestion') continue;
-
-      const input = block.input;
-      if (!input?.questions || !Array.isArray(input.questions)) continue;
-
-      for (const q of input.questions) {
-        questions.push({
-          question: q.question ?? '',
-          options: (q.options ?? []).map((o: any): AskUserQuestionOption => ({
-            label: o.label ?? '',
-            description: o.description ?? '',
-          })),
-          multiSelect: q.multiSelect ?? false,
-        });
-      }
-    }
-  }
-
-  return questions;
+/** True when the run itself failed (auth, max turns, crash), as the agent CLI reports it. */
+export function resultIsError(result: StreamEvent): boolean {
+  if (result.is_error === true) return true;
+  return typeof result.subtype === 'string' && result.subtype !== 'success';
 }
 
-// ── Outcome Determination ────────────────────────────────────────────────
-
-const COMPLETION_PATTERNS = [
-  /\bcommitted\b/i,
-  /\bimplemented\b/i,
-  /\bcompleted?\b/i,
-  /\bpushed?\b/i,
-  /\bfinished\b/i,
-  /\ball changes have been\b/i,
-  /\bsuccessfully\b/i,
-  /\bcreated? (?:a )?commit\b/i,
-];
-
-const NEEDS_INPUT_PATTERNS = [
-  /\bcould you\b/i,
-  /\bcan you\b/i,
-  /\bplease (?:clarify|provide|specify|confirm)\b/i,
-  /\bunable to\b/i,
-  /\bI need (?:clarification|more information|input|guidance)\b/i,
-  /\bcould not (?:determine|find|resolve)\b/i,
-  /\bwhich (?:approach|option|method)\b/i,
-  /\bbefore I (?:can|proceed)\b/i,
-  /\bwhat (?:should|would you)\b/i,
-  /\bhow (?:should|would you)\b/i,
-  /\bdo you (?:want|prefer)\b/i,
-];
+// ── Facts ────────────────────────────────────────────────────────────────
 
 function hasCommitsBeyondBase(worktreePath: string, baseBranch: string): boolean {
   try {
@@ -158,119 +123,95 @@ function hasCommitsBeyondBase(worktreePath: string, baseBranch: string): boolean
   }
 }
 
-function messageMatchesPatterns(message: string, patterns: RegExp[]): boolean {
-  return patterns.some(p => p.test(message));
-}
-
-function endsWithQuestion(message: string): boolean {
-  const trimmed = message.trim();
-  return trimmed.endsWith('?');
-}
+// ── Outcome Determination ────────────────────────────────────────────────
 
 export interface DetermineOutcomeOptions {
   permissionMode?: string;
+  /** Where `foundry report` writes; consulted when the transcript carries no structured output. */
+  reportFile?: string;
 }
 
-export function determineOutcome(logPath: string, worktreePath: string, baseBranch: string, options?: DetermineOutcomeOptions): AgentOutcome {
+function toQuestionData(report: AgentReport): AskUserQuestionData[] {
+  return (report.questions ?? []).map(q => ({
+    question: q.question,
+    options: (q.options ?? []).map(o => ({ label: o.label, description: o.description ?? '' })),
+    multiSelect: q.multi_select === true,
+  }));
+}
+
+export function determineOutcome(
+  logPath: string,
+  worktreePath: string,
+  baseBranch: string,
+  options?: DetermineOutcomeOptions,
+): AgentOutcome {
   const events = parseStreamJsonLog(logPath);
-
-  if (events.length === 0) {
-    return {
-      type: 'errored',
-      session_id: null,
-      final_message: null,
-      ask_user_questions: null,
-    };
-  }
-
   const sessionId = extractSessionId(events);
   const finalMessage = extractFinalAssistantMessage(events);
-  const askQuestions = extractAskUserQuestions(events);
+  const result = findResultEvent(events);
 
-  // Check for error in result event
-  const resultEvent = events.find(e => e.type === 'result');
-  if (resultEvent?.result?.subtype === 'error' || resultEvent?.subtype === 'error') {
-    return {
-      type: 'errored',
-      session_id: sessionId,
-      final_message: finalMessage,
-      ask_user_questions: null,
-    };
-  }
-
-  // Check if AskUserQuestion was used
-  if (askQuestions.length > 0) {
-    return {
-      type: 'needs-input',
-      session_id: sessionId,
-      final_message: finalMessage,
-      ask_user_questions: askQuestions,
-    };
-  }
-
-  // Plan mode: agent ran in plan-only mode — no commits expected
-  if (options?.permissionMode === '--permission-mode plan') {
-    return {
-      type: 'plan-completed',
-      session_id: sessionId,
-      final_message: finalMessage,
-      ask_user_questions: null,
-    };
-  }
-
-  const hasCommits = hasCommitsBeyondBase(worktreePath, baseBranch);
-
-  // Multi-signal heuristic
-  if (hasCommits && finalMessage && messageMatchesPatterns(finalMessage, COMPLETION_PATTERNS)) {
-    return {
-      type: 'completed',
-      session_id: sessionId,
-      final_message: finalMessage,
-      ask_user_questions: null,
-    };
-  }
-
-  if (!hasCommits && finalMessage && (
-    messageMatchesPatterns(finalMessage, NEEDS_INPUT_PATTERNS) ||
-    endsWithQuestion(finalMessage)
-  )) {
-    return {
-      type: 'needs-input',
-      session_id: sessionId,
-      final_message: finalMessage,
-      ask_user_questions: null,
-    };
-  }
-
-  // Commits exist but message doesn't match completion — likely completed
-  if (hasCommits) {
-    return {
-      type: 'completed',
-      session_id: sessionId,
-      final_message: finalMessage,
-      ask_user_questions: null,
-    };
-  }
-
-  // No commits, message doesn't clearly match either pattern
-  if (finalMessage && (endsWithQuestion(finalMessage) || messageMatchesPatterns(finalMessage, NEEDS_INPUT_PATTERNS))) {
-    return {
-      type: 'needs-input',
-      session_id: sessionId,
-      final_message: finalMessage,
-      ask_user_questions: null,
-    };
-  }
-
-  return {
-    type: 'indeterminate',
+  const fail = (reason: string, report: AgentReport | null = null): AgentOutcome => ({
+    type: 'errored',
     session_id: sessionId,
-    final_message: finalMessage,
+    final_message: finalMessage ? `${reason}\n\nLast agent output:\n${finalMessage}` : reason,
     ask_user_questions: null,
-  };
+    report,
+    reason,
+  });
+
+  // 1. The run itself failed.
+  if (result && resultIsError(result)) {
+    const detail = typeof result.result === 'string' && result.result ? `: ${result.result}` : '';
+    return fail(`The agent run failed (${result.subtype ?? 'error'})${detail}`);
+  }
+
+  // 2. The agent's report: structured output first, then the report file.
+  let parsed: ReportResult | null = null;
+  if (result && result.structured_output !== undefined && result.structured_output !== null) {
+    parsed = validateReport(result.structured_output);
+  } else if (options?.reportFile) {
+    parsed = readReportFile(options.reportFile);
+  }
+
+  if (!parsed) {
+    return fail(
+      result
+        ? 'The agent finished without submitting a report. Its backend command must pass `--json-schema "$FOUNDRY_REPORT_SCHEMA"` (Claude Code) or run `foundry report` before exiting.'
+        : 'The agent exited without a result and without a report.',
+    );
+  }
+  if (!parsed.ok) {
+    return fail(`The agent's report was invalid: ${parsed.error}.`);
+  }
+
+  const report = parsed.report;
+  const base = { session_id: sessionId, report };
+  const planMode = options?.permissionMode === '--permission-mode plan';
+
+  // 3. Branch on the typed status, checked against facts.
+  switch (report.status) {
+    case 'needs_input':
+      return { ...base, type: 'needs-input', final_message: report.summary, ask_user_questions: toQuestionData(report) };
+
+    case 'blocked':
+      return { ...base, type: 'blocked', final_message: report.summary, ask_user_questions: null, reason: report.summary };
+
+    case 'plan_ready':
+      return { ...base, type: 'plan-completed', final_message: report.plan ?? report.summary, ask_user_questions: null };
+
+    case 'done':
+      // In plan mode nothing can have been implemented; "done" means the plan is done.
+      if (planMode) {
+        return { ...base, type: 'plan-completed', final_message: report.plan ?? report.summary, ask_user_questions: null };
+      }
+      if (!hasCommitsBeyondBase(worktreePath, baseBranch)) {
+        return fail('The agent reported the task done, but the branch has no commits beyond its base.', report);
+      }
+      return { ...base, type: 'completed', final_message: report.summary, ask_user_questions: null };
+  }
 }
 
-// ── Formatting ───────────────────────────────────────────────────────────
+// ── Comment formatting ───────────────────────────────────────────────────
 
 export function formatInputRequestComment(
   outcome: AgentOutcome,
@@ -282,22 +223,27 @@ export function formatInputRequestComment(
     '',
   ];
 
-  if (outcome.ask_user_questions && outcome.ask_user_questions.length > 0) {
-    for (let i = 0; i < outcome.ask_user_questions.length; i++) {
-      const q = outcome.ask_user_questions[i];
-      const selectType = q.multiSelect ? '(select multiple)' : '(select one)';
-      parts.push(`**${i + 1}. ${q.question}** ${selectType}`);
+  const questions = outcome.ask_user_questions ?? [];
+  const summary = outcome.report?.summary;
+  if (summary && !(questions.length === 1 && questions[0].question === summary)) {
+    parts.push(summary, '');
+  }
+
+  if (questions.length > 0) {
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      const selectType = q.options.length === 0 ? '' : q.multiSelect ? ' (select multiple)' : ' (select one)';
+      parts.push(`**${i + 1}. ${q.question}**${selectType}`);
       for (const opt of q.options) {
-        parts.push(`- **${opt.label}** — ${opt.description}`);
+        parts.push(opt.description ? `- **${opt.label}** — ${opt.description}` : `- **${opt.label}**`);
       }
       parts.push('');
     }
   } else if (outcome.final_message) {
-    parts.push(outcome.final_message);
-    parts.push('');
+    parts.push(outcome.final_message, '');
   }
 
-  parts.push('Reply with your answers. Foundry will resume the agent automatically.');
+  parts.push('Reply with `@foundry continue <your answers>`.');
   parts.push('');
   parts.push('Or: `@foundry restart` · `@foundry stop`');
 

@@ -14,6 +14,7 @@ import { setStateLabel } from './labels.js';
 import * as log from './log.js';
 import * as verify from './verify.js';
 import * as agentOutput from './agent-output.js';
+import { prepareLaunch } from './agent-report.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
@@ -31,6 +32,20 @@ import type {
 } from './events.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/** The PR description: what the agent says it did and what it assumed, for the reviewer. */
+export function buildPRBody(task: TaskState, outcome?: AgentOutcome): string {
+  const parts: string[] = [`Closes #${task.issue}`, ''];
+  const report = outcome?.report;
+  if (report) {
+    parts.push('## Summary', '', report.summary, '');
+    if (report.assumptions && report.assumptions.length > 0) {
+      parts.push('## Assumptions', '', ...report.assumptions.map(a => `- ${a}`), '');
+    }
+  }
+  parts.push('---', `Opened by Foundry (${task.agent_backend}). Request changes on this PR, or comment \`@foundry continue <feedback>\` on the issue, to send the agent back to work.`);
+  return parts.join('\n');
+}
 
 function resolvePermissionMode(issueLabels: string[], config: FoundryConfig): string {
   const modeLabels = config.mode_labels ?? { plan: 'mode:plan', auto: 'mode:auto', default: 'mode:default' };
@@ -84,6 +99,15 @@ export class EventHandler {
     private config: FoundryConfig,
     private repoDir: string,
   ) {}
+
+  /**
+   * Environment for an agent launch: the backend's own env plus the report
+   * contract (schema + report file), with any previous launch's report cleared.
+   */
+  private launchEnv(issue: number, backendEnv: Record<string, string> = {}): Record<string, string> {
+    const stateDir = state.getTaskStateDir(this.config.repo, issue);
+    return { ...backendEnv, ...prepareLaunch(stateDir) };
+  }
 
   async handleEvent(event: FoundryEvent): Promise<void> {
     switch (event.type) {
@@ -210,7 +234,7 @@ export class EventHandler {
       id: workerId,
       cwd: worktree,
       command: agentCommand,
-      env: agentEnv,
+      env: this.launchEnv(issue.number, agentEnv),
     });
 
     const taskState: TaskState = {
@@ -368,8 +392,7 @@ export class EventHandler {
 
     switch (outcome.type) {
       case 'completed':
-      case 'indeterminate':
-        await this.handleCompleted(task);
+        await this.handleCompleted(task, outcome);
         break;
       case 'plan-completed':
         await this.handlePlanCompleted(task, outcome);
@@ -377,8 +400,9 @@ export class EventHandler {
       case 'needs-input':
         await this.handleNeedsInput(task, outcome);
         break;
+      case 'blocked':
       case 'errored':
-        log.error(`Agent for #${task.issue} errored.`);
+        log.error(`Agent for #${task.issue} ${outcome.type}: ${outcome.reason ?? 'no reason given'}`);
         state.updateTaskStatus(config.repo, task.issue, 'failed', {
           last_agent_message: outcome.final_message ?? undefined,
         });
@@ -393,7 +417,7 @@ export class EventHandler {
           await statusComment.updateStatusComment(config.repo, task.issue, {
             task: freshTask,
             message: errorMsg,
-            historyEntry: 'Agent errored',
+            historyEntry: outcome.type === 'blocked' ? 'Agent blocked' : 'Agent errored',
           });
         }
         break;
@@ -509,7 +533,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command: agentCommand,
-      env: agentEnv,
+      env: this.launchEnv(task.issue, agentEnv),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
@@ -591,7 +615,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command: agentCommand,
-      env: agentEnv,
+      env: this.launchEnv(task.issue, agentEnv),
     });
 
     await setStateLabel(config, task.issue, 'in_progress');
@@ -645,7 +669,7 @@ export class EventHandler {
 
   // ── Completed agent sub-handlers ─────────────────────────────────────
 
-  private async handleCompleted(task: TaskState): Promise<void> {
+  private async handleCompleted(task: TaskState, outcome?: AgentOutcome): Promise<void> {
     const config = this.config;
     const repoDir = this.repoDir;
 
@@ -723,7 +747,7 @@ export class EventHandler {
         try {
           const prUrl = await github.createPR(config.repo, {
             title: `#${task.issue}: ${task.title}`,
-            body: `Closes #${task.issue}\n\nAutomated by Foundry (${task.agent_backend})`,
+            body: buildPRBody(task, outcome),
             head: task.branch,
             base: 'integration',
           });
@@ -921,7 +945,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command: agentCommand,
-      env: agentEnv,
+      env: this.launchEnv(task.issue, agentEnv),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
@@ -964,6 +988,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command,
+      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams)),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
@@ -1015,6 +1040,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command,
+      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams)),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
