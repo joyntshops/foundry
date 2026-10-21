@@ -160,6 +160,8 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     log.success(`Created ${CONFIG_FILENAME}`);
   }
 
+  writeIssueTemplate();
+
   // Auto-commit on empty repo so we have a HEAD for branch creation
   if (!git.hasCommits()) {
     log.info('Empty repository detected — creating initial commit...');
@@ -230,4 +232,41 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
   log.info('  3. Run `foundry run` to start the runner loop');
   log.info('');
   log.info('Docs: docs/foundry/overview.md');
+}
+
+const ISSUE_TEMPLATE = `---
+name: Foundry task
+about: A task for the coding agent. Label it state:ready when it is ready to start.
+labels: []
+---
+
+## What
+<!-- One or two sentences. What should exist when this is done? -->
+
+## Acceptance criteria
+<!-- Bullet points the reviewer will check. Be concrete. -->
+-
+
+## Constraints
+<!-- Files or areas not to touch, conventions to follow, things to avoid. -->
+-
+
+## Out of scope
+<!-- What a reasonable developer might include but should not. -->
+-
+
+<!--
+Mode: add the label mode:plan to get a plan for approval before any code is written.
+The agent decides small things itself and lists them in the PR; it asks only when an answer changes the work.
+-->
+`;
+
+/** Scaffold the issue template that gives the agent a developer-quality brief. */
+function writeIssueTemplate(): void {
+  const dir = path.join(process.cwd(), '.github', 'ISSUE_TEMPLATE');
+  const file = path.join(dir, 'foundry-task.md');
+  if (fs.existsSync(file)) return;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, ISSUE_TEMPLATE, 'utf-8');
+  log.success('Created .github/ISSUE_TEMPLATE/foundry-task.md');
 }

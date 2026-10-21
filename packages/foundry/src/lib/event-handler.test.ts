@@ -26,6 +26,11 @@ vi.mock('./github.js', () => ({
   updateCheckRun: vi.fn(),
 }));
 
+vi.mock('./worktree.js', () => ({
+  preserveWork: vi.fn().mockReturnValue({ committed: false, pushed: true }),
+  ensureWorktree: vi.fn(),
+}));
+
 vi.mock('./git.js', () => ({
   resolveBranchName: vi.fn().mockReturnValue('feature/42-fix'),
   resolveWorktreePath: vi.fn().mockReturnValue('/tmp/wts/42'),
@@ -120,6 +125,8 @@ vi.mock('../backends/index.js', () => ({
 }));
 
 import * as github from './github.js';
+import * as worktree from './worktree.js';
+import * as statusComment from './status-comment.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
@@ -439,6 +446,53 @@ describe('EventHandler', () => {
         undefined,
       );
       expect(mockWorkerSpawn).toHaveBeenCalled();
+    });
+  });
+
+  describe('work survives the job', () => {
+    it('needs-input pushes the branch before labelling and says so', async () => {
+      const task = makeTask();
+      await handler.handleEvent({ type: 'agent_completed', task, outcome: {
+        type: 'needs-input', session_id: 's', final_message: 'Which?', ask_user_questions: [{ question: 'Which?', options: [], multiSelect: false }],
+      } });
+      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'waiting for input');
+      const call = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(call.message).toMatch(/Work so far is on `feature\/42-fix/);
+    });
+
+    it('plan-completed pushes the branch', async () => {
+      const task = makeTask();
+      await handler.handleEvent({ type: 'agent_completed', task, outcome: {
+        type: 'plan-completed', session_id: 's', final_message: '1. Do it', ask_user_questions: null,
+      } });
+      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'plan review');
+    });
+
+    it('a human reply recreates the worktree and relaunches with the exchange in the environment', async () => {
+      const task = makeTask({ status: 'waiting-for-input', last_agent_message: 'Tabs or a long form?' });
+      await handler.handleEvent({ type: 'human_response', task, response: 'Tabs.' });
+      expect(worktree.ensureWorktree).toHaveBeenCalledWith(task, expect.any(String));
+      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('RESUMING issue #42 on branch feature/42-fix');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Tabs or a long form?');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Tabs.');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('do not start over');
+    });
+
+    it('plan approval tells the agent to implement', async () => {
+      const task = makeTask({ status: 'plan-review' });
+      await handler.handleEvent({ type: 'plan_approved', task, response: 'Go ahead.' });
+      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('implement it now');
+    });
+
+    it('review feedback is framed as a review', async () => {
+      const task = makeTask({ status: 'pr-open', pr_number: 5 });
+      await handler.handleEvent({ type: 'pr_review', task, feedback: 'Rename the variable.' });
+      expect(worktree.ensureWorktree).toHaveBeenCalled();
+      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('requested changes');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Rename the variable.');
     });
   });
 });

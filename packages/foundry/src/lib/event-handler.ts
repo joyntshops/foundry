@@ -15,6 +15,7 @@ import * as log from './log.js';
 import * as verify from './verify.js';
 import * as agentOutput from './agent-output.js';
 import { prepareLaunch } from './agent-report.js';
+import { preserveWork, ensureWorktree } from './worktree.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
@@ -32,6 +33,32 @@ import type {
 } from './events.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * What a relaunched agent is told about why it is being launched again. Goes
+ * in FOUNDRY_RESUME_CONTEXT; the Claude preset's prompt includes it.
+ */
+export function buildResumeContext(task: TaskState, humanText: string, kind: 'answer' | 'plan' | 'review'): string {
+  const intro = {
+    answer: `You stopped earlier because you needed a decision from a human${task.last_agent_message ? `; you reported: "${task.last_agent_message}"` : ' (your questions are in your last status comment on the issue)'}. The human replied:`,
+    plan: `You posted a plan for this issue and the human reviewed it. Their reply:`,
+    review: `A reviewer requested changes on your pull request:`,
+  }[kind];
+  const outro = {
+    answer: 'Apply the reply and continue the task.',
+    plan: 'If the reply approves the plan, implement it now; if it asks for changes, revise the plan and report plan_ready again.',
+    review: 'Address the review on this branch and commit.',
+  }[kind];
+  return [
+    `RESUMING issue #${task.issue} on branch ${task.branch}. The branch already holds your earlier commits; continue from its current state, do not start over.`,
+    '',
+    intro,
+    '',
+    humanText.trim(),
+    '',
+    outro,
+  ].join('\n');
+}
 
 /** The PR description: what the agent says it did and what it assumed, for the reviewer. */
 export function buildPRBody(task: TaskState, outcome?: AgentOutcome): string {
@@ -104,9 +131,9 @@ export class EventHandler {
    * Environment for an agent launch: the backend's own env plus the report
    * contract (schema + report file), with any previous launch's report cleared.
    */
-  private launchEnv(issue: number, backendEnv: Record<string, string> = {}): Record<string, string> {
+  private launchEnv(issue: number, backendEnv: Record<string, string> = {}, extra: Record<string, string> = {}): Record<string, string> {
     const stateDir = state.getTaskStateDir(this.config.repo, issue);
-    return { ...backendEnv, ...prepareLaunch(stateDir) };
+    return { ...backendEnv, ...extra, ...prepareLaunch(stateDir) };
   }
 
   async handleEvent(event: FoundryEvent): Promise<void> {
@@ -501,6 +528,7 @@ export class EventHandler {
 
   private async handleCommandReplan(task: TaskState): Promise<void> {
     const config = this.config;
+    ensureWorktree(task, this.repoDir);
 
     const worker = getWorker(config);
     await worker.handleFor(task.tmux_session).kill();
@@ -577,6 +605,7 @@ export class EventHandler {
 
   private async handleCommandPlan(task: TaskState, message: string): Promise<void> {
     const config = this.config;
+    ensureWorktree(task, this.repoDir);
 
     if (task.status !== 'claimed') {
       const worker = getWorker(config);
@@ -851,6 +880,8 @@ export class EventHandler {
 
     log.info(`#${task.issue} needs input (round ${inputRound}).`);
 
+    const preserved = preserveWork(task, this.repoDir, 'waiting for input');
+
     try {
       await setStateLabel(config, task.issue, 'waiting_for_input');
     } catch {}
@@ -862,7 +893,8 @@ export class EventHandler {
     });
 
     const inputComment = agentOutput.formatInputRequestComment(outcome, inputRound);
-    const inputMsg = inputComment.replace('<!-- foundry-input-request -->\n', '');
+    const inputMsg = inputComment.replace('<!-- foundry-input-request -->\n', '')
+      + (preserved.pushed ? `\n\n_Work so far is on \`${task.branch}\`._` : '');
 
     const waitingTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'waiting-for-input' as const };
     await statusComment.updateStatusComment(config.repo, task.issue, {
@@ -874,6 +906,8 @@ export class EventHandler {
 
   private async handlePlanCompleted(task: TaskState, outcome: AgentOutcome): Promise<void> {
     const config = this.config;
+
+    preserveWork(task, this.repoDir, 'plan review');
 
     // Post the plan-review comment separately — it has its own marker used for detecting responses
     const planComment = [
@@ -911,6 +945,7 @@ export class EventHandler {
 
   private async launchAgentFromClaimed(task: TaskState, message: string): Promise<void> {
     const config = this.config;
+    ensureWorktree(task, this.repoDir);
 
     const issue = await github.getIssue(config.repo, task.issue);
     const issueLabels = issue.labels.map(l => l.name);
@@ -957,6 +992,7 @@ export class EventHandler {
 
   private async resumeAgent(task: TaskState, humanResponse: string): Promise<void> {
     const config = this.config;
+    ensureWorktree(task, this.repoDir);
 
     await setStateLabel(config, task.issue, 'in_progress');
 
@@ -980,15 +1016,19 @@ export class EventHandler {
       permission_mode: '--dangerously-skip-permissions',
     };
 
-    // The agent is relaunched with the human's message as its brief. Sessions
-    // do not survive Actions jobs, so there is nothing to resume into.
+    // The agent is relaunched, not resumed: sessions do not survive jobs. What
+    // it asked and what the human answered go in FOUNDRY_RESUME_CONTEXT, which
+    // the preset's prompt includes.
     const command = backend.resolveCommand(launchParams);
+    const resumeKind = task.status === 'plan-review' ? 'plan' : 'answer';
 
     await worker.spawn({
       id: task.tmux_session,
       cwd: task.worktree,
       command,
-      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams)),
+      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams), {
+        FOUNDRY_RESUME_CONTEXT: buildResumeContext(task, humanResponse, resumeKind),
+      }),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
@@ -999,6 +1039,7 @@ export class EventHandler {
 
   private async resumeAgentForPR(task: TaskState, feedback: string): Promise<void> {
     const config = this.config;
+    ensureWorktree(task, this.repoDir);
 
     const inputRound = (task.input_request_count ?? 0) + 1;
     if (inputRound > config.max_input_rounds) {
@@ -1040,7 +1081,9 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command,
-      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams)),
+      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams), {
+        FOUNDRY_RESUME_CONTEXT: buildResumeContext(task, feedback, 'review'),
+      }),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {

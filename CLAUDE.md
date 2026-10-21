@@ -23,6 +23,7 @@ packages/foundry/src/
   lib/agent-output.ts        outcome = facts (run error, commits) + the report's status; no prose matching
   lib/preview.ts             preview up/down; url_template always wins over command output
   lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
+  lib/worktree.ts            preserveWork (commit+push before a job ends waiting) and ensureWorktree (recreate on resume)
   lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/
   backends/                  agent backends; `command` is the only type, fully generic
 docs/foundry/                user docs; github-action.md carries the load-bearing decisions
@@ -55,11 +56,11 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 ## Known gaps, in priority order
 
-1. When a job ends with the task waiting for input, the agent's partial work is not pushed and the next job has no worktree to resume into. Fix: push (WIP-commit if dirty) before exit; `ensureWorktree` on resume.
-2. No verify-to-agent retry loop; a verification failure stops the task.
-3. `@foundry` commands on PR comments resolve to the PR number, not the issue.
-4. No `if: cancelled()` label cleanup in the template.
-5. `foundry review` is manual; automating it on PR approval is the Week 3 target.
+1. No verify-to-agent retry loop; a verification failure stops the task.
+2. Comments on PRs (commands or replies) resolve to the PR number, not the issue; the workflow template excludes them.
+3. No `if: cancelled()` label cleanup in the template.
+4. `foundry review` is manual; automating it on PR approval is the next target.
+5. Plan mode (`--permission-mode plan` under `-p` with structured output) is wired but untested on a real run.
 
 ## Testing a change for real
 

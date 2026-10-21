@@ -26,6 +26,7 @@ A human then acts on GitHub. Each action is another event, another job:
 | `issues.labeled` | label is `state:ready` | claim + run agent |
 | `issues.labeled` | label is `state:claim` | claim only, no agent |
 | `issue_comment.created` | body starts with `@foundry <cmd>` | `continue`, `plan`, `start`, `restart`, `replan`, `stop` |
+| `issue_comment.created` | any human comment while the issue is `state:waiting-for-input` or `state:plan-review` | the answer; agent relaunched with it |
 | `pull_request_review.submitted` | state is `changes_requested` | feed review back to agent |
 | `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down |
 
@@ -54,8 +55,11 @@ jobs:
       (github.event_name == 'issues' &&
         (github.event.label.name == 'state:ready' || github.event.label.name == 'state:claim')) ||
       (github.event_name == 'issue_comment' &&
-        contains(github.event.comment.body, '@foundry') &&
-        !endsWith(github.event.comment.user.login, '[bot]')) ||
+        !endsWith(github.event.comment.user.login, '[bot]') &&
+        !github.event.issue.pull_request &&
+        (contains(github.event.comment.body, '@foundry') ||
+         contains(github.event.issue.labels.*.name, 'state:waiting-for-input') ||
+         contains(github.event.issue.labels.*.name, 'state:plan-review'))) ||
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested')
     runs-on: ubuntu-latest
@@ -123,7 +127,7 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **Task state is rebuilt from GitHub every run.** The file store under `~/.joynt-foundry/` is empty in every fresh job. `lib/task-recovery.ts` reconstructs a `TaskState` from the latest claim comment (`<!-- foundry-claim-block -->`), the issue's current `state:*` label, the PR for the branch, and the preview comment (`<!-- foundry-preview -->`). This is why the single-state-label invariant (`setStateLabel`) is load-bearing: recovery reads the label to learn the status.
 
-**There is no session resume.** `claude --resume <session_id>` would need the session file from the runner that started it, and that runner is gone. `@foundry continue`, plan approval, and review feedback all relaunch the agent with the human's message and the issue as context.
+**There is no session resume; there is a hand-off.** `claude --resume` would need the session file from the job that asked, and that job is gone. Instead: when a job ends with the agent waiting (question or plan), Foundry commits anything uncommitted and pushes the branch. When the human answers, the next job recreates the worktree from that branch and relaunches the agent with `FOUNDRY_RESUME_CONTEXT` set to "you stopped because X; the human replied Y; continue from the branch, do not start over". The preset's prompt includes that variable. A plain reply is enough; `@foundry continue` is only needed to nudge a task that is not waiting.
 
 **Cancelling from the Actions UI is the supported way to stop a run.** `@foundry stop` on a running job cannot reach into the job. Press Cancel on the run. A cleanup step that fixes labels on cancel is a planned addition; until then, `@foundry restart` or `@foundry start` re-queues.
 

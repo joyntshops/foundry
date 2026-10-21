@@ -63,9 +63,13 @@ Not yet supported: a comment on the PR carries the PR number, not the issue numb
 
 A running job cannot be stopped by a comment. Press **Cancel** on the run in the Actions UI, then `@foundry restart` or `@foundry start` to fix labels and re-queue.
 
-## The agent asked a question, I answered, and the relaunch had none of its earlier work
+## I answered the agent's question and nothing happened
 
-Known gap in the first version: when a job ends with the task waiting for input, the agent's partial commits are not yet pushed, and the next job starts from a fresh worktree. Push-before-pause and recreate-worktree-on-resume are the next fixes. Until then, ask the agent (in the issue brief) to commit and push as it goes, or keep tasks small enough that a question does not come mid-implementation.
+A plain reply only starts a job while the issue is labeled `state:waiting-for-input` or `state:plan-review`, and only on the **issue**, not the PR. Check the label; if the task is in another state, use `@foundry continue <answer>`. The workflow template's `if:` must include the two label checks (older copies only admitted `@foundry` comments).
+
+## The relaunched agent lost its earlier work
+
+It should not: when a job ends with the agent waiting, Foundry commits anything uncommitted (`chore(foundry): work in progress`) and pushes the branch, and the status comment says "Work so far is on `<branch>`". If that line is missing, the push failed; the job log says why (usually permissions). The next job recreates the worktree from the pushed branch.
 
 ## Where are the logs?
 
