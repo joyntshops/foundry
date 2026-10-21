@@ -44,7 +44,7 @@ export function preserveWork(task: TaskState, repoDir: string, reason: string): 
   try {
     const base = resolveBaseBranch(repoDir);
     if (git.countCommits(`${base}..HEAD`, wt) > 0) {
-      git.push(task.branch, wt);
+      git.push(task.branch, wt, true);
       result.pushed = true;
       log.info(`#${task.issue}: pushed ${task.branch}.`);
     }

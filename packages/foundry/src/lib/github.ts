@@ -122,6 +122,14 @@ export function mergePR(repo: string, pr: string | number, method?: 'merge' | 'r
   return _client.mergePR(repo, pr, method);
 }
 
+export function getPRMergeability(repo: string, pr: number): Promise<'mergeable' | 'conflicting' | 'unknown'> {
+  return _client.getPRMergeability(repo, pr);
+}
+
+export function listOpenPRs(repo: string, base: string): Promise<Array<{ number: number; head: string }>> {
+  return _client.listOpenPRs(repo, base);
+}
+
 export function isPRMergeable(repo: string, pr: string | number): Promise<boolean> {
   return _client.isPRMergeable(repo, pr);
 }

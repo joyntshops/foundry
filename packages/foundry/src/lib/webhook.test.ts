@@ -357,6 +357,23 @@ describe('webhookToEvents', () => {
     });
   });
 
+  describe('workflow_dispatch', () => {
+    it('maps {issue, command, message} inputs to a command event for the task', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      const events = webhookToEvents('workflow_dispatch', {
+        inputs: { issue: '42', command: 'continue', message: 'integration moved; rebase.' },
+        sender: { login: 'foundry-bot[bot]' },
+      }, config);
+      expect(events).toEqual([expect.objectContaining({ type: 'command', command: 'continue', message: 'integration moved; rebase.' })]);
+    });
+
+    it('ignores unknown commands and unknown issues', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '42', command: 'deploy' } }, config)).toEqual([]);
+      expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '99', command: 'continue' } }, config)).toEqual([]);
+    });
+  });
+
   describe('pull_request_review.submitted', () => {
     it('maps changes_requested review to pr_review event', () => {
       const task = makeTask({ branch: 'feature/42-fix-bug' });

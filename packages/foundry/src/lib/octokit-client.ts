@@ -399,6 +399,22 @@ export class OctokitClient implements GitHubClient {
     }
   }
 
+  async getPRMergeability(repo: string, pr: number): Promise<'mergeable' | 'conflicting' | 'unknown'> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    const { data } = await ok.rest.pulls.get({ owner, repo: repoName, pull_number: pr });
+    if (data.mergeable === true) return 'mergeable';
+    if (data.mergeable === false) return 'conflicting';
+    return 'unknown';
+  }
+
+  async listOpenPRs(repo: string, base: string): Promise<Array<{ number: number; head: string }>> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    const { data } = await ok.rest.pulls.list({ owner, repo: repoName, state: 'open', base, per_page: 100 });
+    return data.map((p: any) => ({ number: p.number, head: p.head?.ref ?? '' }));
+  }
+
   async isPRMergeable(repo: string, pr: string | number): Promise<boolean> {
     const ok = await this.octokit();
     const { owner, repo: repoName } = splitRepo(repo);

@@ -155,6 +155,19 @@ export class GhCliClient implements GitHubClient {
     ]);
   }
 
+  async getPRMergeability(repo: string, pr: number): Promise<'mergeable' | 'conflicting' | 'unknown'> {
+    const raw = gh(['pr', 'view', String(pr), '--repo', repo, '--json', 'mergeable']);
+    const m = JSON.parse(raw).mergeable;
+    if (m === 'MERGEABLE') return 'mergeable';
+    if (m === 'CONFLICTING') return 'conflicting';
+    return 'unknown';
+  }
+
+  async listOpenPRs(repo: string, base: string): Promise<Array<{ number: number; head: string }>> {
+    const raw = gh(['pr', 'list', '--repo', repo, '--state', 'open', '--base', base, '--limit', '100', '--json', 'number,headRefName']);
+    return (JSON.parse(raw) as Array<{ number: number; headRefName: string }>).map(p => ({ number: p.number, head: p.headRefName }));
+  }
+
   async isPRMergeable(repo: string, pr: string | number): Promise<boolean> {
     try {
       const raw = gh([

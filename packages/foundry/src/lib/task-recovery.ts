@@ -37,6 +37,10 @@ export function issueNumberFromBranch(template: string, branch: string): number 
 export function issueNumberFromPayload(payload: Record<string, any>, config: FoundryConfig): number | null {
   if (typeof payload.issue?.number === 'number') return payload.issue.number;
 
+  // workflow_dispatch with an `issue` input (see stale-prs.ts)
+  const dispatched = parseInt(String(payload.inputs?.issue ?? ''), 10);
+  if (Number.isFinite(dispatched)) return dispatched;
+
   const pr = payload.pull_request;
   if (!pr) return null;
 

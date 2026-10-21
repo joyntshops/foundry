@@ -28,7 +28,8 @@ A human then acts on GitHub. Each action is another event, another job:
 | `issue_comment.created` | body starts with `@foundry <cmd>` | `continue`, `plan`, `start`, `restart`, `replan`, `stop` |
 | `issue_comment.created` | any human comment while the issue is `state:waiting-for-input` or `state:plan-review` | the answer; agent relaunched with it |
 | `pull_request_review.submitted` | state is `changes_requested` | feed review back to agent |
-| `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down |
+| `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down; then check sibling PRs for conflicts |
+| `workflow_dispatch` | inputs `issue`, `command`, `message` | the command, as if commented; how Foundry hands work to itself |
 | `pull_request.opened` / `synchronize` / `reopened` / `closed` | base in `preview.pull_request_bases` | preview up / redeploy / down for a non-task PR |
 
 ## Workflow template
@@ -40,6 +41,11 @@ on:
   issue_comment:       { types: [created] }
   pull_request:        { types: [opened, synchronize, reopened, closed] }
   pull_request_review: { types: [submitted] }
+  workflow_dispatch:                       # Foundry dispatches itself; see gotchas
+    inputs:
+      issue:   { required: true,  type: string }
+      command: { required: true,  type: string }
+      message: { required: false, type: string, default: "" }
 
 
 # The job's built-in token does all of Foundry's GitHub writes.
@@ -64,11 +70,12 @@ jobs:
       (github.event_name == 'pull_request' &&
         (github.event.pull_request.merged == true ||
          github.event.pull_request.base.ref == 'main')) ||
-      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested')
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     concurrency:                                       # job-level, see gotchas
-      group: foundry-${{ github.event.issue.number || github.event.pull_request.number }}
+      group: foundry-${{ github.event.inputs.issue || github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false
     env:
       FOUNDRY_APP_ID: ${{ secrets.FOUNDRY_APP_ID }}   # secrets aren't readable in step `if:`
@@ -121,6 +128,10 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 **Nothing Foundry does may depend on triggering another run.** Events caused by the job's built-in token do not start workflow runs, with two exceptions: `workflow_dispatch` and `repository_dispatch`. Preview up/down use `gh workflow run`, which is `workflow_dispatch`, so they are fine. Merges are done by humans, so `pull_request.closed` fires. The only paths that used to rely on a follow-up run were `@foundry restart` and `@foundry start`, which re-add `state:ready`; `foundry action` now detects a re-queued issue and continues straight into `issue_ready` in the same job. Design any new transition the same way: finish it in-job, or make it a dispatch.
 
 **No branching on prose.** What happens after the agent exits is decided from facts Foundry can check (run error, commits) and the agent's typed report (`done`, `needs_input`, `plan_ready`, `blocked`), submitted as Claude Code structured output or via `foundry report`. Contradictions and missing reports fail closed. The regex heuristics this replaced misread "I have not completed this" as completion and treated "can't tell" as success. Details in [Agent Backends](agent-backends.md#the-agent-report).
+
+**Stale PRs are handled from the merge, never from reviews.** When a PR merges into `integration`, the same job lists the other open Foundry PRs into that base, waits for GitHub to recompute mergeability, and for each one that now conflicts dispatches the workflow with a `continue` command carrying a rebase instruction. `workflow_dispatch` is used because it is one of the two event types GitHub delivers even when the job's own token caused it, and the dispatched job runs under the conflicting issue's own concurrency group. Reviews cannot do this: GitHub does not run `pull_request_review` workflows for a PR that has conflicts.
+
+**Relaunch pushes use `--force-with-lease`.** An agent sent back to a branch may rebase. The lease is the remote-tracking ref the job fetched when it recreated the worktree, so a push by anyone else in the meantime is still refused.
 
 **Consecutive transitions happen inside one job.** Claim → agent → verify → PR → preview-up is a single run. A new job is only needed when a human acts. This keeps runner spin-ups to one per human interaction.
 

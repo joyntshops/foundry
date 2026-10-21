@@ -19,6 +19,7 @@ import { preserveWork, ensureWorktree } from './worktree.js';
 import { writeIssueFile } from './issue-file.js';
 import * as previewVerify from './preview-verify.js';
 import * as path from 'node:path';
+import * as stalePRs from './stale-prs.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
@@ -517,6 +518,9 @@ export class EventHandler {
     state.removeTask(config.repo, task.issue);
 
     log.success(`Auto-cleaned resources for #${task.issue}.`);
+
+    // integration moved: any sibling PR that now conflicts gets its agent back.
+    await stalePRs.handleStalePRs(config, event.base ?? 'integration', task.pr_number);
   }
 
   // ── PR Review ────────────────────────────────────────────────────────
@@ -938,7 +942,10 @@ export class EventHandler {
       }
 
       try {
-        git.push(task.branch, task.worktree);
+        // --force-with-lease: a relaunched agent may have rebased. The lease is
+        // the remote-tracking ref this job fetched, so a push by anyone else
+        // since then is still refused.
+        git.push(task.branch, task.worktree, true);
         log.success(`Pushed ${task.branch}`);
       } catch (err: any) {
         log.error(`Push failed for #${task.issue}: ${err.message}`);
