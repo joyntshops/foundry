@@ -917,7 +917,7 @@ export class EventHandler {
       outcome.final_message ?? 'No plan content captured.',
       '',
       '---',
-      'Reply to approve this plan, or provide feedback to revise it.',
+      'Reply to this issue to approve the plan, or with feedback to have it revised.',
       '',
       'Or: `@foundry restart` · `@foundry stop`',
     ].join('\n');

@@ -243,7 +243,7 @@ export function formatInputRequestComment(
     parts.push(outcome.final_message, '');
   }
 
-  parts.push('Reply with `@foundry continue <your answers>`.');
+  parts.push('Reply to this issue with your answer. The agent will pick it up and continue.');
   parts.push('');
   parts.push('Or: `@foundry restart` · `@foundry stop`');
 

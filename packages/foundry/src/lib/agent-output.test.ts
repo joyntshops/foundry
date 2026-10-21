@@ -179,6 +179,6 @@ describe('formatInputRequestComment', () => {
     expect(body).toContain('- **vitest** — fast');
     expect(body).toContain('- **jest**');
     expect(body).toMatch(/\*\*2\. What should the page be called\?\*\*\n/);
-    expect(body).toContain('@foundry continue');
+    expect(body).toContain('Reply to this issue with your answer');
   });
 });
