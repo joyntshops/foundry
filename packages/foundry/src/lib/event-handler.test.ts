@@ -38,6 +38,10 @@ vi.mock('./preview-verify.js', () => ({
   formatPreviewVerify: vi.fn().mockReturnValue('**Preview verification FAILED** against https://pr-5.x'),
 }));
 
+vi.mock('./stale-prs.js', () => ({
+  handleStalePRs: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('./worktree.js', () => ({
   preserveWork: vi.fn().mockReturnValue({ committed: false, pushed: true }),
   ensureWorktree: vi.fn(),
@@ -147,6 +151,7 @@ import * as statusComment from './status-comment.js';
 import * as issueFile from './issue-file.js';
 import * as previewMod from './preview.js';
 import * as previewVerify from './preview-verify.js';
+import * as stalePRs from './stale-prs.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
@@ -601,6 +606,14 @@ describe('EventHandler', () => {
       expect(previewVerify.verifyPreview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ url: 'https://pr-40.x', cwd: expect.stringMatching(/pr-40$/) }));
       expect(github.commentOnPR).toHaveBeenCalledWith('owner/repo', 40, expect.stringContaining('foundry-preview-verify'));
       expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ head_sha: 'deadbeef', conclusion: 'success' }));
+    });
+  });
+
+  describe('after a merge', () => {
+    it('checks sibling PRs for conflicts against the merged base', async () => {
+      const task = makeTask({ pr_url: 'https://github.com/owner/repo/pull/5', pr_number: 5 });
+      await handler.handleEvent({ type: 'pr_merged', task, base: 'integration' });
+      expect(stalePRs.handleStalePRs).toHaveBeenCalledWith(expect.anything(), 'integration', 5);
     });
   });
 });

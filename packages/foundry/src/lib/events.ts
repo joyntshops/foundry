@@ -42,6 +42,8 @@ export interface IssueClaimEvent {
 export interface PRMergedEvent {
   type: 'pr_merged';
   task: TaskState;
+  /** Base branch the PR merged into. */
+  base?: string;
 }
 
 export interface PRReviewEvent {

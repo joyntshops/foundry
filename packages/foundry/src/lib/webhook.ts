@@ -34,6 +34,8 @@ export function webhookToEvents(
       return mapPullRequestClosed(payload, config);
     case 'pull_request_review.submitted':
       return mapPullRequestReview(payload, config);
+    case 'workflow_dispatch':
+      return mapWorkflowDispatch(payload, config);
     default:
       return [];
   }
@@ -120,6 +122,40 @@ function parseFoundryCommand(body: string, config: FoundryConfig): ParsedFoundry
   return null;
 }
 
+// ── workflow_dispatch ───────────────────────────────────────────────────
+
+/**
+ * A command delivered by `gh workflow run` with inputs {issue, command,
+ * message}. This is how Foundry hands work to itself across jobs, since
+ * workflow_dispatch is delivered even when the job's own token caused it.
+ */
+function mapWorkflowDispatch(
+  payload: Record<string, any>,
+  config: FoundryConfig,
+): FoundryEvent[] {
+  const inputs = payload.inputs ?? {};
+  const issueNumber = parseInt(String(inputs.issue ?? ''), 10);
+  if (!Number.isFinite(issueNumber)) return [];
+
+  const task = state.getAllTasks(config.repo).find(t => t.issue === issueNumber);
+  if (!task) return [];
+
+  const trigger = (config.comment_triggers as Record<string, string>)[String(inputs.command ?? '')];
+  if (!trigger) return [];
+  const body = inputs.message ? `${trigger}\n${inputs.message}` : trigger;
+  const command = parseFoundryCommand(body, config);
+  if (!command) return [];
+
+  return [{
+    type: 'command',
+    task,
+    command: command.name,
+    message: command.message,
+    commentId: 0,
+    commentAuthor: payload.sender?.login ?? 'workflow_dispatch',
+  }];
+}
+
 // ── issues.labeled ──────────────────────────────────────────────────────
 
 function mapIssueLabeled(
@@ -165,7 +201,7 @@ function mapPullRequestClosed(
   // A task's PR: completion on merge; a close without merge is a human
   // decision Foundry leaves alone.
   const task = state.getAllTasks(repo).find(t => t.branch === branch);
-  if (task) return pr.merged ? [{ type: 'pr_merged', task }] : [];
+  if (task) return pr.merged ? [{ type: 'pr_merged', task, base: pr.base?.ref }] : [];
 
   // Any other PR with a listed base: its preview comes down, merged or not.
   return mapPullRequestPreview(payload, config, 'down');

@@ -64,6 +64,10 @@ describe('issueNumberFromPayload', () => {
     expect(issueNumberFromPayload(payload, config)).toBe(17);
   });
 
+  it('reads the issue from workflow_dispatch inputs', () => {
+    expect(issueNumberFromPayload({ inputs: { issue: '41', command: 'continue' } }, config)).toBe(41);
+  });
+
   it('returns null when nothing identifies an issue', () => {
     expect(issueNumberFromPayload({ pull_request: { head: { ref: 'x' }, body: null } }, config)).toBeNull();
     expect(issueNumberFromPayload({}, config)).toBeNull();

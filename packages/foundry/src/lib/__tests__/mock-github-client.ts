@@ -22,6 +22,8 @@ export class MockGitHubClient implements GitHubClient {
   prStatus: { state: string; url: string } | null = { state: 'OPEN', url: 'https://github.com/o/r/pull/1' };
   prBranch = 'feature/1-test';
   prMergeable = true;
+  prMergeability: 'mergeable' | 'conflicting' | 'unknown' = 'mergeable';
+  openPRs: Array<{ number: number; head: string }> = [];
   prReviews: PRReview[] = [];
   prReviewComments: PRReviewComment[] = [];
   repoSlug = 'owner/repo';
@@ -110,6 +112,16 @@ export class MockGitHubClient implements GitHubClient {
 
   async mergePR(repo: string, pr: string | number, method?: 'merge' | 'rebase' | 'squash'): Promise<void> {
     this.record('mergePR', [repo, pr, method]);
+  }
+
+  async getPRMergeability(repo: string, pr: number): Promise<'mergeable' | 'conflicting' | 'unknown'> {
+    this.record('getPRMergeability', [repo, pr]);
+    return this.prMergeability;
+  }
+
+  async listOpenPRs(repo: string, base: string): Promise<Array<{ number: number; head: string }>> {
+    this.record('listOpenPRs', [repo, base]);
+    return this.openPRs;
   }
 
   async isPRMergeable(repo: string, pr: string | number): Promise<boolean> {

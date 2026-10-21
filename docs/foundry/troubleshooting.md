@@ -55,6 +55,10 @@ Exactly that: the report said `done` and git disagrees. Usually the agent edited
 
 Foundry labels the task `state:failed` and posts each command's result and the failing output on the issue. Fix the cause (often the verify command itself, or a dependency the runner image lacks) and `@foundry restart`, or check the branch out locally and run the commands by hand. A verify-to-agent retry loop is planned; today a failure stops the task.
 
+## A PR went stale after another one merged
+
+Foundry handles this: after any merge into `integration`, it checks the other open Foundry PRs and, for each that now conflicts, posts a note on the issue and dispatches the agent with a rebase instruction. If the note says Foundry *could not* start the agent, the workflow is missing the `workflow_dispatch` trigger or `actions: write`; add them from the template, then reply with the quoted instruction. Requesting changes on the conflicting PR does nothing, because GitHub runs no workflow for a PR with conflicts.
+
 ## `@foundry continue` on a PR comment did nothing
 
 Not yet supported: a comment on the PR carries the PR number, not the issue number. Comment on the issue instead.

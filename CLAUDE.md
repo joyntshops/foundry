@@ -24,6 +24,7 @@ packages/foundry/src/
   lib/preview.ts             preview up/down; url_template always wins over command output
   lib/preview-verify.ts      verify_preview: wait for the URL, run commands against it, gate ready-for-review
   lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
+  lib/stale-prs.ts           after a merge, find sibling PRs that now conflict and dispatch their agents (workflow_dispatch)
   lib/worktree.ts            preserveWork (commit+push before a job ends waiting) and ensureWorktree (recreate on resume)
   lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/
   backends/                  agent backends; `command` is the only type, fully generic
@@ -48,7 +49,7 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 - **One `state:*` label per issue.** Always go through `setStateLabel`. Task recovery reads the label to learn the status, so a second label is a corrupted record.
 - **Every job starts with nothing.** Anything a later job needs must be on GitHub before this one exits: labels, the claim comment, the status comment, the PR, the preview comment. If you add task state, add it to a comment and to `task-recovery.ts`.
-- **Finish transitions in-job.** Events caused by the job's token do not start other runs, except `workflow_dispatch` and `repository_dispatch`. A transition that relies on "the next run will pick it up" stalls. `continueIfRequeued` in `commands/action.ts` is the pattern.
+- **Finish transitions in-job, or dispatch.** Events caused by the job's token do not start other runs, except `workflow_dispatch` and `repository_dispatch`. A transition that relies on "the next run will pick it up" stalls. `continueIfRequeued` in `commands/action.ts` finishes in-job; `stale-prs.ts` dispatches the workflow with `{issue, command, message}` inputs when the work belongs to another issue's concurrency group.
 - **Behavior goes in `EventHandler`.** `action.ts` is composition only.
 - **Never branch on prose.** Control flow reads the agent's typed report and facts Foundry can check, nothing else. No report, an invalid report, or a report that contradicts git fails closed. If a new decision needs information only the agent has, add a field to `AGENT_REPORT_SCHEMA`; do not match text.
 - **Issue text is hostile input.** Titles and bodies reach a shell. Use the `FOUNDRY_ISSUE_*` env vars; `{title}`/`{body}` are escaped for double quotes only.

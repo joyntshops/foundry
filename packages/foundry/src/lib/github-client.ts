@@ -81,6 +81,9 @@ export interface GitHubClient {
   getPRBranch(repo: string, pr: string | number): Promise<string>;
   mergePR(repo: string, pr: string | number, method?: 'merge' | 'rebase' | 'squash'): Promise<void>;
   isPRMergeable(repo: string, pr: string | number): Promise<boolean>;
+  /** Tri-state: GitHub computes mergeability lazily after the base changes. */
+  getPRMergeability(repo: string, pr: number): Promise<'mergeable' | 'conflicting' | 'unknown'>;
+  listOpenPRs(repo: string, base: string): Promise<Array<{ number: number; head: string }>>;
 
   // PR Reviews
   getPRReviews(repo: string, prNumber: number): Promise<{ reviews: PRReview[]; comments: PRReviewComment[] }>;
