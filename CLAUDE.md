@@ -22,6 +22,7 @@ packages/foundry/src/
   lib/agent-report.ts        the typed agent report: schema, validation, file transport, launch env
   lib/agent-output.ts        outcome = facts (run error, commits) + the report's status; no prose matching
   lib/preview.ts             preview up/down; url_template always wins over command output
+  lib/preview-verify.ts      verify_preview: wait for the URL, run commands against it, gate ready-for-review
   lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
   lib/worktree.ts            preserveWork (commit+push before a job ends waiting) and ensureWorktree (recreate on resume)
   lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/

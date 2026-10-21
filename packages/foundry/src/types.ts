@@ -39,6 +39,8 @@ export interface FoundryConfig {
   max_input_rounds: number;             // default 3
 
   verify: string[];                     // e.g. ["npm run lint", "npm run build", "npm test"]
+  /** Run against the live preview (FOUNDRY_PREVIEW_URL) before ready-for-review. Default []. */
+  verify_preview?: string[];
   integration_rebuild: string;          // e.g. "npm run build"
 
   comment_triggers: {
@@ -73,6 +75,8 @@ export interface FoundryConfig {
      * promotion PR from `integration` into `main`.
      */
     pull_request_bases?: string[];
+    /** How long to wait for the preview URL to answer before verify_preview runs. Default 300. */
+    ready_timeout_seconds?: number;
   };
 
   github_deployments?: {

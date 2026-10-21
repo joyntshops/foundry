@@ -11,14 +11,14 @@ export interface VerifyResult {
   duration_ms: number;
 }
 
-export function runVerifyStep(command: string, cwd: string): VerifyResult {
+export function runVerifyStep(command: string, cwd: string, extraEnv: Record<string, string> = {}): VerifyResult {
   const start = Date.now();
   try {
     const output = execSync(command, {
       cwd,
       encoding: 'utf-8',
       timeout: 300_000, // 5 min per step
-      env: { ...process.env, CI: '1' },
+      env: { ...process.env, CI: '1', ...extraEnv },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return {

@@ -17,6 +17,8 @@ import * as agentOutput from './agent-output.js';
 import { prepareLaunch } from './agent-report.js';
 import { preserveWork, ensureWorktree } from './worktree.js';
 import { writeIssueFile } from './issue-file.js';
+import * as previewVerify from './preview-verify.js';
+import * as path from 'node:path';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
@@ -35,6 +37,8 @@ import type {
 } from './events.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+const PREVIEW_VERIFY_MARKER = '<!-- foundry-preview-verify -->';
 
 /**
  * What a relaunched agent is told about why it is being launched again. Goes
@@ -189,7 +193,13 @@ export class EventHandler {
           pr_number: event.pr_number,
           sha: event.sha,
         });
-        if (!result) log.warn(`No preview URL resolved for ${label}.`);
+        if (!result) {
+          log.warn(`No preview URL resolved for ${label}.`);
+          return;
+        }
+        if (previewVerify.isConfigured(config)) {
+          await this.verifyPullRequestPreview(event, result.url);
+        }
       } catch (err: any) {
         log.warn(`Preview up failed for ${label}: ${err.message}`);
       }
@@ -211,6 +221,66 @@ export class EventHandler {
       });
     } catch (err: any) {
       log.warn(`Preview down failed for ${label}: ${err.message}`);
+    }
+  }
+
+  /**
+   * Run `verify_preview` for a non-task PR from a throwaway checkout of its
+   * head branch. The result goes on the PR as a comment and, when the token
+   * allows, as a check run on the head SHA.
+   */
+  private async verifyPullRequestPreview(event: PRPreviewEvent, url: string): Promise<void> {
+    const config = this.config;
+    const label = `PR #${event.pr_number}`;
+    const cwd = path.resolve(this.repoDir, config.worktree_base, `pr-${event.pr_number}`);
+
+    try {
+      try { git.fetchAll(this.repoDir); } catch {}
+      git.pruneWorktrees(this.repoDir);
+      if (git.worktreeExists(cwd, this.repoDir)) git.removeWorktree(cwd, this.repoDir);
+      git.addWorktreeTracking(cwd, event.branch, this.repoDir);
+    } catch (err: any) {
+      log.warn(`Could not check out ${event.branch} for preview verification of ${label}: ${err.message}`);
+      return;
+    }
+
+    let outcome: previewVerify.PreviewVerifyOutcome;
+    try {
+      log.info(`Running preview verification for ${label} against ${url}...`);
+      outcome = await previewVerify.verifyPreview(config, {
+        url,
+        cwd,
+        env: { FOUNDRY_BRANCH: event.branch, FOUNDRY_PR_NUMBER: String(event.pr_number) },
+      });
+    } finally {
+      try { git.removeWorktree(cwd, this.repoDir); } catch {}
+    }
+
+    (outcome.passed ? log.success : log.error)(`Preview verification ${outcome.passed ? 'passed' : 'failed'} for ${label}.`);
+
+    const body = PREVIEW_VERIFY_MARKER + '\n' + previewVerify.formatPreviewVerify(outcome);
+    try {
+      const comments = await github.getComments(config.repo, event.pr_number);
+      const existing = comments.find(c => c.body.includes(PREVIEW_VERIFY_MARKER));
+      if (existing) await github.updateComment(config.repo, existing.id, body);
+      else await github.commentOnPR(config.repo, event.pr_number, body);
+    } catch (err: any) {
+      log.warn(`Could not post preview verification on ${label}: ${err.message}`);
+    }
+
+    try {
+      await github.createCheckRun(config.repo, {
+        name: 'Foundry Preview Verification',
+        head_sha: event.sha,
+        status: 'completed',
+        conclusion: outcome.passed ? 'success' : 'failure',
+        output: {
+          title: outcome.passed ? 'Preview verification passed' : 'Preview verification failed',
+          summary: previewVerify.formatPreviewVerify(outcome),
+        },
+      });
+    } catch (err: any) {
+      log.warn(`Failed to create check run for ${label}: ${err.message}`);
     }
   }
 
@@ -757,6 +827,69 @@ export class EventHandler {
 
   // ── Completed agent sub-handlers ─────────────────────────────────────
 
+  /**
+   * The last mile after a PR exists: deploy the preview, verify against it
+   * when `verify_preview` is configured, and only then mark the task ready
+   * for human review. A failed preview verification fails the task with the
+   * output on the issue, exactly like a failed build.
+   */
+  private async finishReadyForReview(task: TaskState, message: string, historyEntry: string, prUrl?: string): Promise<void> {
+    const config = this.config;
+    const fresh = () => state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? task;
+
+    await triggerPreviewUp(config, task);
+
+    let verified: previewVerify.PreviewVerifyOutcome | null = null;
+    if (previewVerify.isConfigured(config)) {
+      const current = fresh();
+      if (!current.preview_url) {
+        verified = {
+          passed: false,
+          url: '(none)',
+          results: [{ command: 'preview', success: false, output: 'verify_preview is configured but no preview URL was produced. Check the `preview` section of .joynt-foundry.yml.', duration_ms: 0 }],
+        };
+      } else {
+        log.info(`Running preview verification for #${task.issue} against ${current.preview_url}...`);
+        verified = await previewVerify.verifyPreview(config, {
+          url: current.preview_url,
+          cwd: current.worktree,
+          env: {
+            FOUNDRY_ISSUE: String(task.issue),
+            FOUNDRY_BRANCH: current.branch,
+            FOUNDRY_PR_NUMBER: String(current.pr_number ?? ''),
+          },
+        });
+      }
+
+      if (!verified.passed) {
+        log.error(`Preview verification failed for #${task.issue}.`);
+        state.updateTaskStatus(config.repo, task.issue, 'failed');
+        await claim.markFailed(config, task.issue);
+        await statusComment.updateStatusComment(config.repo, task.issue, {
+          task: { ...fresh(), status: 'failed' },
+          prUrl,
+          message: previewVerify.formatPreviewVerify(verified) + '\n\n`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
+          historyEntry: 'Preview verification failed',
+        });
+        return;
+      }
+      log.success(`Preview verification passed for #${task.issue}.`);
+    }
+
+    await setStateLabel(config, task.issue, 'ready_for_review');
+    await statusComment.updateStatusComment(config.repo, task.issue, {
+      task: { ...fresh(), status: 'pr-open' },
+      prUrl,
+      message: [
+        message,
+        verified ? `Preview verification passed (${verified.results.length} check${verified.results.length === 1 ? '' : 's'}).` : null,
+        '',
+        'Foundry is watching this PR. Submit a review with **Request changes**, or reply on this issue with feedback.',
+      ].filter(l => l !== null).join('\n'),
+      historyEntry: verified ? `${historyEntry}, preview verified` : historyEntry,
+    });
+  }
+
   private async handleCompleted(task: TaskState, outcome?: AgentOutcome): Promise<void> {
     const config = this.config;
     const repoDir = this.repoDir;
@@ -823,14 +956,7 @@ export class EventHandler {
       if (task.pr_url) {
         log.success(`PR already exists for #${task.issue}: ${task.pr_url}`);
         state.updateTaskStatus(config.repo, task.issue, 'pr-open');
-        await setStateLabel(config, task.issue, 'ready_for_review');
-        await triggerPreviewUp(config, task);
-        const prOpenTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'pr-open' as const };
-        await statusComment.updateStatusComment(config.repo, task.issue, {
-          task: prOpenTask,
-          message: 'Verification passed. PR updated with new changes.\n\nFoundry is watching this PR. Submit a review with **Request changes** or comment `@foundry continue [feedback]`.',
-          historyEntry: 'Verification passed, PR updated',
-        });
+        await this.finishReadyForReview(task, 'Verification passed. PR updated with new changes.', 'Verification passed, PR updated');
       } else {
         try {
           const prUrl = await github.createPR(config.repo, {
@@ -845,15 +971,7 @@ export class EventHandler {
             pr_url: prUrl,
             pr_number: prNumber ?? undefined,
           });
-          await setStateLabel(config, task.issue, 'ready_for_review');
-          await triggerPreviewUp(config, task);
-          const newPrTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'pr-open' as const };
-          await statusComment.updateStatusComment(config.repo, task.issue, {
-            task: newPrTask,
-            prUrl,
-            message: 'Verification passed. PR created and ready for review.\n\nFoundry is watching this PR. Submit a review with **Request changes** or comment `@foundry continue [feedback]`.',
-            historyEntry: 'Verification passed, PR created',
-          });
+          await this.finishReadyForReview(task, 'Verification passed. PR created and ready for review.', 'Verification passed, PR created', prUrl);
         } catch (err: any) {
           log.error(`PR creation failed for #${task.issue}: ${err.message}`);
           state.updateTaskStatus(config.repo, task.issue, 'failed');
