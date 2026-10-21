@@ -94,6 +94,15 @@ export function extractFinalAssistantMessage(events: StreamEvent[]): string | nu
   return lastAssistantText;
 }
 
+/** Cost and size of the run, as the agent CLI reports them on its result event. */
+export function extractUsage(result: StreamEvent): { cost_usd?: number; turns?: number; duration_ms?: number } | undefined {
+  const u: { cost_usd?: number; turns?: number; duration_ms?: number } = {};
+  if (typeof result.total_cost_usd === 'number') u.cost_usd = result.total_cost_usd;
+  if (typeof result.num_turns === 'number') u.turns = result.num_turns;
+  if (typeof result.duration_ms === 'number') u.duration_ms = result.duration_ms;
+  return Object.keys(u).length > 0 ? u : undefined;
+}
+
 /** The final `result` event of the main conversation, if the run got that far. */
 export function findResultEvent(events: StreamEvent[]): StreamEvent | null {
   for (let i = events.length - 1; i >= 0; i--) {
@@ -127,6 +136,8 @@ function hasCommitsBeyondBase(worktreePath: string, baseBranch: string): boolean
 
 export interface DetermineOutcomeOptions {
   permissionMode?: string;
+  /** Exit code of the agent process, when the caller waited on it. Null when killed by a signal. */
+  exitCode?: number | null;
   /** Where `foundry report` writes; consulted when the transcript carries no structured output. */
   reportFile?: string;
 }
@@ -149,6 +160,7 @@ export function determineOutcome(
   const sessionId = extractSessionId(events);
   const finalMessage = extractFinalAssistantMessage(events);
   const result = findResultEvent(events);
+  const usage = result ? extractUsage(result) : undefined;
 
   const fail = (reason: string, report: AgentReport | null = null): AgentOutcome => ({
     type: 'errored',
@@ -157,6 +169,7 @@ export function determineOutcome(
     ask_user_questions: null,
     report,
     reason,
+    usage,
   });
 
   // 1. The run itself failed.
@@ -174,6 +187,13 @@ export function determineOutcome(
   }
 
   if (!parsed) {
+    const code = options?.exitCode;
+    if (typeof code === 'number' && code !== 0) {
+      return fail(`The agent process exited with code ${code} and submitted no report.`);
+    }
+    if (code === null) {
+      return fail('The agent process was killed by a signal and submitted no report.');
+    }
     return fail(
       result
         ? 'The agent finished without submitting a report. Its backend command must pass `--json-schema "$FOUNDRY_REPORT_SCHEMA"` (Claude Code) or run `foundry report` before exiting.'
@@ -185,7 +205,7 @@ export function determineOutcome(
   }
 
   const report = parsed.report;
-  const base = { session_id: sessionId, report };
+  const base = { session_id: sessionId, report, usage };
   const planMode = options?.permissionMode === '--permission-mode plan';
 
   // 3. Branch on the typed status, checked against facts.

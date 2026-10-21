@@ -37,6 +37,10 @@ export interface FoundryConfig {
   worktree_base: string;                // default "../wts"
 
   max_input_rounds: number;             // default 3
+  /** Passed to the agent as FOUNDRY_MAX_TURNS; the preset uses --max-turns. Default 150. */
+  agent_max_turns?: number;
+  /** An in-progress issue with no status update for this long is marked failed by `foundry reconcile`. Default 120. */
+  reconcile_stale_minutes?: number;
 
   verify: string[];                     // e.g. ["npm run lint", "npm run build", "npm test"]
   /** Run against the live preview (FOUNDRY_PREVIEW_URL) before ready-for-review. Default []. */
@@ -122,6 +126,8 @@ export interface TaskState {
   permission_mode?: string;
   input_request_count?: number;
   last_agent_message?: string;
+  /** Usage of the most recent agent run, from the transcript's result event. */
+  last_run?: { cost_usd?: number; turns?: number; duration_ms?: number };
   /** The issue body at claim time; written to FOUNDRY_ISSUE_FILE on every launch. */
   issue_body?: string;
   preview_url?: string;
@@ -198,4 +204,6 @@ export interface AgentOutcome {
   report?: import('./lib/agent-report.js').AgentReport | null;
   /** Why the task failed or is blocked, for `errored` and `blocked`. */
   reason?: string;
+  /** From the result event when present. */
+  usage?: { cost_usd?: number; turns?: number; duration_ms?: number };
 }

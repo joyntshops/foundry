@@ -31,6 +31,7 @@ A human then acts on GitHub. Each action is another event, another job:
 | `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down; then check sibling PRs for conflicts |
 | `workflow_dispatch` | inputs `issue`, `command`, `message` | the command, as if commented; how Foundry hands work to itself |
 | `pull_request.opened` / `synchronize` / `reopened` / `closed` | base in `preview.pull_request_bases` | preview up / redeploy / down for a non-task PR |
+| `schedule` | | reconcile: in-progress issues with no status update for `reconcile_stale_minutes` are marked failed |
 
 ## Workflow template
 
@@ -46,6 +47,8 @@ on:
       issue:   { required: true,  type: string }
       command: { required: true,  type: string }
       message: { required: false, type: string, default: "" }
+  schedule:
+    - cron: '*/30 * * * *'                 # reconcile: catch runs that died without cleanup
 
 
 # The job's built-in token does all of Foundry's GitHub writes.
@@ -71,12 +74,14 @@ jobs:
         (github.event.pull_request.merged == true ||
          github.event.pull_request.base.ref == 'main')) ||
       (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     concurrency:                                       # job-level, see gotchas
-      group: foundry-${{ github.event.inputs.issue || github.event.issue.number || github.event.pull_request.number }}
-      cancel-in-progress: false
+      group: foundry-${{ github.event.inputs.issue || github.event.issue.number || github.event.pull_request.number || github.event_name }}
+      # `@foundry stop` cancels the running job for that issue; everything else queues.
+      cancel-in-progress: ${{ github.event_name == 'issue_comment' && contains(github.event.comment.body, '@foundry stop') }}
     env:
       FOUNDRY_APP_ID: ${{ secrets.FOUNDRY_APP_ID }}   # secrets aren't readable in step `if:`
     steps:
@@ -143,7 +148,13 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **There is no session resume; there is a hand-off.** `claude --resume` would need the session file from the job that asked, and that job is gone. Instead: when a job ends with the agent waiting (question or plan), Foundry commits anything uncommitted and pushes the branch. When the human answers, the next job recreates the worktree from that branch and relaunches the agent with `FOUNDRY_RESUME_CONTEXT` set to "you stopped because X; the human replied Y; continue from the branch, do not start over". The preset's prompt includes that variable. A plain reply is enough; `@foundry continue` is only needed to nudge a task that is not waiting.
 
-**Cancelling from the Actions UI is the supported way to stop a run.** `@foundry stop` on a running job cannot reach into the job. Press Cancel on the run. A cleanup step that fixes labels on cancel is a planned addition; until then, `@foundry restart` or `@foundry start` re-queues.
+**Stopping a run.** `@foundry stop` works: the template sets `cancel-in-progress` for that comment, so GitHub cancels the issue's running job, the action's `if: cancelled()` step marks the task failed, and the stop command's own job tears the preview down. Cancel from the Actions UI has the same effect through the same cleanup step. Either way the issue never stays at `state:in-progress` with nothing running.
+
+**Runs that die silently are reconciled.** A runner failure or the six-hour limit can end a job with no cleanup. The `schedule` trigger runs `foundry reconcile`: any `state:in-progress` issue whose status comment is older than `reconcile_stale_minutes` (default 120) is marked failed with a note. Set the threshold above your job `timeout-minutes`.
+
+**Cost is visible per issue.** The status comment's `Last run` row shows the cost, turns, and duration the agent CLI reported. `agent_max_turns` (default 150) caps a runaway session; the preset passes it as `--max-turns`.
+
+**The Claude Code version is pinned** in `action.yml` (`claude-code-version`). Four CLI behaviours surprised us on the first day; a release should not change Foundry under you. Bump deliberately, or pass `latest`.
 
 **The `if:` filter matters for cost.** Every `issues.labeled` event, including the ones Foundry itself causes, would otherwise start a runner that does ~40 seconds of setup and exits. The filter in the template starts a job only for `state:ready`, `state:claim`, `@foundry` comments from humans, merged PRs, and change-request reviews.
 

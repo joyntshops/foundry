@@ -35,6 +35,14 @@ const STATUS_MAP: Record<TaskStatus, StatusDisplay> = {
 
 // ── Comment building ─────────────────────────────────────────────────────
 
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r === 0 ? `${m}m` : `${m}m${String(r).padStart(2, '0')}s`;
+}
+
 export interface StatusCommentOpts {
   task: TaskState;
   message?: string;
@@ -43,7 +51,7 @@ export interface StatusCommentOpts {
   historyEntry?: string;
 }
 
-function buildStatusComment(opts: StatusCommentOpts): string {
+export function buildStatusComment(opts: StatusCommentOpts): string {
   const { task, message, prUrl, previewUrl, historyEntry } = opts;
   const display = STATUS_MAP[task.status] ?? { emoji: '❓', label: task.status };
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
@@ -66,6 +74,14 @@ function buildStatusComment(opts: StatusCommentOpts): string {
     lines.push(`| Preview | ${previewUrl ?? task.preview_url} |`);
   }
 
+  const run = task.last_run;
+  if (run && (run.cost_usd !== undefined || run.turns !== undefined || run.duration_ms !== undefined)) {
+    const parts: string[] = [];
+    if (run.cost_usd !== undefined) parts.push(`$${run.cost_usd.toFixed(2)}`);
+    if (run.turns !== undefined) parts.push(`${run.turns} turn${run.turns === 1 ? '' : 's'}`);
+    if (run.duration_ms !== undefined) parts.push(formatDuration(run.duration_ms));
+    lines.push(`| Last run | ${parts.join(' · ')} |`);
+  }
   lines.push(`| Updated | ${timestamp} |`);
 
   if (message) {

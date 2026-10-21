@@ -616,4 +616,21 @@ describe('EventHandler', () => {
       expect(stalePRs.handleStalePRs).toHaveBeenCalledWith(expect.anything(), 'integration', 5);
     });
   });
+
+  describe('run usage', () => {
+    it('is saved on the task when the outcome carries it', async () => {
+      const task = makeTask();
+      await handler.handleEvent({ type: 'agent_completed', task, outcome: {
+        type: 'completed', session_id: 's', final_message: 'ok', ask_user_questions: null,
+        report: { status: 'done', summary: 'ok' }, usage: { cost_usd: 0.5, turns: 9, duration_ms: 1000 },
+      } });
+      expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, task.status, expect.objectContaining({ last_run: { cost_usd: 0.5, turns: 9, duration_ms: 1000 } }));
+    });
+
+    it('every launch carries FOUNDRY_MAX_TURNS from config', async () => {
+      const issue = { number: 42, title: 'T', body: '', html_url: 'u', state: 'open', labels: [] as any[] };
+      await handler.handleEvent({ type: 'issue_ready', issue });
+      expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_MAX_TURNS).toBe('150');
+    });
+  });
 });

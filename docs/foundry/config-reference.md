@@ -36,6 +36,8 @@ worktree_base: "./wts"                      # Relative to repo root; add to .git
 # ── Limits ───────────────────────────────────────────────────────────
 
 max_input_rounds: 3                     # Max human-input rounds before giving up
+agent_max_turns: 150                    # --max-turns for the agent; a runaway session fails
+reconcile_stale_minutes: 120            # in-progress with no update this long → failed (schedule trigger)
 
 # ── Verification ─────────────────────────────────────────────────────
 
@@ -136,6 +138,12 @@ Base directory for git worktrees. Resolved relative to the repo root. Default: `
 
 ### `max_input_rounds`
 Maximum number of human-input rounds (including PR review feedback rounds) before the agent gives up and marks the task failed. Default 3.
+
+### `agent_max_turns`
+Cap on agent turns per run, exported as `FOUNDRY_MAX_TURNS`; the Claude Code preset passes it as `--max-turns`. A run that hits it ends with an error result and the task fails. Default 150.
+
+### `reconcile_stale_minutes`
+`foundry reconcile` (the `schedule` trigger) marks an in-progress issue failed when its status comment has not changed for this long. Set it above the workflow's `timeout-minutes`. Default 120.
 
 ### `verify`
 Ordered list of shell commands run in the task worktree before opening a PR. Fails fast on first error.

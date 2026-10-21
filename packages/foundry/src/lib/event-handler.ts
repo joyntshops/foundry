@@ -150,7 +150,13 @@ export class EventHandler {
       body: brief.body,
       url: `https://github.com/${this.config.repo}/issues/${brief.issue}`,
     });
-    return { ...backendEnv, ...extra, ...issueFile, ...prepareLaunch(stateDir) };
+    return {
+      ...backendEnv,
+      ...extra,
+      ...issueFile,
+      FOUNDRY_MAX_TURNS: String(this.config.agent_max_turns ?? 150),
+      ...prepareLaunch(stateDir),
+    };
   }
 
   private briefFor(task: TaskState): { issue: number; title: string; body: string } {
@@ -544,9 +550,10 @@ export class EventHandler {
 
     log.info(`Outcome for #${task.issue}: ${outcome.type}`);
 
-    if (outcome.session_id) {
+    if (outcome.session_id || outcome.usage) {
       state.updateTaskStatus(config.repo, task.issue, task.status, {
-        session_id: outcome.session_id,
+        ...(outcome.session_id ? { session_id: outcome.session_id } : {}),
+        ...(outcome.usage ? { last_run: outcome.usage } : {}),
       });
     }
 

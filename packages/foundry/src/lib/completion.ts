@@ -26,11 +26,13 @@ export function buildAgentCompletedEvent(
   config: FoundryConfig,
   repoDir: string,
   task: TaskState,
+  exitCode?: number | null,
 ): AgentCompletedEvent {
   const logPath = agentLogPath(config, task.issue);
   const baseBranch = resolveBaseBranch(repoDir);
   const outcome = agentOutput.determineOutcome(logPath, task.worktree, baseBranch, {
     permissionMode: task.permission_mode,
+    exitCode,
     reportFile: reportFilePath(state.getTaskStateDir(config.repo, task.issue)),
   });
   return { type: 'agent_completed', task, outcome };

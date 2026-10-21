@@ -65,7 +65,11 @@ Not yet supported: a comment on the PR carries the PR number, not the issue numb
 
 ## `@foundry stop` did nothing
 
-A running job cannot be stopped by a comment. Press **Cancel** on the run in the Actions UI, then `@foundry restart` or `@foundry start` to fix labels and re-queue.
+The workflow must set `cancel-in-progress` for stop comments (template: `cancel-in-progress: ${{ github.event_name == 'issue_comment' && contains(github.event.comment.body, '@foundry stop') }}`). Without it the stop job queues behind the running one. Cancelling from the Actions UI always works, and the action's `if: cancelled()` step marks the task failed.
+
+## An issue is stuck at `state:in-progress` with no run
+
+The job died without cleanup (runner failure, `timeout-minutes`, or an older template without the cancel step). The `schedule` trigger runs `foundry reconcile` every 30 minutes and marks such issues failed once the status comment is older than `reconcile_stale_minutes`. To do it now from a checkout: `foundry reconcile`. Then `@foundry restart` or `@foundry start`.
 
 ## I answered the agent's question and nothing happened
 

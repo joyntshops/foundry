@@ -49,6 +49,13 @@ export async function runAction(opts: ActionOptions): Promise<void> {
   const config = loadConfig();
   const repoDir = getConfigDir();
 
+  if (eventName === 'schedule') {
+    const { reconcile } = await import('../lib/reconcile.js');
+    const changed = await reconcile(config, repoDir);
+    log.info(`Reconcile: ${changed.length} issue(s) marked failed.`);
+    return;
+  }
+
   const payloadRepo: string | undefined = payload.repository?.full_name;
   if (payloadRepo && payloadRepo !== config.repo) {
     log.warn(`Event is for ${payloadRepo} but .joynt-foundry.yml says ${config.repo}.`);
@@ -134,7 +141,7 @@ async function driveToCompletion(config: FoundryConfig, repoDir: string, handler
       log.info(`Agent for #${task.issue} exited (${code ?? 'signal'}). Analyzing outcome...`);
 
       const fresh = state.getTask(config.repo, task.issue) ?? task;
-      await handler.handleEvent(buildAgentCompletedEvent(config, repoDir, fresh));
+      await handler.handleEvent(buildAgentCompletedEvent(config, repoDir, fresh, code));
     }
   }
 
