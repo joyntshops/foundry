@@ -8,6 +8,7 @@ import * as state from './state.js';
 import * as deployments from './deployments.js';
 import * as log from './log.js';
 import type { FoundryConfig, TaskState } from '../types.js';
+import { slugify } from './git.js';
 
 const COMMENT_MARKER = '<!-- foundry-preview -->';
 
@@ -15,7 +16,7 @@ const COMMENT_MARKER = '<!-- foundry-preview -->';
 
 interface TemplateVars {
   branch: string;
-  issue: number;
+  issue: number | undefined;
   repo: string;
   pr_number: number | undefined;
   sha: string;
@@ -23,8 +24,9 @@ interface TemplateVars {
 
 function expandTemplate(template: string, vars: TemplateVars): string {
   return template
+    .replace(/\{branch_slug\}/g, slugify(vars.branch))
     .replace(/\{branch\}/g, vars.branch)
-    .replace(/\{issue\}/g, String(vars.issue))
+    .replace(/\{issue\}/g, String(vars.issue ?? ''))
     .replace(/\{repo\}/g, vars.repo)
     .replace(/\{pr_number\}/g, String(vars.pr_number ?? ''))
     .replace(/\{sha\}/g, vars.sha);
@@ -33,11 +35,53 @@ function expandTemplate(template: string, vars: TemplateVars): string {
 function makeEnvVars(vars: TemplateVars): Record<string, string> {
   return {
     FOUNDRY_BRANCH: vars.branch,
-    FOUNDRY_ISSUE: String(vars.issue),
+    FOUNDRY_BRANCH_SLUG: slugify(vars.branch),
+    FOUNDRY_ISSUE: String(vars.issue ?? ''),
     FOUNDRY_REPO: vars.repo,
     FOUNDRY_PR_NUMBER: String(vars.pr_number ?? ''),
     FOUNDRY_SHA: vars.sha,
   };
+}
+
+/**
+ * What a preview is for. A task's PR and a plain pull request (such as the
+ * promotion PR from integration into main) both become one of these; only
+ * the task path persists results to local state.
+ */
+export interface PreviewTarget {
+  branch: string;
+  sha: string;
+  pr_number?: number;
+  issue?: number;
+  preview_url?: string;
+  deployment_id?: number;
+}
+
+function targetLabel(t: PreviewTarget): string {
+  return t.issue !== undefined ? `#${t.issue}` : `PR #${t.pr_number ?? '?'} (${t.branch})`;
+}
+
+function targetVars(config: FoundryConfig, t: PreviewTarget): TemplateVars {
+  return { branch: t.branch, issue: t.issue, repo: config.repo, pr_number: t.pr_number, sha: t.sha };
+}
+
+/** The preview URL a PR's comment currently advertises, if Foundry posted one. */
+export function previewUrlFromComments(bodies: string[]): string | undefined {
+  for (const body of bodies) {
+    if (!body.includes(COMMENT_MARKER)) continue;
+    const m = body.match(/Preview URL:\s*(\S+)/);
+    if (m) return m[1];
+  }
+  return undefined;
+}
+
+export async function findPreviewUrlOnPR(repo: string, prNumber: number): Promise<string | undefined> {
+  try {
+    const comments = await github.getComments(repo, prNumber);
+    return previewUrlFromComments(comments.map(c => c.body));
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveHeadSha(worktree: string): string {
@@ -139,14 +183,27 @@ async function upsertPreviewComment(
 
 export async function previewUp(config: FoundryConfig, task: TaskState): Promise<void> {
   if (!config.preview) return;
-
-  const vars: TemplateVars = {
+  const result = await previewUpTarget(config, {
     branch: task.branch,
     issue: task.issue,
-    repo: config.repo,
     pr_number: task.pr_number,
     sha: resolveHeadSha(task.worktree),
-  };
+  });
+  if (!result) return;
+  state.updateTaskStatus(config.repo, task.issue, task.status, {
+    preview_url: result.url,
+    ...(result.deploymentId !== undefined ? { deployment_id: result.deploymentId } : {}),
+  });
+}
+
+/** Deploy a preview for any target. Returns what was created, or null when no URL could be resolved. */
+export async function previewUpTarget(
+  config: FoundryConfig,
+  target: PreviewTarget,
+): Promise<{ url: string; deploymentId?: number } | null> {
+  if (!config.preview) return null;
+  const vars = targetVars(config, target);
+  const label = targetLabel(target);
 
   // Resolve URL. url_template, when set, is always the preview URL: the
   // provider command still runs (it does the deploy) but its output is not
@@ -163,35 +220,26 @@ export async function previewUp(config: FoundryConfig, task: TaskState): Promise
   }
 
   if (!url) {
-    log.warn(`Preview up: could not resolve URL for #${task.issue}`);
-    return;
+    log.warn(`Preview up: could not resolve URL for ${label}`);
+    return null;
   }
 
-  // Save preview URL to state
-  state.updateTaskStatus(config.repo, task.issue, task.status, {
-    preview_url: url,
-  });
-
-  log.info(`Preview URL for #${task.issue}: ${url}`);
+  log.info(`Preview URL for ${label}: ${url}`);
 
   // Create GitHub Deployment (if enabled)
   let deploymentId: number | undefined;
   if (config.github_deployments?.enabled) {
     const deployment = await deployments.createDeployment({
       repo: config.repo,
-      ref: task.branch,
+      ref: target.branch,
       environment: config.github_deployments.environment ?? 'preview',
-      description: `Preview for #${task.issue}`,
+      description: `Preview for ${label}`,
       transientEnvironment: !(config.github_deployments.production ?? false),
       productionEnvironment: config.github_deployments.production ?? false,
     });
 
     if (deployment) {
       deploymentId = deployment.id;
-      state.updateTaskStatus(config.repo, task.issue, task.status, {
-        deployment_id: deploymentId,
-      });
-
       await deployments.createDeploymentStatus({
         repo: config.repo,
         deploymentId: deployment.id,
@@ -204,22 +252,31 @@ export async function previewUp(config: FoundryConfig, task: TaskState): Promise
   }
 
   // Post/update PR comment
-  if (config.preview.comment !== false && task.pr_number) {
-    await upsertPreviewComment(config.repo, task.pr_number, url, 'active');
+  if (config.preview.comment !== false && target.pr_number) {
+    await upsertPreviewComment(config.repo, target.pr_number, url, 'active');
   }
+
+  return { url, deploymentId };
 }
 
 export async function previewDown(config: FoundryConfig, task: TaskState): Promise<void> {
   if (!config.preview) return;
   if (!task.preview_url) return;
-
-  const vars: TemplateVars = {
+  await previewDownTarget(config, {
     branch: task.branch,
     issue: task.issue,
-    repo: config.repo,
     pr_number: task.pr_number,
     sha: resolveHeadSha(task.worktree),
-  };
+    preview_url: task.preview_url,
+    deployment_id: task.deployment_id,
+  });
+}
+
+/** Tear down a preview for any target. `preview_url` must be set. */
+export async function previewDownTarget(config: FoundryConfig, target: PreviewTarget): Promise<void> {
+  if (!config.preview || !target.preview_url) return;
+  const vars = targetVars(config, target);
+  const label = targetLabel(target);
 
   // Run down command (provider mode only)
   if (config.preview.mode === 'provider' && config.preview.down_command) {
@@ -228,15 +285,15 @@ export async function previewDown(config: FoundryConfig, task: TaskState): Promi
     try {
       execSync(expanded, { encoding: 'utf-8', timeout: 120_000, env });
     } catch (err: any) {
-      log.warn(`Preview down command failed for #${task.issue}: ${err.message}`);
+      log.warn(`Preview down command failed for ${label}: ${err.message}`);
     }
   }
 
   // Set deployment status to inactive
-  if (config.github_deployments?.enabled && task.deployment_id) {
+  if (config.github_deployments?.enabled && target.deployment_id) {
     await deployments.createDeploymentStatus({
       repo: config.repo,
-      deploymentId: task.deployment_id,
+      deploymentId: target.deployment_id,
       state: 'inactive',
       description: 'Preview torn down',
       autoInactive: config.github_deployments.auto_inactive ?? true,
@@ -244,11 +301,11 @@ export async function previewDown(config: FoundryConfig, task: TaskState): Promi
   }
 
   // Update PR comment
-  if (config.preview.comment !== false && task.pr_number) {
-    await upsertPreviewComment(config.repo, task.pr_number, task.preview_url, 'inactive');
+  if (config.preview.comment !== false && target.pr_number) {
+    await upsertPreviewComment(config.repo, target.pr_number, target.preview_url, 'inactive');
   }
 
-  log.info(`Preview torn down for #${task.issue}`);
+  log.info(`Preview torn down for ${label}`);
 }
 
 export interface PreviewStatus {

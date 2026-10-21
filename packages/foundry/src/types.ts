@@ -67,6 +67,12 @@ export interface FoundryConfig {
     up_command?: string;
     down_command?: string;
     comment?: boolean;
+    /**
+     * Also preview any pull request whose base branch is listed here, task or
+     * not: up on open/reopen, redeploy on push, down on close. For the
+     * promotion PR from `integration` into `main`.
+     */
+    pull_request_bases?: string[];
   };
 
   github_deployments?: {

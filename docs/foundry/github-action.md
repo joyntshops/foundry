@@ -29,6 +29,7 @@ A human then acts on GitHub. Each action is another event, another job:
 | `issue_comment.created` | any human comment while the issue is `state:waiting-for-input` or `state:plan-review` | the answer; agent relaunched with it |
 | `pull_request_review.submitted` | state is `changes_requested` | feed review back to agent |
 | `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down |
+| `pull_request.opened` / `synchronize` / `reopened` / `closed` | base in `preview.pull_request_bases` | preview up / redeploy / down for a non-task PR |
 
 ## Workflow template
 
@@ -37,7 +38,7 @@ name: Foundry
 on:
   issues:              { types: [labeled] }
   issue_comment:       { types: [created] }
-  pull_request:        { types: [closed] }
+  pull_request:        { types: [opened, synchronize, reopened, closed] }
   pull_request_review: { types: [submitted] }
 
 
@@ -60,7 +61,9 @@ jobs:
         (contains(github.event.comment.body, '@foundry') ||
          contains(github.event.issue.labels.*.name, 'state:waiting-for-input') ||
          contains(github.event.issue.labels.*.name, 'state:plan-review'))) ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'pull_request' &&
+        (github.event.pull_request.merged == true ||
+         github.event.pull_request.base.ref == 'main')) ||
       (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested')
     runs-on: ubuntu-latest
     timeout-minutes: 90

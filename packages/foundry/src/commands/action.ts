@@ -148,6 +148,8 @@ function describe(event: FoundryEvent): string {
       return `${event.type} #${event.issue.number}`;
     case 'command':
       return `command "${event.command}" on #${event.task.issue} by ${event.commentAuthor}`;
+    case 'pr_preview':
+      return `pr_preview ${event.action} for PR #${event.pr_number} (${event.branch} → ${event.base})`;
     default:
       return `${event.type} #${event.task.issue}`;
   }

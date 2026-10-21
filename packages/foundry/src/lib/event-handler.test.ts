@@ -79,6 +79,9 @@ vi.mock('./agent-output.js', () => ({
 vi.mock('./preview.js', () => ({
   previewUp: vi.fn(),
   previewDown: vi.fn(),
+  previewUpTarget: vi.fn().mockResolvedValue({ url: 'https://pr-40.x' }),
+  previewDownTarget: vi.fn(),
+  findPreviewUrlOnPR: vi.fn().mockResolvedValue('https://pr-40.x'),
 }));
 
 vi.mock('./status-comment.js', () => ({
@@ -132,6 +135,7 @@ import * as github from './github.js';
 import * as worktree from './worktree.js';
 import * as statusComment from './status-comment.js';
 import * as issueFile from './issue-file.js';
+import * as previewMod from './preview.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
@@ -513,6 +517,26 @@ describe('EventHandler', () => {
       const task = makeTask({ status: 'waiting-for-input', issue_body: 'stored body' });
       await handler.handleEvent({ type: 'human_response', task, response: 'ok' });
       expect(issueFile.writeIssueFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ body: 'stored body' }));
+    });
+  });
+
+  describe('pr_preview', () => {
+    it('up deploys a preview for the PR with no task involved', async () => {
+      await handler.handleEvent({ type: 'pr_preview', action: 'up', pr_number: 40, branch: 'integration', base: 'main', sha: 'deadbeef' });
+      expect(previewMod.previewUpTarget).toHaveBeenCalledWith(expect.anything(), { branch: 'integration', pr_number: 40, sha: 'deadbeef' });
+      expect(mockWorkerSpawn).not.toHaveBeenCalled();
+    });
+
+    it('down finds the posted URL and tears the preview down', async () => {
+      await handler.handleEvent({ type: 'pr_preview', action: 'down', pr_number: 40, branch: 'integration', base: 'main', sha: 'deadbeef' });
+      expect(previewMod.findPreviewUrlOnPR).toHaveBeenCalledWith('owner/repo', 40);
+      expect(previewMod.previewDownTarget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ pr_number: 40, preview_url: 'https://pr-40.x' }));
+    });
+
+    it('down with no posted URL does nothing', async () => {
+      vi.mocked(previewMod.findPreviewUrlOnPR).mockResolvedValueOnce(undefined);
+      await handler.handleEvent({ type: 'pr_preview', action: 'down', pr_number: 41, branch: 'integration', base: 'main', sha: 's' });
+      expect(previewMod.previewDownTarget).not.toHaveBeenCalled();
     });
   });
 });
