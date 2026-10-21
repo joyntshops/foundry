@@ -109,6 +109,7 @@ const DEFAULT_CONFIG = {
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
   verify: [] as string[],
+  verify_preview: [] as string[],
   integration_rebuild: '',
   comment_triggers: {
     replan: '@foundry replan',

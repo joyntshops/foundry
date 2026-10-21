@@ -47,6 +47,11 @@ verify:                                 # Commands run before PR creation
 
 integration_rebuild: "npm run build"    # Command run after integration merge
 
+# Run against the live preview before the task is marked ready for review.
+# FOUNDRY_PREVIEW_URL is set; also FOUNDRY_BRANCH, FOUNDRY_PR_NUMBER, FOUNDRY_ISSUE.
+verify_preview:
+  - "npx playwright test --base-url \"$FOUNDRY_PREVIEW_URL\""
+
 # ── Comment Triggers ─────────────────────────────────────────────────
 
 comment_triggers:
@@ -101,6 +106,7 @@ preview:
   # down_command: "deploy.sh down {issue} {branch}"  # mode:provider — teardown command
   comment: true                           # Post/update PR comment (default true)
   # pull_request_bases: [main]            # also preview non-task PRs into these branches
+  # ready_timeout_seconds: 300            # how long verify_preview waits for the URL to answer
 
 # ── GitHub Deployments (optional) ───────────────────────────────────
 
@@ -137,6 +143,9 @@ Ordered list of shell commands run in the task worktree before opening a PR. Fai
 ### `integration_rebuild`
 Shell command run after merging into integration (via `foundry review`).
 
+### `verify_preview`
+Ordered list of shell commands run **against the live preview** after it is up, in the branch's worktree, with `FOUNDRY_PREVIEW_URL` in the environment (plus `FOUNDRY_BRANCH`, `FOUNDRY_PR_NUMBER`, `FOUNDRY_ISSUE`). Fail-fast. Foundry first waits for the URL to answer (`preview.ready_timeout_seconds`). A task is not marked `state:ready-for-human-review` until these pass; a failure fails the task with the output on the issue. Also runs for non-task PRs previewed via `pull_request_bases`, with the result posted on the PR. Default `[]`. See [Preview Environments](preview-environments.md#verifying-against-the-preview).
+
 ### `comment_triggers`
 Strings matched in issue comments to trigger agent commands; each comment is an `issue_comment` event and a job. Commands that accept a message (`continue`, `start`, `plan`) match as a prefix — everything after the trigger string becomes the message. See [Controlling Foundry](workflows.md#controlling-foundry) for the full command reference.
 
@@ -169,6 +178,7 @@ Configuration for preview/staging environments deployed per-task.
 - `up_command` — Shell command to spin up the preview environment (`provider` mode). Without `url_template` it must print a URL, or JSON `{ "url": "..." }`, to stdout. Same template variables. Under the Action, `gh` is available and `GH_TOKEN` is set, so `gh workflow run your-deploy.yml -f pr={pr_number}` is the common shape; it needs `actions: write`.
 - `down_command` — Shell command to tear down the preview environment (`provider` mode). Same template variables.
 - `comment` — Whether to post/update a PR comment with the preview URL. Default `true`.
+- `ready_timeout_seconds` — How long `verify_preview` waits for the preview URL to answer before giving up. Default `300`.
 - `pull_request_bases` — Base branches whose pull requests get a preview even when they are not Foundry tasks (up on open, redeploy on push, down on close). Typically `[main]` for the promotion PR from `integration`. See [Preview Environments](preview-environments.md#previews-for-pull-requests-that-are-not-tasks).
 
 ### `github_deployments`

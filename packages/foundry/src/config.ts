@@ -29,6 +29,7 @@ const DEFAULTS: FoundryConfig = {
   worktree_base: './wts',
   max_input_rounds: 3,
   verify: [],
+  verify_preview: [],
   integration_rebuild: '',
   comment_triggers: {
     replan: '@foundry replan',

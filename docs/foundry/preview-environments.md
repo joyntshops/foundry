@@ -93,6 +93,20 @@ With `pull_request_bases: [main]`, the promotion PR from `integration` into `mai
 
 The workflow must deliver the events: `pull_request` with `types: [opened, synchronize, reopened, closed]`, and the job `if:` must admit them for listed bases. The template in [GitHub Action](github-action.md) does. GitHub does not run `pull_request` workflows for a PR with merge conflicts, so a conflicting promotion PR gets no preview until it is clean.
 
+## Verifying against the preview
+
+`verify` proves the branch builds; `verify_preview` proves the deployed thing works. Commands run after the preview is up, in the branch's worktree, with `FOUNDRY_PREVIEW_URL` set:
+
+```yaml
+verify_preview:
+  - 'curl -fsS "$FOUNDRY_PREVIEW_URL" | grep -q "<h1>"'
+  - 'npx playwright test --base-url "$FOUNDRY_PREVIEW_URL"'
+```
+
+Foundry first polls the URL until it answers (anything but 404 or 5xx), for up to `preview.ready_timeout_seconds` (default 300). Then the commands run fail-fast. For a task, the result gates `state:ready-for-human-review`: a failure fails the task and posts the output on the issue, exactly like a failed build. For a non-task PR (`pull_request_bases`), the result is posted on the PR and, when the token allows, as a check run on the head commit, from a throwaway checkout of the PR's branch.
+
+This is where end-to-end and integration tests belong once there is no shared test environment to run them in.
+
 ## Template Variables
 
 The following variables are expanded in `url_template`, `up_command`, and `down_command`:

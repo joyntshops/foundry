@@ -20,6 +20,8 @@ vi.mock('./github.js', () => ({
   createPR: vi.fn(),
   closeIssue: vi.fn(),
   commentOnPR: vi.fn(),
+  getComments: vi.fn().mockResolvedValue([]),
+  updateComment: vi.fn(),
   extractPRNumber: vi.fn(),
   getPRReviews: vi.fn(),
   createCheckRun: vi.fn(),
@@ -28,6 +30,12 @@ vi.mock('./github.js', () => ({
 
 vi.mock('./issue-file.js', () => ({
   writeIssueFile: vi.fn().mockReturnValue({ FOUNDRY_ISSUE_FILE: '/tmp/state/42/issue.md' }),
+}));
+
+vi.mock('./preview-verify.js', () => ({
+  isConfigured: vi.fn().mockReturnValue(false),
+  verifyPreview: vi.fn().mockResolvedValue({ passed: true, url: 'https://pr-5.x', results: [] }),
+  formatPreviewVerify: vi.fn().mockReturnValue('**Preview verification FAILED** against https://pr-5.x'),
 }));
 
 vi.mock('./worktree.js', () => ({
@@ -44,6 +52,8 @@ vi.mock('./git.js', () => ({
   worktreeExists: vi.fn().mockReturnValue(false),
   branchExists: vi.fn().mockReturnValue(false),
   addWorktree: vi.fn(),
+  addWorktreeTracking: vi.fn(),
+  pruneWorktrees: vi.fn(),
   removeWorktree: vi.fn(),
   deleteBranch: vi.fn(),
   deleteRemoteBranch: vi.fn(),
@@ -136,6 +146,7 @@ import * as worktree from './worktree.js';
 import * as statusComment from './status-comment.js';
 import * as issueFile from './issue-file.js';
 import * as previewMod from './preview.js';
+import * as previewVerify from './preview-verify.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
@@ -537,6 +548,59 @@ describe('EventHandler', () => {
       vi.mocked(previewMod.findPreviewUrlOnPR).mockResolvedValueOnce(undefined);
       await handler.handleEvent({ type: 'pr_preview', action: 'down', pr_number: 41, branch: 'integration', base: 'main', sha: 's' });
       expect(previewMod.previewDownTarget).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('preview verification gate', () => {
+    const readyLabelSet = () => vi.mocked(github.transitionLabels).mock.calls.some(c => Array.isArray(c[3]) && c[3].includes('state:ready-for-human-review'));
+    const completed = (task: any) => handler.handleEvent({ type: 'agent_completed', task, outcome: {
+      type: 'completed', session_id: 's', final_message: 'done', ask_user_questions: null,
+      report: { status: 'done', summary: 'done' },
+    } });
+
+    it('when not configured, ready-for-review follows preview up with no verification', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(false);
+      await completed(makeTask({ pr_url: 'https://github.com/owner/repo/pull/5', pr_number: 5 }));
+      expect(previewVerify.verifyPreview).not.toHaveBeenCalled();
+      expect(readyLabelSet()).toBe(true);
+    });
+
+    it('when it passes, the task is ready for review and the comment says so', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(true);
+      vi.mocked(state.getAllTasks).mockReturnValue([makeTask({ pr_url: 'u', pr_number: 5, preview_url: 'https://pr-5.x', worktree: '/w' })]);
+      await completed(makeTask({ pr_url: 'u', pr_number: 5 }));
+      expect(previewVerify.verifyPreview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ url: 'https://pr-5.x', cwd: '/w' }));
+      expect(readyLabelSet()).toBe(true);
+      const last = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(last.historyEntry).toMatch(/preview verified/);
+    });
+
+    it('when it fails, the task is failed and never marked ready for review', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(true);
+      vi.mocked(previewVerify.verifyPreview).mockResolvedValueOnce({ passed: false, url: 'https://pr-5.x', results: [{ command: 'x', success: false, output: 'nope', duration_ms: 1 }] });
+      vi.mocked(state.getAllTasks).mockReturnValue([makeTask({ pr_url: 'u', pr_number: 5, preview_url: 'https://pr-5.x' })]);
+      await completed(makeTask({ pr_url: 'u', pr_number: 5 }));
+      expect(readyLabelSet()).toBe(false);
+      expect(claim.markFailed).toHaveBeenCalled();
+      const last = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(last.historyEntry).toBe('Preview verification failed');
+    });
+
+    it('when configured but no preview URL exists, it fails closed', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(true);
+      vi.mocked(state.getAllTasks).mockReturnValue([makeTask({ pr_url: 'u', pr_number: 5, preview_url: undefined })]);
+      await completed(makeTask({ pr_url: 'u', pr_number: 5 }));
+      expect(previewVerify.verifyPreview).not.toHaveBeenCalled();
+      expect(claim.markFailed).toHaveBeenCalled();
+    });
+
+    it('a non-task PR preview is verified from a throwaway checkout and reported on the PR', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(true);
+      vi.mocked(github.getComments).mockResolvedValue([]);
+      await handler.handleEvent({ type: 'pr_preview', action: 'up', pr_number: 40, branch: 'integration', base: 'main', sha: 'deadbeef' });
+      expect(previewVerify.verifyPreview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ url: 'https://pr-40.x', cwd: expect.stringMatching(/pr-40$/) }));
+      expect(github.commentOnPR).toHaveBeenCalledWith('owner/repo', 40, expect.stringContaining('foundry-preview-verify'));
+      expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ head_sha: 'deadbeef', conclusion: 'success' }));
     });
   });
 });
