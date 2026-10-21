@@ -64,6 +64,18 @@ export function push(branch: string, cwd?: string, force = false): void {
   git(args, cwd);
 }
 
+/** Number of commits in a revision range, e.g. `origin/integration..HEAD`. 0 on any error. */
+export function countCommits(range: string, cwd?: string): number {
+  const out = gitSafe(['rev-list', '--count', range], cwd);
+  return out === null ? 0 : Number(out) || 0;
+}
+
+/** True when the working tree has uncommitted or untracked changes. */
+export function isDirty(cwd?: string): boolean {
+  const out = gitSafe(['status', '--porcelain'], cwd);
+  return out !== null && out.length > 0;
+}
+
 export function deleteBranch(branch: string, cwd?: string): void {
   gitSafe(['branch', '-D', branch], cwd);
 }
@@ -97,6 +109,20 @@ export function addWorktree(worktreePath: string, branch: string, base: string, 
   git(['worktree', 'add', '-b', branch, worktreePath, base], cwd);
 }
 
+/**
+ * Add a worktree for a branch that already exists on the remote. The local
+ * branch is created or reset to origin/<branch> and set to track it.
+ */
+export function addWorktreeTracking(worktreePath: string, branch: string, cwd?: string): void {
+  fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+  git(['worktree', 'add', '-B', branch, '--track', worktreePath, `origin/${branch}`], cwd);
+}
+
+/** Drop worktree registrations whose directories no longer exist. */
+export function pruneWorktrees(cwd?: string): void {
+  gitSafe(['worktree', 'prune'], cwd);
+}
+
 export function removeWorktree(worktreePath: string, cwd?: string): void {
   gitSafe(['worktree', 'remove', worktreePath, '--force'], cwd);
 }
@@ -124,8 +150,14 @@ export function listWorktrees(cwd?: string): Array<{ path: string; branch: strin
   return entries;
 }
 
+/** Resolve symlinks so paths compare equal to what git reports (macOS: /var → /private/var). */
+function canonical(p: string): string {
+  try { return fs.realpathSync.native(p); } catch { return path.resolve(p); }
+}
+
 export function worktreeExists(worktreePath: string, cwd?: string): boolean {
-  return listWorktrees(cwd).some(w => w.path === worktreePath);
+  const target = canonical(worktreePath);
+  return listWorktrees(cwd).some(w => canonical(w.path) === target);
 }
 
 // ── Utility ─────────────────────────────────────────────────────────────

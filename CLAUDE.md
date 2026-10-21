@@ -55,11 +55,11 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 ## Known gaps, in priority order
 
-1. When a job ends with the task waiting for input, the agent's partial work is not pushed and the next job has no worktree to resume into. Fix: push (WIP-commit if dirty) before exit; `ensureWorktree` on resume.
-2. No verify-to-agent retry loop; a verification failure stops the task.
-3. `@foundry` commands on PR comments resolve to the PR number, not the issue.
-4. No `if: cancelled()` label cleanup in the template.
-5. `foundry review` is manual; automating it on PR approval is the Week 3 target.
+1. No verify-to-agent retry loop; a verification failure stops the task.
+2. Comments on PRs (commands or replies) resolve to the PR number, not the issue; the workflow template excludes them.
+3. No `if: cancelled()` label cleanup in the template.
+4. `foundry review` is manual; automating it on PR approval is the next target.
+5. Plan mode (`--permission-mode plan` under `-p` with structured output) is wired but untested on a real run.
 
 ## Testing a change for real
 

@@ -140,6 +140,46 @@ describe('webhookToEvents', () => {
       expect(events).toEqual([]);
     });
 
+    it('maps a plain reply on a waiting-for-input issue to human_response', () => {
+      mockGetAllTasks.mockReturnValue([makeTask({ status: 'waiting-for-input' })]);
+      const events = webhookToEvents('issue_comment', {
+        action: 'created',
+        comment: { id: 103, body: 'Use the tabbed layout.', user: { login: 'alice' } },
+        issue: { number: 42 },
+      }, config);
+      expect(events).toEqual([{ type: 'human_response', task: expect.objectContaining({ issue: 42 }), response: 'Use the tabbed layout.' }]);
+    });
+
+    it('maps a plain reply on a plan-review issue to plan_approved', () => {
+      mockGetAllTasks.mockReturnValue([makeTask({ status: 'plan-review' })]);
+      const events = webhookToEvents('issue_comment', {
+        action: 'created',
+        comment: { id: 104, body: 'Looks good, go ahead.', user: { login: 'alice' } },
+        issue: { number: 42 },
+      }, config);
+      expect(events[0].type).toBe('plan_approved');
+    });
+
+    it('an @foundry command on a waiting issue is still a command', () => {
+      mockGetAllTasks.mockReturnValue([makeTask({ status: 'waiting-for-input' })]);
+      const events = webhookToEvents('issue_comment', {
+        action: 'created',
+        comment: { id: 105, body: '@foundry restart', user: { login: 'alice' } },
+        issue: { number: 42 },
+      }, config);
+      expect(events[0].type).toBe('command');
+    });
+
+    it('ignores plain comments on a task that is not waiting', () => {
+      mockGetAllTasks.mockReturnValue([makeTask({ status: 'agent-running' })]);
+      const events = webhookToEvents('issue_comment', {
+        action: 'created',
+        comment: { id: 106, body: 'Any update?', user: { login: 'alice' } },
+        issue: { number: 42 },
+      }, config);
+      expect(events).toEqual([]);
+    });
+
     it('returns empty array for bot comments', () => {
       const task = makeTask();
       mockGetAllTasks.mockReturnValue([task]);

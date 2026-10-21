@@ -87,6 +87,10 @@ claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_
 
 `AskUserQuestion` is disallowed because nobody is there to answer it; questions go in the report. `< /dev/null` stops the CLI waiting three seconds for stdin.
 
+### What the preset tells the agent
+
+Two environment variables shape every launch. `FOUNDRY_AGENT_BRIEF` is appended to the system prompt: the standing instruction a stakeholder gives a developer (read the whole issue, decide small things yourself and list them as assumptions, ask only material questions with options, change only what is needed, commit as you go, never push or open PRs, run the verify commands, report truthfully). `FOUNDRY_RESUME_CONTEXT` is empty on a first launch and, on a relaunch after a human reply, says what the agent asked, what the human answered, and that the branch already holds its earlier commits. A custom command can use both the same way.
+
 ### Untrusted text in commands
 
 Issue titles and bodies are written by whoever opened the issue and end up on a shell command line. Every launch gets `FOUNDRY_ISSUE_TITLE`, `FOUNDRY_ISSUE_BODY`, `FOUNDRY_ISSUE_NUMBER`, and `FOUNDRY_ISSUE_URL` in its environment; `"$FOUNDRY_ISSUE_TITLE"` is never re-evaluated by the shell, so prefer it. `{title}` and `{body}` still work and are escaped for use **inside double quotes only**.

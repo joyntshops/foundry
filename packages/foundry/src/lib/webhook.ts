@@ -53,9 +53,6 @@ function mapIssueComment(
     return [];
   }
 
-  const command = parseFoundryCommand(body, config);
-  if (!command) return [];
-
   const issueNumber: number = issue.number;
   const repo = config.repo;
 
@@ -63,14 +60,28 @@ function mapIssueComment(
   const task = state.getAllTasks(repo).find(t => t.issue === issueNumber);
   if (!task) return [];
 
-  return [{
-    type: 'command',
-    task,
-    command: command.name,
-    message: command.message,
-    commentId: comment.id,
-    commentAuthor: author,
-  }];
+  const command = parseFoundryCommand(body, config);
+  if (command) {
+    return [{
+      type: 'command',
+      task,
+      command: command.name,
+      message: command.message,
+      commentId: comment.id,
+      commentAuthor: author,
+    }];
+  }
+
+  // A plain reply on an issue where the agent is waiting is the answer.
+  if (body.trim() === '') return [];
+  if (task.status === 'waiting-for-input') {
+    return [{ type: 'human_response', task, response: body }];
+  }
+  if (task.status === 'plan-review') {
+    return [{ type: 'plan_approved', task, response: body }];
+  }
+
+  return [];
 }
 
 interface ParsedFoundryCommand {
