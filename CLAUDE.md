@@ -19,7 +19,8 @@ packages/foundry/src/
   lib/labels.ts              setStateLabel: the single-state-label invariant
   lib/claim.ts               claim protocol + structured claim comment (the task's durable record)
   lib/completion.ts          exited agent → AgentCompletedEvent
-  lib/agent-output.ts        parses Claude Code stream-json; classifies outcomes
+  lib/agent-report.ts        the typed agent report: schema, validation, file transport, launch env
+  lib/agent-output.ts        outcome = facts (run error, commits) + the report's status; no prose matching
   lib/preview.ts             preview up/down; url_template always wins over command output
   lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
   lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/
@@ -47,6 +48,8 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 - **Every job starts with nothing.** Anything a later job needs must be on GitHub before this one exits: labels, the claim comment, the status comment, the PR, the preview comment. If you add task state, add it to a comment and to `task-recovery.ts`.
 - **Finish transitions in-job.** Events caused by the job's token do not start other runs, except `workflow_dispatch` and `repository_dispatch`. A transition that relies on "the next run will pick it up" stalls. `continueIfRequeued` in `commands/action.ts` is the pattern.
 - **Behavior goes in `EventHandler`.** `action.ts` is composition only.
+- **Never branch on prose.** Control flow reads the agent's typed report and facts Foundry can check, nothing else. No report, an invalid report, or a report that contradicts git fails closed. If a new decision needs information only the agent has, add a field to `AGENT_REPORT_SCHEMA`; do not match text.
+- **Issue text is hostile input.** Titles and bodies reach a shell. Use the `FOUNDRY_ISSUE_*` env vars; `{title}`/`{body}` are escaped for double quotes only.
 - **Foundry is not the agent.** Backends are configured commands. Do not special-case Claude beyond parsing its transcript format.
 - **`url_template` wins.** Provider command output is only read as a URL when there is no template. `gh workflow run` prints a run URL and this bit us.
 
