@@ -122,6 +122,7 @@ export async function recoverTask(
   return {
     issue: issueNumber,
     title: iss.title,
+    issue_body: iss.body ?? '',
     repo: config.repo,
     branch,
     worktree: git.resolveWorktreePath(config.worktree_base, issueNumber, iss.title, repoDir),

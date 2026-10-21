@@ -112,6 +112,8 @@ export interface TaskState {
   permission_mode?: string;
   input_request_count?: number;
   last_agent_message?: string;
+  /** The issue body at claim time; written to FOUNDRY_ISSUE_FILE on every launch. */
+  issue_body?: string;
   preview_url?: string;
   deployment_id?: number;
 }

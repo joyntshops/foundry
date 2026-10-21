@@ -89,7 +89,7 @@ claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_
 
 ### What the preset tells the agent
 
-Two environment variables shape every launch. `FOUNDRY_AGENT_BRIEF` is appended to the system prompt: the standing instruction a stakeholder gives a developer (read the whole issue, decide small things yourself and list them as assumptions, ask only material questions with options, change only what is needed, commit as you go, never push or open PRs, run the verify commands, report truthfully). `FOUNDRY_RESUME_CONTEXT` is empty on a first launch and, on a relaunch after a human reply, says what the agent asked, what the human answered, and that the branch already holds its earlier commits. A custom command can use both the same way.
+Three environment variables shape every launch. `FOUNDRY_ISSUE_FILE` is a Markdown file holding the issue's title, URL, and body; the preset tells the agent to read it first, so the brief arrives even when the agent has no network (Claude Code's plan mode blocks `gh`, `curl`, and web fetches; the first real plan-mode run planned from the title alone). `FOUNDRY_AGENT_BRIEF` is appended to the system prompt: the standing instruction a stakeholder gives a developer (read the whole issue, decide small things yourself and list them as assumptions, ask only material questions with options, change only what is needed, commit as you go, never push or open PRs, run the verify commands, report truthfully). `FOUNDRY_RESUME_CONTEXT` is empty on a first launch and, on a relaunch after a human reply, says what the agent asked, what the human answered, and that the branch already holds its earlier commits. A custom command can use both the same way.
 
 ### Untrusted text in commands
 

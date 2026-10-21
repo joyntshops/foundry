@@ -16,6 +16,7 @@ import * as verify from './verify.js';
 import * as agentOutput from './agent-output.js';
 import { prepareLaunch } from './agent-report.js';
 import { preserveWork, ensureWorktree } from './worktree.js';
+import { writeIssueFile } from './issue-file.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
@@ -131,9 +132,23 @@ export class EventHandler {
    * Environment for an agent launch: the backend's own env plus the report
    * contract (schema + report file), with any previous launch's report cleared.
    */
-  private launchEnv(issue: number, backendEnv: Record<string, string> = {}, extra: Record<string, string> = {}): Record<string, string> {
-    const stateDir = state.getTaskStateDir(this.config.repo, issue);
-    return { ...backendEnv, ...extra, ...prepareLaunch(stateDir) };
+  private launchEnv(
+    brief: { issue: number; title: string; body: string },
+    backendEnv: Record<string, string> = {},
+    extra: Record<string, string> = {},
+  ): Record<string, string> {
+    const stateDir = state.getTaskStateDir(this.config.repo, brief.issue);
+    const issueFile = writeIssueFile(stateDir, {
+      number: brief.issue,
+      title: brief.title,
+      body: brief.body,
+      url: `https://github.com/${this.config.repo}/issues/${brief.issue}`,
+    });
+    return { ...backendEnv, ...extra, ...issueFile, ...prepareLaunch(stateDir) };
+  }
+
+  private briefFor(task: TaskState): { issue: number; title: string; body: string } {
+    return { issue: task.issue, title: task.title, body: task.issue_body ?? '' };
   }
 
   async handleEvent(event: FoundryEvent): Promise<void> {
@@ -261,12 +276,13 @@ export class EventHandler {
       id: workerId,
       cwd: worktree,
       command: agentCommand,
-      env: this.launchEnv(issue.number, agentEnv),
+      env: this.launchEnv({ issue: issue.number, title: issue.title, body: issue.body ?? '' }, agentEnv),
     });
 
     const taskState: TaskState = {
       issue: issue.number,
       title: issue.title,
+      issue_body: issue.body ?? '',
       repo: config.repo,
       branch,
       worktree,
@@ -354,6 +370,7 @@ export class EventHandler {
     const taskState: TaskState = {
       issue: issue.number,
       title: issue.title,
+      issue_body: issue.body ?? '',
       repo: config.repo,
       branch,
       worktree,
@@ -561,7 +578,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command: agentCommand,
-      env: this.launchEnv(task.issue, agentEnv),
+      env: this.launchEnv(this.briefFor(task), agentEnv),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
@@ -644,7 +661,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command: agentCommand,
-      env: this.launchEnv(task.issue, agentEnv),
+      env: this.launchEnv(this.briefFor(task), agentEnv),
     });
 
     await setStateLabel(config, task.issue, 'in_progress');
@@ -980,7 +997,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command: agentCommand,
-      env: this.launchEnv(task.issue, agentEnv),
+      env: this.launchEnv(this.briefFor(task), agentEnv),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
@@ -1026,7 +1043,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command,
-      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams), {
+      env: this.launchEnv(this.briefFor(task), backend.resolveEnv(launchParams), {
         FOUNDRY_RESUME_CONTEXT: buildResumeContext(task, humanResponse, resumeKind),
       }),
     });
@@ -1081,7 +1098,7 @@ export class EventHandler {
       id: task.tmux_session,
       cwd: task.worktree,
       command,
-      env: this.launchEnv(task.issue, backend.resolveEnv(launchParams), {
+      env: this.launchEnv(this.briefFor(task), backend.resolveEnv(launchParams), {
         FOUNDRY_RESUME_CONTEXT: buildResumeContext(task, feedback, 'review'),
       }),
     });
