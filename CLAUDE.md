@@ -23,6 +23,7 @@ packages/foundry/src/
   lib/agent-output.ts        outcome = facts (run error, commits) + the report's status; no prose matching
   lib/preview.ts             preview up/down; url_template always wins over command output
   lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
+  lib/worktree.ts            preserveWork (commit+push before a job ends waiting) and ensureWorktree (recreate on resume)
   lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/
   backends/                  agent backends; `command` is the only type, fully generic
 docs/foundry/                user docs; github-action.md carries the load-bearing decisions
