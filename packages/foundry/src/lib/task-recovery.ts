@@ -11,9 +11,9 @@
 import * as github from './github.js';
 import * as git from './git.js';
 import { parseClaimComment } from './claim.js';
+import { previewUrlFromComments } from './preview.js';
 import type { FoundryConfig, TaskState, TaskStatus, GitHubIssue } from '../types.js';
 
-const PREVIEW_MARKER = '<!-- foundry-preview -->';
 const CLAIM_MARKER = '<!-- foundry-claim-block -->';
 
 /**
@@ -68,14 +68,6 @@ function permissionModeFromLabels(config: FoundryConfig, labels: string[]): stri
   return '--dangerously-skip-permissions';
 }
 
-function previewUrlFromComments(bodies: string[]): string | undefined {
-  for (const body of bodies) {
-    if (!body.includes(PREVIEW_MARKER)) continue;
-    const m = body.match(/Preview URL:\s*(\S+)/);
-    if (m) return m[1];
-  }
-  return undefined;
-}
 
 /**
  * Rebuild the TaskState for an issue from GitHub. Returns null when the issue

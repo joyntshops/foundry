@@ -17,7 +17,8 @@ export type FoundryEvent =
   | PRReviewEvent
   | AgentCompletedEvent
   | HumanResponseEvent
-  | PlanApprovedEvent;
+  | PlanApprovedEvent
+  | PRPreviewEvent;
 
 export interface CommandEvent {
   type: 'command';
@@ -59,6 +60,20 @@ export interface HumanResponseEvent {
   type: 'human_response';
   task: TaskState;
   response: string;
+}
+
+/**
+ * Preview lifecycle for a pull request that is not a Foundry task, selected
+ * by `preview.pull_request_bases`. `up` on open, reopen, and every push;
+ * `down` on close.
+ */
+export interface PRPreviewEvent {
+  type: 'pr_preview';
+  action: 'up' | 'down';
+  pr_number: number;
+  branch: string;
+  base: string;
+  sha: string;
 }
 
 export interface PlanApprovedEvent {

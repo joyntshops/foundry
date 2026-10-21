@@ -32,7 +32,7 @@ vi.mock('./log.js', () => ({
   warn: vi.fn(),
 }));
 
-import { previewUp, previewDown, getPreviewStatus } from './preview.js';
+import { previewUp, previewDown, getPreviewStatus, previewUpTarget, previewDownTarget, findPreviewUrlOnPR } from './preview.js';
 import * as github from './github.js';
 import * as state from './state.js';
 import * as deployments from './deployments.js';
@@ -508,12 +508,12 @@ describe('previewUp', () => {
 
       await previewUp(config, task);
 
-      // First call saves preview_url, second saves deployment_id
+      // One state write carries both the URL and the deployment id
       expect(state.updateTaskStatus).toHaveBeenCalledWith(
         'acme/webapp',
         42,
         'pr-open',
-        { deployment_id: 555 },
+        { preview_url: 'https://pr-42.example.com', deployment_id: 555 },
       );
     });
 
@@ -885,5 +885,52 @@ describe('comment upsert', () => {
       expect.stringContaining('Torn down'),
     );
     expect(github.commentOnPR).not.toHaveBeenCalled();
+  });
+});
+
+describe('previews for pull requests that are not tasks', () => {
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(github.getComments).mockResolvedValue([]); });
+
+  it('previewUpTarget expands {branch_slug} and {pr_number}, posts on the PR, touches no task state', async () => {
+    mockExecWithSha('');
+    const config = makeConfig({
+      preview: {
+        mode: 'provider',
+        url_template: 'https://{branch_slug}.preview.example.com',
+        up_command: 'deploy {branch_slug} {sha}',
+      },
+    });
+
+    const result = await previewUpTarget(config, { branch: 'integration', pr_number: 7, sha: 'abc123' });
+
+    expect(result).toEqual({ url: 'https://integration.preview.example.com', deploymentId: undefined });
+    expect(execSync).toHaveBeenCalledWith('deploy integration abc123', expect.objectContaining({
+      env: expect.objectContaining({ FOUNDRY_BRANCH_SLUG: 'integration', FOUNDRY_ISSUE: '', FOUNDRY_PR_NUMBER: '7', FOUNDRY_SHA: 'abc123' }),
+    }));
+    expect(github.commentOnPR).toHaveBeenCalledWith('acme/webapp', 7, expect.stringContaining('https://integration.preview.example.com'));
+    expect(state.updateTaskStatus).not.toHaveBeenCalled();
+  });
+
+  it('slugifies a feature branch for {branch_slug}', async () => {
+    mockExecWithSha('');
+    const config = makeConfig({ preview: { mode: 'template', url_template: 'https://{branch_slug}.x' } });
+    const r = await previewUpTarget(config, { branch: 'feature/42-Fix Login', pr_number: 1, sha: 's' });
+    expect(r?.url).toBe('https://feature-42-fix-login.x');
+  });
+
+  it('previewDownTarget runs the down command and marks the PR comment inactive', async () => {
+    mockExecWithSha('');
+    const config = makeConfig({ preview: { mode: 'provider', url_template: 'https://u', down_command: 'teardown {pr_number}' } });
+    await previewDownTarget(config, { branch: 'integration', pr_number: 7, sha: 's', preview_url: 'https://u' });
+    expect(execSync).toHaveBeenCalledWith('teardown 7', expect.anything());
+    expect(github.commentOnPR).toHaveBeenCalledWith('acme/webapp', 7, expect.stringContaining('~~https://u~~'));
+  });
+
+  it('findPreviewUrlOnPR reads the URL Foundry posted', async () => {
+    vi.mocked(github.getComments).mockResolvedValue([
+      { id: 1, body: 'hi', user: { login: 'a' }, created_at: '' },
+      { id: 2, body: '<!-- foundry-preview -->\n**Preview Environment** — Live\n\nPreview URL: https://pr-7.x\n', user: { login: 'b' }, created_at: '' },
+    ] as any);
+    expect(await findPreviewUrlOnPR('acme/webapp', 7)).toBe('https://pr-7.x');
   });
 });

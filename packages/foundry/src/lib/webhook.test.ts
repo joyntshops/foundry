@@ -320,6 +320,43 @@ describe('webhookToEvents', () => {
     });
   });
 
+  describe('pull_request previews for non-task PRs', () => {
+    const cfg = makeConfig({ preview: { mode: 'template', url_template: 'https://pr-{pr_number}.x', pull_request_bases: ['main'] } });
+    const promo = (action: string, extra: object = {}) => ({
+      action,
+      pull_request: { number: 40, merged: false, head: { ref: 'integration', sha: 'deadbeef' }, base: { ref: 'main' }, ...extra },
+    });
+
+    it.each(['opened', 'reopened', 'synchronize'])('%s on a listed base → pr_preview up', (action) => {
+      mockGetAllTasks.mockReturnValue([]);
+      expect(webhookToEvents('pull_request', promo(action), cfg)).toEqual([
+        { type: 'pr_preview', action: 'up', pr_number: 40, branch: 'integration', base: 'main', sha: 'deadbeef' },
+      ]);
+    });
+
+    it('closed on a listed base → pr_preview down, merged or not', () => {
+      mockGetAllTasks.mockReturnValue([]);
+      expect(webhookToEvents('pull_request', promo('closed'), cfg)[0]).toMatchObject({ type: 'pr_preview', action: 'down' });
+      expect(webhookToEvents('pull_request', promo('closed', { merged: true }), cfg)[0]).toMatchObject({ type: 'pr_preview', action: 'down' });
+    });
+
+    it('ignores PRs whose base is not listed', () => {
+      mockGetAllTasks.mockReturnValue([]);
+      expect(webhookToEvents('pull_request', promo('opened', { base: { ref: 'integration' } }), cfg)).toEqual([]);
+    });
+
+    it('ignores non-task PRs when pull_request_bases is unset', () => {
+      mockGetAllTasks.mockReturnValue([]);
+      expect(webhookToEvents('pull_request', promo('opened'), config)).toEqual([]);
+    });
+
+    it('a task\'s own PR is never double-previewed, and still completes on merge', () => {
+      mockGetAllTasks.mockReturnValue([makeTask({ branch: 'integration' })]);
+      expect(webhookToEvents('pull_request', promo('synchronize'), cfg)).toEqual([]);
+      expect(webhookToEvents('pull_request', promo('closed', { merged: true }), cfg)[0].type).toBe('pr_merged');
+    });
+  });
+
   describe('pull_request_review.submitted', () => {
     it('maps changes_requested review to pr_review event', () => {
       const task = makeTask({ branch: 'feature/42-fix-bug' });

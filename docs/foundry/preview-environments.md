@@ -76,6 +76,23 @@ preview:
 
 The script receives template variables both as interpolated arguments and as environment variables (see below).
 
+## Previews for pull requests that are not tasks
+
+Every Foundry task's PR gets a preview. Other pull requests can too, selected by base branch:
+
+```yaml
+preview:
+  mode: provider
+  url_template: https://pr-{pr_number}.preview.example.com
+  up_command:   ./scripts/deploy-preview.sh {pr_number} {branch} {sha}
+  down_command: ./scripts/teardown-preview.sh {pr_number}
+  pull_request_bases: [main]      # also preview any PR into main
+```
+
+With `pull_request_bases: [main]`, the promotion PR from `integration` into `main` is deployed when it opens, **redeployed on every push** to its branch (so the preview tracks `integration` while the PR is open), and torn down when it closes, merged or not. The URL is posted on the PR. No issue, claim, or agent is involved.
+
+The workflow must deliver the events: `pull_request` with `types: [opened, synchronize, reopened, closed]`, and the job `if:` must admit them for listed bases. The template in [GitHub Action](github-action.md) does. GitHub does not run `pull_request` workflows for a PR with merge conflicts, so a conflicting promotion PR gets no preview until it is clean.
+
 ## Template Variables
 
 The following variables are expanded in `url_template`, `up_command`, and `down_command`:
@@ -83,7 +100,8 @@ The following variables are expanded in `url_template`, `up_command`, and `down_
 | Variable | Description | Env var equivalent |
 |----------|-------------|--------------------|
 | `{branch}` | Feature branch name | `FOUNDRY_BRANCH` |
-| `{issue}` | Issue number | `FOUNDRY_ISSUE` |
+| `{branch_slug}` | Branch name with `/` and other non-alphanumerics as `-` (lane and hostname safe) | `FOUNDRY_BRANCH_SLUG` |
+| `{issue}` | Issue number; empty for a non-task PR | `FOUNDRY_ISSUE` |
 | `{repo}` | Repository in `owner/repo` format | `FOUNDRY_REPO` |
 | `{pr_number}` | Pull request number (empty if PR not yet created) | `FOUNDRY_PR_NUMBER` |
 | `{sha}` | HEAD commit SHA of the worktree | `FOUNDRY_SHA` |

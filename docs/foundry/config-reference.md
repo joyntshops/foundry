@@ -100,6 +100,7 @@ preview:
   # up_command: "deploy.sh up {issue} {branch}"   # mode:provider — deploy command
   # down_command: "deploy.sh down {issue} {branch}"  # mode:provider — teardown command
   comment: true                           # Post/update PR comment (default true)
+  # pull_request_bases: [main]            # also preview non-task PRs into these branches
 
 # ── GitHub Deployments (optional) ───────────────────────────────────
 
@@ -164,10 +165,11 @@ Optional mapping from issue label names to backend names. When an issue has a ma
 Configuration for preview/staging environments deployed per-task.
 
 - `mode` — `"template"` or `"provider"`. In `template` mode no command runs; the URL comes from `url_template`. In `provider` mode `up_command` runs to deploy and `down_command` to tear down.
-- `url_template` — When set, this is **always** the preview URL in either mode; command output is ignored. Only when it is absent does provider mode read the URL from the command's stdout. Template variables: `{branch}`, `{issue}`, `{repo}`, `{pr_number}`, `{sha}`. Also exposed as env vars `FOUNDRY_BRANCH`, `FOUNDRY_ISSUE`, `FOUNDRY_REPO`, `FOUNDRY_PR_NUMBER`, `FOUNDRY_SHA`.
+- `url_template` — When set, this is **always** the preview URL in either mode; command output is ignored. Only when it is absent does provider mode read the URL from the command's stdout. Template variables: `{branch}`, `{branch_slug}`, `{issue}`, `{repo}`, `{pr_number}`, `{sha}`. Also exposed as env vars `FOUNDRY_BRANCH`, `FOUNDRY_BRANCH_SLUG`, `FOUNDRY_ISSUE`, `FOUNDRY_REPO`, `FOUNDRY_PR_NUMBER`, `FOUNDRY_SHA`.
 - `up_command` — Shell command to spin up the preview environment (`provider` mode). Without `url_template` it must print a URL, or JSON `{ "url": "..." }`, to stdout. Same template variables. Under the Action, `gh` is available and `GH_TOKEN` is set, so `gh workflow run your-deploy.yml -f pr={pr_number}` is the common shape; it needs `actions: write`.
 - `down_command` — Shell command to tear down the preview environment (`provider` mode). Same template variables.
 - `comment` — Whether to post/update a PR comment with the preview URL. Default `true`.
+- `pull_request_bases` — Base branches whose pull requests get a preview even when they are not Foundry tasks (up on open, redeploy on push, down on close). Typically `[main]` for the promotion PR from `integration`. See [Preview Environments](preview-environments.md#previews-for-pull-requests-that-are-not-tasks).
 
 ### `github_deployments`
 Configuration for creating GitHub Deployment objects alongside preview environments.

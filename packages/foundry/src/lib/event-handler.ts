@@ -31,6 +31,7 @@ import type {
   AgentCompletedEvent,
   HumanResponseEvent,
   PlanApprovedEvent,
+  PRPreviewEvent,
 } from './events.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -169,6 +170,47 @@ export class EventHandler {
         return this.handleHumanResponse(event);
       case 'plan_approved':
         return this.handlePlanApproved(event);
+      case 'pr_preview':
+        return this.handlePRPreview(event);
+    }
+  }
+
+  // ── Previews for pull requests that are not tasks ─────────────────────
+
+  private async handlePRPreview(event: PRPreviewEvent): Promise<void> {
+    const config = this.config;
+    const label = `PR #${event.pr_number} (${event.branch} → ${event.base})`;
+
+    if (event.action === 'up') {
+      log.info(`Preview up for ${label}`);
+      try {
+        const result = await preview.previewUpTarget(config, {
+          branch: event.branch,
+          pr_number: event.pr_number,
+          sha: event.sha,
+        });
+        if (!result) log.warn(`No preview URL resolved for ${label}.`);
+      } catch (err: any) {
+        log.warn(`Preview up failed for ${label}: ${err.message}`);
+      }
+      return;
+    }
+
+    const url = await preview.findPreviewUrlOnPR(config.repo, event.pr_number);
+    if (!url) {
+      log.info(`No preview recorded on ${label}; nothing to tear down.`);
+      return;
+    }
+    log.info(`Preview down for ${label}`);
+    try {
+      await preview.previewDownTarget(config, {
+        branch: event.branch,
+        pr_number: event.pr_number,
+        sha: event.sha,
+        preview_url: url,
+      });
+    } catch (err: any) {
+      log.warn(`Preview down failed for ${label}: ${err.message}`);
     }
   }
 

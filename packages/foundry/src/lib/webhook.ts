@@ -26,6 +26,10 @@ export function webhookToEvents(
       return mapIssueComment(payload, config);
     case 'issues.labeled':
       return mapIssueLabeled(payload, config);
+    case 'pull_request.opened':
+    case 'pull_request.reopened':
+    case 'pull_request.synchronize':
+      return mapPullRequestPreview(payload, config, 'up');
     case 'pull_request.closed':
       return mapPullRequestClosed(payload, config);
     case 'pull_request_review.submitted':
@@ -153,16 +157,47 @@ function mapPullRequestClosed(
   config: FoundryConfig,
 ): FoundryEvent[] {
   const pr = payload.pull_request;
-  if (!pr || !pr.merged) return [];
+  if (!pr) return [];
 
   const branch: string = pr.head?.ref ?? '';
   const repo = config.repo;
 
-  // Find the task that owns this branch
+  // A task's PR: completion on merge; a close without merge is a human
+  // decision Foundry leaves alone.
   const task = state.getAllTasks(repo).find(t => t.branch === branch);
-  if (!task) return [];
+  if (task) return pr.merged ? [{ type: 'pr_merged', task }] : [];
 
-  return [{ type: 'pr_merged', task }];
+  // Any other PR with a listed base: its preview comes down, merged or not.
+  return mapPullRequestPreview(payload, config, 'down');
+}
+
+/**
+ * A pull request that is not a task but whose base is listed in
+ * `preview.pull_request_bases` gets a preview of its own.
+ */
+function mapPullRequestPreview(
+  payload: Record<string, any>,
+  config: FoundryConfig,
+  action: 'up' | 'down',
+): FoundryEvent[] {
+  const pr = payload.pull_request;
+  if (!pr) return [];
+  const bases = config.preview?.pull_request_bases ?? [];
+  const base: string = pr.base?.ref ?? '';
+  if (!bases.includes(base)) return [];
+
+  const branch: string = pr.head?.ref ?? '';
+  // A task's own PR is previewed through the task lifecycle, never twice.
+  if (state.getAllTasks(config.repo).some(t => t.branch === branch)) return [];
+
+  return [{
+    type: 'pr_preview',
+    action,
+    pr_number: pr.number,
+    branch,
+    base,
+    sha: pr.head?.sha ?? '',
+  }];
 }
 
 // ── pull_request_review.submitted ───────────────────────────────────────
