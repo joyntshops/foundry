@@ -123,6 +123,7 @@ describe('recoverTask', () => {
     expect(task).not.toBeNull();
     expect(task!.issue).toBe(42);
     expect(task!.title).toBe('Add login');
+    expect(task!.issue_body).toBe('');
     expect(task!.branch).toBe('feature/42-add-login');
     expect(task!.tmux_session).toBe('foundry-42');
     expect(task!.agent_backend).toBe('claude-code');

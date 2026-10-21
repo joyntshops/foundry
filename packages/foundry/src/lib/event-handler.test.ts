@@ -26,6 +26,10 @@ vi.mock('./github.js', () => ({
   updateCheckRun: vi.fn(),
 }));
 
+vi.mock('./issue-file.js', () => ({
+  writeIssueFile: vi.fn().mockReturnValue({ FOUNDRY_ISSUE_FILE: '/tmp/state/42/issue.md' }),
+}));
+
 vi.mock('./worktree.js', () => ({
   preserveWork: vi.fn().mockReturnValue({ committed: false, pushed: true }),
   ensureWorktree: vi.fn(),
@@ -127,6 +131,7 @@ vi.mock('../backends/index.js', () => ({
 import * as github from './github.js';
 import * as worktree from './worktree.js';
 import * as statusComment from './status-comment.js';
+import * as issueFile from './issue-file.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
@@ -493,6 +498,21 @@ describe('EventHandler', () => {
       const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
       expect(env.FOUNDRY_RESUME_CONTEXT).toContain('requested changes');
       expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Rename the variable.');
+    });
+  });
+
+  describe('the issue is delivered as a file', () => {
+    it('on first launch, from the issue payload', async () => {
+      const issue = { number: 42, title: 'Add login', body: '## What\nA page.', html_url: 'u', state: 'open', labels: [] as any[] };
+      await handler.handleEvent({ type: 'issue_ready', issue });
+      expect(issueFile.writeIssueFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ number: 42, title: 'Add login', body: '## What\nA page.' }));
+      expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_ISSUE_FILE).toBe('/tmp/state/42/issue.md');
+    });
+
+    it('on relaunch, from the body stored on the task', async () => {
+      const task = makeTask({ status: 'waiting-for-input', issue_body: 'stored body' });
+      await handler.handleEvent({ type: 'human_response', task, response: 'ok' });
+      expect(issueFile.writeIssueFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ body: 'stored body' }));
     });
   });
 });

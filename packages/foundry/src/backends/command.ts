@@ -86,6 +86,6 @@ export const AGENT_BRIEF = [
 
 export const CLAUDE_CODE_PRESET: AgentBackendDef & { command: string } = {
   type: 'command',
-  command: 'claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. The issue is at {issue_url}. $FOUNDRY_RESUME_CONTEXT" --append-system-prompt "$FOUNDRY_AGENT_BRIEF" --json-schema "$FOUNDRY_REPORT_SCHEMA" --disallowedTools AskUserQuestion --verbose --output-format stream-json < /dev/null 2>&1 | tee {log_dir}/agent.log',
+  command: 'claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. Read the issue first: its title and body are in the file $FOUNDRY_ISSUE_FILE (the live issue with comments is at {issue_url} when you have network access). $FOUNDRY_RESUME_CONTEXT" --append-system-prompt "$FOUNDRY_AGENT_BRIEF" --json-schema "$FOUNDRY_REPORT_SCHEMA" --disallowedTools AskUserQuestion --verbose --output-format stream-json < /dev/null 2>&1 | tee {log_dir}/agent.log',
   env: {},
 };
