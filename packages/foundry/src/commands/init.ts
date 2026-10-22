@@ -10,14 +10,12 @@ import * as log from '../lib/log.js';
 import * as git from '../lib/git.js';
 
 const LABEL_DEFS: Array<{ name: string; color: string; description: string }> = [
-  { name: 'state:ready', color: '0e8a16', description: 'Task ready for Foundry to claim' },
-  { name: 'state:in-progress', color: 'fbca04', description: 'Task claimed by Foundry runner' },
+  { name: 'state:in-progress', color: 'fbca04', description: 'Foundry is working on this issue' },
   { name: 'state:done', color: '006b75', description: 'Task completed by Foundry' },
   { name: 'state:ready-for-human-review', color: '1d76db', description: 'Ready for human review' },
   { name: 'state:waiting-for-input', color: '1d76db', description: 'Agent needs human input to proceed' },
   { name: 'state:failed', color: 'b60205', description: 'Task failed — needs human review before retry' },
   { name: 'state:plan-review', color: '1d76db', description: 'Agent plan awaiting human review' },
-  { name: 'state:claim', color: 'c2e0c6', description: 'Request Foundry to claim without starting agent' },
   { name: 'mode:plan', color: '5319e7', description: 'Agent runs in plan-only mode' },
   { name: 'mode:auto', color: '5319e7', description: 'Agent runs with full permissions' },
   { name: 'mode:default', color: '5319e7', description: 'Agent runs in step-by-step mode' },
@@ -92,14 +90,12 @@ function detectProjectDefaults(): ProjectDefaults & { detected: string } {
 const DEFAULT_CONFIG = {
   repo: '',
   labels: {
-    ready: 'state:ready',
     in_progress: 'state:in-progress',
     done: 'state:done',
     ready_for_review: 'state:ready-for-human-review',
     waiting_for_input: 'state:waiting-for-input',
     failed: 'state:failed',
     plan_review: 'state:plan-review',
-    claim: 'state:claim',
   },
   mode_labels: {
     plan: 'mode:plan',
@@ -112,13 +108,9 @@ const DEFAULT_CONFIG = {
   verify_preview: [] as string[],
   integration_rebuild: '',
   comment_triggers: {
-    replan: '@foundry replan',
+    go: '@foundry go',
     restart: '@foundry restart',
     stop: '@foundry stop',
-    continue: '@foundry continue',
-    plan: '@foundry plan',
-    start: '@foundry start',
-    claim: '@foundry claim',
   },
   version_sources: [] as string[],
   tag_prefix: 'v',
@@ -237,7 +229,7 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
 
 const ISSUE_TEMPLATE = `---
 name: Foundry task
-about: A task for the coding agent. Label it state:ready when it is ready to start.
+about: A task for the coding agent. Comment "@foundry go" when it is ready to start.
 labels: []
 ---
 
@@ -257,7 +249,9 @@ labels: []
 -
 
 <!--
-Mode: add the label mode:plan to get a plan for approval before any code is written.
+Start: comment "@foundry go". Nothing happens until you do.
+Mode: add the label mode:plan first to get a plan for approval before any code is written.
+Every comment on this issue is given to the agent; only "@foundry go" starts it.
 The agent decides small things itself and lists them in the PR; it asks only when an answer changes the work.
 -->
 `;

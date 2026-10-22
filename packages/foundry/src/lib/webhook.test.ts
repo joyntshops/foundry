@@ -23,23 +23,17 @@ function makeConfig(overrides?: Partial<FoundryConfig>): FoundryConfig {
   return {
     repo: 'owner/repo',
     labels: {
-      ready: 'state:ready',
       in_progress: 'state:in-progress',
       done: 'state:done',
       ready_for_review: 'state:ready-for-human-review',
       waiting_for_input: 'state:waiting-for-input',
       failed: 'state:failed',
       plan_review: 'state:plan-review',
-      claim: 'state:claim',
     },
     comment_triggers: {
-      replan: '@foundry replan',
+      go: '@foundry go',
       restart: '@foundry restart',
       stop: '@foundry stop',
-      continue: '@foundry continue',
-      plan: '@foundry plan',
-      start: '@foundry start',
-      claim: '@foundry claim',
     },
     branch_template: 'feature/{issue}-{slug}',
     worktree_base: '../wts',
@@ -82,193 +76,72 @@ describe('webhookToEvents', () => {
   });
 
   describe('issue_comment.created', () => {
-    it('maps "@foundry continue" comment to a command event', () => {
-      const task = makeTask();
-      mockGetAllTasks.mockReturnValue([task]);
-
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: {
-          id: 100,
-          body: '@foundry continue please fix the tests',
-          user: { login: 'alice' },
-        },
-        issue: { number: 42 },
-      }, config);
-
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('command');
-      if (events[0].type === 'command') {
-        expect(events[0].command).toBe('continue');
-        expect(events[0].message).toBe('please fix the tests');
-        expect(events[0].commentId).toBe(100);
-        expect(events[0].commentAuthor).toBe('alice');
-      }
+    const comment = (body: string, extra: object = {}) => ({
+      action: 'created',
+      comment: { id: 100, body, user: { login: 'alice' }, ...extra },
+      issue: { number: 42 },
     });
 
-    it('maps "@foundry stop" comment to a command event', () => {
-      const task = makeTask();
-      mockGetAllTasks.mockReturnValue([task]);
-
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: {
-          id: 101,
-          body: '@foundry stop',
-          user: { login: 'bob' },
-        },
-        issue: { number: 42 },
-      }, config);
-
-      expect(events).toHaveLength(1);
-      if (events[0].type === 'command') {
-        expect(events[0].command).toBe('stop');
-      }
+    it('maps "@foundry go <message>" to a go command with the message', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      const events = webhookToEvents('issue_comment', comment('@foundry go please fix the tests'), config);
+      expect(events).toEqual([expect.objectContaining({
+        type: 'command', issue: 42, command: 'go', message: 'please fix the tests', commentId: 100, commentAuthor: 'alice', via: 'comment',
+      })]);
+      expect((events[0] as any).task.issue).toBe(42);
     });
 
-    it('returns empty array for comments without @foundry trigger', () => {
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: {
-          id: 102,
-          body: 'This is a regular comment',
-          user: { login: 'alice' },
-        },
-        issue: { number: 42 },
-      }, config);
-
-      expect(events).toEqual([]);
+    it('takes the message from the following lines too', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      const events = webhookToEvents('issue_comment', comment('@foundry go\nUse tabs.\nAdd a test.'), config);
+      expect((events[0] as any).message).toBe('Use tabs.\nAdd a test.');
     });
 
-    it('maps a plain reply on a waiting-for-input issue to human_response', () => {
-      mockGetAllTasks.mockReturnValue([makeTask({ status: 'waiting-for-input' })]);
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: { id: 103, body: 'Use the tabbed layout.', user: { login: 'alice' } },
-        issue: { number: 42 },
-      }, config);
-      expect(events).toEqual([{ type: 'human_response', task: expect.objectContaining({ issue: 42 }), response: 'Use the tabbed layout.' }]);
-    });
-
-    it('maps a plain reply on a plan-review issue to plan_approved', () => {
-      mockGetAllTasks.mockReturnValue([makeTask({ status: 'plan-review' })]);
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: { id: 104, body: 'Looks good, go ahead.', user: { login: 'alice' } },
-        issue: { number: 42 },
-      }, config);
-      expect(events[0].type).toBe('plan_approved');
-    });
-
-    it('an @foundry command on a waiting issue is still a command', () => {
-      mockGetAllTasks.mockReturnValue([makeTask({ status: 'waiting-for-input' })]);
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: { id: 105, body: '@foundry restart', user: { login: 'alice' } },
-        issue: { number: 42 },
-      }, config);
-      expect(events[0].type).toBe('command');
-    });
-
-    it('ignores plain comments on a task that is not waiting', () => {
-      mockGetAllTasks.mockReturnValue([makeTask({ status: 'agent-running' })]);
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: { id: 106, body: 'Any update?', user: { login: 'alice' } },
-        issue: { number: 42 },
-      }, config);
-      expect(events).toEqual([]);
-    });
-
-    it('returns empty array for bot comments', () => {
-      const task = makeTask();
-      mockGetAllTasks.mockReturnValue([task]);
-
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: {
-          id: 103,
-          body: '@foundry continue',
-          user: { login: 'foundry-bot[bot]' },
-        },
-        issue: { number: 42 },
-      }, config);
-
-      expect(events).toEqual([]);
-    });
-
-    it('returns empty array when no matching task exists', () => {
+    it('a go command on an unclaimed issue carries a null task (fresh start)', () => {
       mockGetAllTasks.mockReturnValue([]);
+      const events = webhookToEvents('issue_comment', comment('@foundry go'), config);
+      expect(events).toEqual([expect.objectContaining({ type: 'command', issue: 42, task: null, command: 'go', message: undefined })]);
+    });
 
-      const events = webhookToEvents('issue_comment', {
-        action: 'created',
-        comment: {
-          id: 104,
-          body: '@foundry continue',
-          user: { login: 'alice' },
-        },
-        issue: { number: 99 },
-      }, config);
+    it('maps "@foundry restart" and "@foundry stop" (first line only)', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      expect((webhookToEvents('issue_comment', comment('@foundry stop'), config)[0] as any).command).toBe('stop');
+      expect((webhookToEvents('issue_comment', comment('@foundry restart\nit went wrong'), config)[0] as any).command).toBe('restart');
+      expect(webhookToEvents('issue_comment', comment('@foundry stop please'), config)).toEqual([]);
+    });
 
-      expect(events).toEqual([]);
+    it('a plain comment is never an event, whatever the task state', () => {
+      for (const status of ['waiting-for-input', 'plan-review', 'agent-running', 'failed'] as const) {
+        mockGetAllTasks.mockReturnValue([makeTask({ status })]);
+        expect(webhookToEvents('issue_comment', comment('Use the tabbed layout.'), config)).toEqual([]);
+      }
+    });
+
+    it('a mention that is not at the start is just text', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      expect(webhookToEvents('issue_comment', comment('I think @foundry go is the answer'), config)).toEqual([]);
+      expect(webhookToEvents('issue_comment', comment('@foundry gopher'), config)).toEqual([]);
+    });
+
+    it('ignores bot comments', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      expect(webhookToEvents('issue_comment', comment('@foundry go', { user: { login: 'foundry-bot[bot]' } }), config)).toEqual([]);
+    });
+
+    it('ignores comments on pull requests (their number is the PR, not the issue)', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      const payload = { ...comment('@foundry go'), issue: { number: 42, pull_request: { url: 'x' } } };
+      expect(webhookToEvents('issue_comment', payload, config)).toEqual([]);
     });
   });
 
   describe('issues.labeled', () => {
-    it('maps state:ready label to issue_ready event', () => {
+    it('never starts anything: labels are status, not commands', () => {
       const events = webhookToEvents('issues', {
         action: 'labeled',
-        label: { name: 'state:ready' },
-        issue: {
-          number: 10,
-          title: 'New feature',
-          body: 'Build something',
-          labels: [{ name: 'state:ready' }],
-          html_url: 'https://github.com/owner/repo/issues/10',
-          state: 'open',
-        },
+        label: { name: 'state:in-progress' },
+        issue: { number: 10, title: 'New feature', body: 'Build something', labels: [], html_url: 'u', state: 'open' },
       }, config);
-
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('issue_ready');
-      if (events[0].type === 'issue_ready') {
-        expect(events[0].issue.number).toBe(10);
-        expect(events[0].issue.title).toBe('New feature');
-      }
-    });
-
-    it('maps state:claim label to issue_claim event', () => {
-      const events = webhookToEvents('issues', {
-        action: 'labeled',
-        label: { name: 'state:claim' },
-        issue: {
-          number: 11,
-          title: 'Claimed task',
-          body: null,
-          labels: [{ name: 'state:claim' }],
-          html_url: 'https://github.com/owner/repo/issues/11',
-          state: 'open',
-        },
-      }, config);
-
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('issue_claim');
-    });
-
-    it('returns empty array for unrelated labels', () => {
-      const events = webhookToEvents('issues', {
-        action: 'labeled',
-        label: { name: 'bug' },
-        issue: {
-          number: 12,
-          title: 'Bug',
-          body: '',
-          labels: [{ name: 'bug' }],
-          html_url: 'https://github.com/owner/repo/issues/12',
-          state: 'open',
-        },
-      }, config);
-
       expect(events).toEqual([]);
     });
   });
@@ -358,19 +231,20 @@ describe('webhookToEvents', () => {
   });
 
   describe('workflow_dispatch', () => {
-    it('maps {issue, command, message} inputs to a command event for the task', () => {
+    it('maps {issue, command, message} inputs to a dispatched command for the task', () => {
       mockGetAllTasks.mockReturnValue([makeTask()]);
       const events = webhookToEvents('workflow_dispatch', {
-        inputs: { issue: '42', command: 'continue', message: 'integration moved; rebase.' },
+        inputs: { issue: '42', command: 'go', message: 'integration moved; rebase.' },
         sender: { login: 'foundry-bot[bot]' },
       }, config);
-      expect(events).toEqual([expect.objectContaining({ type: 'command', command: 'continue', message: 'integration moved; rebase.' })]);
+      expect(events).toEqual([expect.objectContaining({ type: 'command', issue: 42, command: 'go', message: 'integration moved; rebase.', via: 'dispatch' })]);
     });
 
-    it('ignores unknown commands and unknown issues', () => {
+    it('ignores unknown commands; an unknown issue is a fresh start', () => {
       mockGetAllTasks.mockReturnValue([makeTask()]);
       expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '42', command: 'deploy' } }, config)).toEqual([]);
-      expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '99', command: 'continue' } }, config)).toEqual([]);
+      expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '42', command: 'continue' } }, config)).toEqual([]);
+      expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '99', command: 'go' } }, config)).toEqual([expect.objectContaining({ issue: 99, task: null })]);
     });
   });
 

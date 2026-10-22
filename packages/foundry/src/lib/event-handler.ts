@@ -1,8 +1,9 @@
 /**
  * EventHandler — processes FoundryEvent instances.
  *
- * All handler logic that was previously inline in run.ts lives here.
- * run.ts becomes a thin composition layer that wires Poller → EventHandler.
+ * All behavior lives here; `commands/action.ts` is composition only. Humans
+ * drive a task with three commands (`go`, `restart`, `stop`); everything
+ * else that moves a task is a review, a merge, or the agent finishing.
  */
 import * as github from './github.js';
 import * as git from './git.js';
@@ -15,8 +16,9 @@ import * as log from './log.js';
 import * as verify from './verify.js';
 import * as agentOutput from './agent-output.js';
 import { prepareLaunch } from './agent-report.js';
-import { preserveWork, ensureWorktree } from './worktree.js';
+import { preserveWork, ensureWorktree, type PreserveResult } from './worktree.js';
 import { writeIssueFile } from './issue-file.js';
+import { collectThread, type ThreadComment } from './thread.js';
 import * as previewVerify from './preview-verify.js';
 import * as path from 'node:path';
 import * as stalePRs from './stale-prs.js';
@@ -24,17 +26,13 @@ import * as review from './review.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
-import type { FoundryConfig, TaskState, AgentLaunchParams, AgentOutcome } from '../types.js';
+import type { FoundryConfig, TaskState, AgentLaunchParams, AgentOutcome, GitHubIssue } from '../types.js';
 import type {
   FoundryEvent,
   CommandEvent,
-  IssueReadyEvent,
-  IssueClaimEvent,
   PRMergedEvent,
   PRReviewEvent,
   AgentCompletedEvent,
-  HumanResponseEvent,
-  PlanApprovedEvent,
   PRPreviewEvent,
   PRApprovedEvent,
 } from './events.js';
@@ -43,27 +41,41 @@ import type {
 
 const PREVIEW_VERIFY_MARKER = '<!-- foundry-preview-verify -->';
 
+/** What every non-success ending tells the human. */
+export const FAILED_FOOTER = '`@foundry go` to continue from the branch · `@foundry restart` to start over';
+
+function workOnBranch(task: TaskState, preserved: PreserveResult): string[] {
+  return preserved.pushed ? [`_Work so far is on \`${task.branch}\`._`] : [];
+}
+
+export type ResumeKind = 'answer' | 'plan' | 'review' | 'go';
+
 /**
  * What a relaunched agent is told about why it is being launched again. Goes
  * in FOUNDRY_RESUME_CONTEXT; the Claude preset's prompt includes it.
  */
-export function buildResumeContext(task: TaskState, humanText: string, kind: 'answer' | 'plan' | 'review'): string {
+export function buildResumeContext(task: TaskState, humanText: string, kind: ResumeKind): string {
+  const lastReport = task.last_agent_message ? ` Your last report: "${task.last_agent_message}".` : '';
+  const prNote = task.pr_url ? ` Your pull request ${task.pr_url} is open; commits you add to the branch update it.` : '';
   const intro = {
     answer: `You stopped earlier because you needed a decision from a human${task.last_agent_message ? `; you reported: "${task.last_agent_message}"` : ' (your questions are in your last status comment on the issue)'}. The human replied:`,
     plan: `You posted a plan for this issue and the human reviewed it. Their reply:`,
     review: `A reviewer requested changes on your pull request:`,
+    go: `The human commented \`@foundry go\` on the issue.${prNote}${lastReport} Their message:`,
   }[kind];
   const outro = {
     answer: 'Apply the reply and continue the task.',
     plan: 'If the reply approves the plan, implement it now; if it asks for changes, revise the plan and report plan_ready again.',
     review: 'Address the review on this branch and commit.',
+    go: 'The issue file holds the whole thread, including every comment since your last launch; read it, then finish the task from the branch and report.',
   }[kind];
+  const text = humanText.trim() || '(no message; see the thread in the issue file)';
   return [
     `RESUMING issue #${task.issue} on branch ${task.branch}. The branch already holds your earlier commits; continue from its current state, do not start over.`,
     '',
     intro,
     '',
-    humanText.trim(),
+    text,
     '',
     outro,
   ].join('\n');
@@ -79,7 +91,7 @@ export function buildPRBody(task: TaskState, outcome?: AgentOutcome): string {
       parts.push('## Assumptions', '', ...report.assumptions.map(a => `- ${a}`), '');
     }
   }
-  parts.push('---', `Opened by Foundry (${task.agent_backend}). Request changes on this PR, or comment \`@foundry continue <feedback>\` on the issue, to send the agent back to work.`);
+  parts.push('---', `Opened by Foundry (${task.agent_backend}). Request changes on this PR, or comment \`@foundry go <feedback>\` on the issue, to send the agent back to work.`);
   return parts.join('\n');
 }
 
@@ -128,6 +140,11 @@ async function triggerPreviewDown(config: FoundryConfig, task: TaskState): Promi
   }
 }
 
+/** A task whose job may still hold a live agent process. */
+function mayBeRunning(task: TaskState): boolean {
+  return task.status !== 'claimed' && task.status !== 'done' && task.status !== 'failed' && task.status !== 'stopped';
+}
+
 // ── EventHandler ─────────────────────────────────────────────────────────
 
 export class EventHandler {
@@ -137,20 +154,28 @@ export class EventHandler {
   ) {}
 
   /**
-   * Environment for an agent launch: the backend's own env plus the report
-   * contract (schema + report file), with any previous launch's report cleared.
+   * Environment for an agent launch: the backend's own env plus the issue
+   * file (body and the human thread), the report contract (schema + report
+   * file, with any previous launch's report cleared), and the turn cap.
    */
-  private launchEnv(
+  private async launchEnv(
     brief: { issue: number; title: string; body: string },
     backendEnv: Record<string, string> = {},
     extra: Record<string, string> = {},
-  ): Record<string, string> {
+  ): Promise<Record<string, string>> {
     const stateDir = state.getTaskStateDir(this.config.repo, brief.issue);
+    let comments: ThreadComment[] = [];
+    try {
+      comments = await collectThread(this.config, brief.issue);
+    } catch (err: any) {
+      log.warn(`Could not read the comments on #${brief.issue}: ${err.message}. The agent gets the body only.`);
+    }
     const issueFile = writeIssueFile(stateDir, {
       number: brief.issue,
       title: brief.title,
       body: brief.body,
       url: `https://github.com/${this.config.repo}/issues/${brief.issue}`,
+      comments,
     });
     return {
       ...backendEnv,
@@ -169,20 +194,12 @@ export class EventHandler {
     switch (event.type) {
       case 'command':
         return this.handleCommand(event);
-      case 'issue_ready':
-        return this.handleIssueReady(event);
-      case 'issue_claim':
-        return this.handleIssueClaim(event);
       case 'pr_merged':
         return this.handlePRMerged(event);
       case 'pr_review':
         return this.handlePRReview(event);
       case 'agent_completed':
         return this.handleAgentCompleted(event);
-      case 'human_response':
-        return this.handleHumanResponse(event);
-      case 'plan_approved':
-        return this.handlePlanApproved(event);
       case 'pr_preview':
         return this.handlePRPreview(event);
       case 'pr_approved':
@@ -206,10 +223,10 @@ export class EventHandler {
       // A conflict is work for the agent, when there is one.
       if ((outcome.reason === 'conflicting' || outcome.reason === 'rebase_failed') && event.task) {
         const instruction = stalePRs.conflictInstruction(event.base, 0).replace(' (PR #0 merged)', '');
-        const dispatched = stalePRs.dispatchCommand(event.task.issue, 'continue', instruction);
+        const dispatched = stalePRs.dispatchCommand(event.task.issue, 'go', instruction);
         const note = dispatched
           ? `PR #${event.pr_number} was approved but conflicts with \`${event.base}\`. Foundry has sent the agent to rebase and resolve; approve again once it is clean.`
-          : `PR #${event.pr_number} was approved but conflicts with \`${event.base}\`. Reply with \`@foundry continue\` and:\n\n> ${instruction}`;
+          : `PR #${event.pr_number} was approved but conflicts with \`${event.base}\`. Comment \`@foundry go\` with:\n\n> ${instruction}`;
         try { await github.addComment(config.repo, event.task.issue, note); } catch {}
       }
       return;
@@ -332,29 +349,113 @@ export class EventHandler {
     }
   }
 
-  // ── Command dispatch ─────────────────────────────────────────────────
+  // ── Commands ─────────────────────────────────────────────────────────
 
   private async handleCommand(event: CommandEvent): Promise<void> {
     switch (event.command) {
-      case 'stop':
-        return this.handleCommandStop(event.task);
+      case 'go':
+        return this.handleCommandGo(event);
       case 'restart':
-        return this.handleCommandRestart(event.task);
-      case 'replan':
-        return this.handleCommandReplan(event.task);
-      case 'continue':
-        return this.handleCommandContinue(event.task, event.message ?? '');
-      case 'plan':
-        return this.handleCommandPlan(event.task, event.message ?? '');
-      case 'start':
-        return this.handleCommandStart(event.task, event.message ?? '');
+        return this.handleCommandRestart(event);
+      case 'stop':
+        return this.handleCommandStop(event);
     }
   }
 
-  // ── Issue Ready (spawn agent) ────────────────────────────────────────
+  /**
+   * `@foundry go`: start the issue if it has never been started; otherwise
+   * proceed from the branch. The agent reads the whole thread from the issue
+   * file, so the same command answers a question, approves a plan, revises a
+   * PR, or picks up a failed task. On a task whose label still says running,
+   * the job that ran it is gone (a live job would have made this one wait),
+   * so it is resumed like any other.
+   */
+  private async handleCommandGo(event: CommandEvent): Promise<void> {
+    const config = this.config;
+    const { task } = event;
 
-  private async handleIssueReady(event: IssueReadyEvent): Promise<void> {
-    const { issue } = event;
+    if (!task || task.status === 'claimed' || task.status === 'done') {
+      const issue = await github.getIssue(config.repo, event.issue);
+      await this.startTask(issue);
+      return;
+    }
+
+    const message = event.message ?? '';
+    const kind: ResumeKind =
+      task.status === 'waiting-for-input' ? 'answer' :
+      task.status === 'plan-review' ? 'plan' :
+      'go';
+
+    await this.relaunch(task, message, kind);
+
+    const fresh = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'agent-running' as const };
+    await statusComment.updateStatusComment(config.repo, task.issue, {
+      task: fresh,
+      message: 'Agent is working per `@foundry go`. `@foundry stop` to stop it.',
+      historyEntry: 'Resumed via @foundry go',
+    });
+
+    log.success(`Resumed #${task.issue} via @foundry go (${kind})`);
+  }
+
+  /** `@foundry restart`: discard everything and start the issue again, in this job. */
+  private async handleCommandRestart(event: CommandEvent): Promise<void> {
+    const config = this.config;
+    const { task } = event;
+
+    if (task) {
+      if (mayBeRunning(task)) {
+        const worker = getWorker(config);
+        await worker.handleFor(task.tmux_session).kill();
+      }
+      await triggerPreviewDown(config, task);
+      state.removeTask(config.repo, task.issue);
+      await statusComment.updateStatusComment(config.repo, task.issue, {
+        task: { ...task, status: 'stopped' },
+        message: 'Work discarded per `@foundry restart`. Starting over.',
+        historyEntry: 'Restarted via @foundry restart',
+      });
+      log.info(`Discarded work on #${task.issue} via @foundry restart`);
+    }
+
+    // startTask removes the old worktree, branch, and remote branch itself.
+    const issue = await github.getIssue(config.repo, event.issue);
+    await this.startTask(issue);
+  }
+
+  /** `@foundry stop`: stop the agent, keep the branch, mark the task failed. */
+  private async handleCommandStop(event: CommandEvent): Promise<void> {
+    const config = this.config;
+    const { task } = event;
+    if (!task) {
+      log.info(`#${event.issue} has no task to stop.`);
+      return;
+    }
+
+    if (mayBeRunning(task)) {
+      const worker = getWorker(config);
+      await worker.handleFor(task.tmux_session).kill();
+    }
+
+    const preserved = preserveWork(task, this.repoDir, 'stopped');
+    await triggerPreviewDown(config, task);
+
+    state.updateTaskStatus(config.repo, task.issue, 'failed');
+    await setStateLabel(config, task.issue, 'failed');
+
+    const stoppedTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
+    await statusComment.updateStatusComment(config.repo, task.issue, {
+      task: stoppedTask,
+      message: ['Agent stopped per `@foundry stop`.', ...workOnBranch(task, preserved), '', FAILED_FOOTER].join('\n'),
+      historyEntry: 'Stopped via @foundry stop',
+    });
+
+    log.success(`Stopped agent for #${task.issue} via @foundry stop`);
+  }
+
+  // ── Fresh start (claim + worktree + agent) ───────────────────────────
+
+  private async startTask(issue: GitHubIssue): Promise<void> {
     const config = this.config;
     const repoDir = this.repoDir;
 
@@ -436,7 +537,7 @@ export class EventHandler {
       id: workerId,
       cwd: worktree,
       command: agentCommand,
-      env: this.launchEnv({ issue: issue.number, title: issue.title, body: issue.body ?? '' }, agentEnv),
+      env: await this.launchEnv({ issue: issue.number, title: issue.title, body: issue.body ?? '' }, agentEnv),
     });
 
     const taskState: TaskState = {
@@ -460,90 +561,11 @@ export class EventHandler {
 
     await statusComment.updateStatusComment(config.repo, issue.number, {
       task: taskState,
-      message: 'Agent is working on this issue. `@foundry stop` to cancel.',
+      message: 'Agent is working on this issue. `@foundry stop` to stop it.',
       historyEntry: 'Agent started',
     });
 
     log.success(`Agent launched in ${workerId}`);
-  }
-
-  // ── Issue Claim (claim only, no agent) ───────────────────────────────
-
-  private async handleIssueClaim(event: IssueClaimEvent): Promise<void> {
-    const { issue } = event;
-    const config = this.config;
-    const repoDir = this.repoDir;
-
-    const runnerId = state.getRunnerId();
-    const branch = git.resolveBranchName(config.branch_template, issue.number, issue.title);
-    const worktree = git.resolveWorktreePath(config.worktree_base, issue.number, issue.title, repoDir);
-    const workerId = git.workerId(issue.number);
-    const issueLabels = issue.labels.map(l => l.name);
-    const backend = resolveBackendForIssue(config, issueLabels);
-
-    log.info(`Claim-only #${issue.number}: ${issue.title}`);
-
-    const claimed = await claim.claimIssueOnly(config, issue, {
-      runner_id: runnerId,
-      branch,
-      worktree,
-      tmux_session: workerId,
-      agent_backend: backend.name,
-    });
-
-    if (!claimed) {
-      log.warn(`Failed to claim #${issue.number} — another runner may own it.`);
-      return;
-    }
-
-    log.success(`Claimed #${issue.number} (claim-only)`);
-
-    try { git.fetchAll(repoDir); } catch (err: any) {
-      log.warn(`Fetch failed: ${err.message}`);
-    }
-
-    const base = git.remoteBranchExists('integration', repoDir)
-      ? 'origin/integration'
-      : 'origin/main';
-
-    if (git.worktreeExists(worktree, repoDir)) {
-      log.info(`Removing stale worktree from previous attempt: ${worktree}`);
-      git.removeWorktree(worktree, repoDir);
-    }
-    if (git.branchExists(branch, repoDir)) {
-      log.info(`Removing stale branch from previous attempt: ${branch}`);
-      git.deleteBranch(branch, repoDir);
-    }
-    if (git.remoteBranchExists(branch, repoDir)) {
-      log.info(`Removing stale remote branch from previous attempt: ${branch}`);
-      git.deleteRemoteBranch(branch, repoDir);
-    }
-
-    try {
-      git.addWorktree(worktree, branch, base, repoDir);
-      log.success(`Worktree: ${worktree}`);
-    } catch (err: any) {
-      log.error(`Failed to create worktree: ${err.message}`);
-      return;
-    }
-
-    const taskState: TaskState = {
-      issue: issue.number,
-      title: issue.title,
-      issue_body: issue.body ?? '',
-      repo: config.repo,
-      branch,
-      worktree,
-      tmux_session: workerId,
-      agent_backend: backend.name,
-      status: 'claimed',
-      claimed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      runner_id: runnerId,
-    };
-
-    state.upsertTask(config.repo, taskState);
-    log.success(`Task #${issue.number} saved as claimed — awaiting commands`);
   }
 
   // ── PR Merged ────────────────────────────────────────────────────────
@@ -610,271 +632,35 @@ export class EventHandler {
         break;
       case 'blocked':
       case 'errored':
-        log.error(`Agent for #${task.issue} ${outcome.type}: ${outcome.reason ?? 'no reason given'}`);
-        state.updateTaskStatus(config.repo, task.issue, 'failed', {
-          last_agent_message: outcome.final_message ?? undefined,
-        });
-        await claim.markFailed(config, task.issue);
-        {
-          const errorMsg = [
-            outcome.final_message ? outcome.final_message.slice(-2000) : 'No error details captured.',
-            '',
-            '`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
-          ].join('\n');
-          const freshTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
-          await statusComment.updateStatusComment(config.repo, task.issue, {
-            task: freshTask,
-            message: errorMsg,
-            historyEntry: outcome.type === 'blocked' ? 'Agent blocked' : 'Agent errored',
-          });
-        }
+        await this.handleFailedRun(task, outcome);
         break;
     }
   }
 
-  // ── Human Response (waiting-for-input) ───────────────────────────────
-
-  private async handleHumanResponse(event: HumanResponseEvent): Promise<void> {
-    const { task, response } = event;
-
-    log.info(`Human response found for #${task.issue}. Resuming agent...`);
-    await this.resumeAgent(task, response);
-  }
-
-  // ── Plan Approved ────────────────────────────────────────────────────
-
-  private async handlePlanApproved(event: PlanApprovedEvent): Promise<void> {
-    const { task, response } = event;
+  /** The agent ended without finishing. The branch is kept so `go` can continue it. */
+  private async handleFailedRun(task: TaskState, outcome: AgentOutcome): Promise<void> {
     const config = this.config;
+    log.error(`Agent for #${task.issue} ${outcome.type}: ${outcome.reason ?? 'no reason given'}`);
 
-    log.info(`Plan approval/feedback for #${task.issue}. Resuming in auto mode...`);
+    const preserved = preserveWork(task, this.repoDir, outcome.type);
 
-    await setStateLabel(config, task.issue, 'in_progress');
+    state.updateTaskStatus(config.repo, task.issue, 'failed', {
+      last_agent_message: outcome.final_message ?? undefined,
+    });
+    await claim.markFailed(config, task.issue);
 
-    await this.resumeAgent(task, response);
-  }
-
-  // ── Command handlers ─────────────────────────────────────────────────
-
-  private async handleCommandStop(task: TaskState): Promise<void> {
-    const config = this.config;
-
-    if (task.status !== 'claimed') {
-      const worker = getWorker(config);
-      await worker.handleFor(task.tmux_session).kill();
-    }
-
-    await triggerPreviewDown(config, task);
-
-    state.updateTaskStatus(config.repo, task.issue, 'failed');
-    await setStateLabel(config, task.issue, 'failed');
-
-    const stoppedTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
+    const errorMsg = [
+      outcome.final_message ? outcome.final_message.slice(-2000) : 'No error details captured.',
+      ...workOnBranch(task, preserved),
+      '',
+      FAILED_FOOTER,
+    ].join('\n');
+    const freshTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
     await statusComment.updateStatusComment(config.repo, task.issue, {
-      task: stoppedTask,
-      message: 'Agent has been stopped per `@foundry stop` command.\n\n`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
-      historyEntry: 'Stopped via @foundry stop',
+      task: freshTask,
+      message: errorMsg,
+      historyEntry: outcome.type === 'blocked' ? 'Agent blocked' : 'Agent errored',
     });
-
-    log.success(`Stopped agent for #${task.issue} via @foundry stop`);
-  }
-
-  private async handleCommandRestart(task: TaskState): Promise<void> {
-    const config = this.config;
-    const repoDir = this.repoDir;
-
-    if (task.status !== 'claimed') {
-      const worker = getWorker(config);
-      await worker.handleFor(task.tmux_session).kill();
-    }
-
-    await triggerPreviewDown(config, task);
-
-    try { git.removeWorktree(task.worktree, repoDir); } catch {}
-    try { git.deleteBranch(task.branch, repoDir); } catch {}
-    try { git.deleteRemoteBranch(task.branch, repoDir); } catch {}
-
-    state.removeTask(config.repo, task.issue);
-
-    await setStateLabel(config, task.issue, 'ready');
-
-    await statusComment.updateStatusComment(config.repo, task.issue, {
-      task: { ...task, status: 'stopped' },
-      message: 'Work discarded per `@foundry restart`. The issue has been re-queued and will be claimed on the next poll cycle.',
-      historyEntry: 'Restarted via @foundry restart',
-    });
-
-    log.success(`Restarted #${task.issue} via @foundry restart — re-queued as ready`);
-  }
-
-  private async handleCommandReplan(task: TaskState): Promise<void> {
-    const config = this.config;
-    ensureWorktree(task, this.repoDir);
-
-    const worker = getWorker(config);
-    await worker.handleFor(task.tmux_session).kill();
-
-    const issue = await github.getIssue(config.repo, task.issue);
-    const issueLabels = issue.labels.map(l => l.name);
-
-    const backend = resolveBackend(config, task.agent_backend);
-    const logDir = state.getLogDir(config.repo, task.issue);
-    const stateDir = state.getTaskStateDir(config.repo, task.issue);
-    const permissionMode = resolvePermissionMode(issueLabels, config);
-
-    const params: AgentLaunchParams = {
-      worktree: task.worktree,
-      issue_url: issue.html_url,
-      issue_number: issue.number,
-      repo: config.repo,
-      title: issue.title,
-      body: issue.body ?? '',
-      labels: issueLabels,
-      log_dir: logDir,
-      state_dir: stateDir,
-      permission_mode: permissionMode,
-    };
-
-    const agentCommand = backend.resolveCommand(params);
-    const agentEnv = backend.resolveEnv(params);
-
-    await worker.spawn({
-      id: task.tmux_session,
-      cwd: task.worktree,
-      command: agentCommand,
-      env: this.launchEnv(this.briefFor(task), agentEnv),
-    });
-
-    state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
-      permission_mode: permissionMode,
-    });
-
-    const replanTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'agent-running' as const };
-    await statusComment.updateStatusComment(config.repo, task.issue, {
-      task: replanTask,
-      message: 'Agent re-launched with fresh issue body per `@foundry replan`. `@foundry stop` to cancel.',
-      historyEntry: 'Replanned via @foundry replan',
-    });
-
-    log.success(`Replanned #${task.issue} via @foundry replan`);
-  }
-
-  private async handleCommandContinue(task: TaskState, message: string): Promise<void> {
-    const config = this.config;
-    const prompt = message || 'The user asked you to continue working on this task.';
-
-    if (task.status === 'claimed') {
-      await this.launchAgentFromClaimed(task, message);
-    } else if (task.status === 'pr-open') {
-      state.updateTaskStatus(config.repo, task.issue, 'pr-changes-requested', {
-        last_agent_message: prompt,
-      });
-      await this.resumeAgentForPR(task, prompt);
-    } else {
-      await this.resumeAgent(task, prompt);
-    }
-
-    const continueTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'agent-running' as const };
-    await statusComment.updateStatusComment(config.repo, task.issue, {
-      task: continueTask,
-      message: 'Agent is continuing per `@foundry continue`. `@foundry stop` to cancel.',
-      historyEntry: 'Resumed via @foundry continue',
-    });
-
-    log.success(`Continued #${task.issue} via @foundry continue`);
-  }
-
-  private async handleCommandPlan(task: TaskState, message: string): Promise<void> {
-    const config = this.config;
-    ensureWorktree(task, this.repoDir);
-
-    if (task.status !== 'claimed') {
-      const worker = getWorker(config);
-      await worker.handleFor(task.tmux_session).kill();
-    }
-
-    const issue = await github.getIssue(config.repo, task.issue);
-    const issueLabels = issue.labels.map(l => l.name);
-
-    const body = message
-      ? `${issue.body ?? ''}\n\n---\nAdditional instructions from @foundry plan:\n${message}`
-      : issue.body ?? '';
-
-    const backend = resolveBackend(config, task.agent_backend);
-    const logDir = state.getLogDir(config.repo, task.issue);
-    const stateDir = state.getTaskStateDir(config.repo, task.issue);
-
-    const params: AgentLaunchParams = {
-      worktree: task.worktree,
-      issue_url: issue.html_url,
-      issue_number: issue.number,
-      repo: config.repo,
-      title: issue.title,
-      body,
-      labels: issueLabels,
-      log_dir: logDir,
-      state_dir: stateDir,
-      permission_mode: '--permission-mode plan',
-    };
-
-    const agentCommand = backend.resolveCommand(params);
-    const agentEnv = backend.resolveEnv(params);
-
-    const worker = getWorker(config);
-    await worker.spawn({
-      id: task.tmux_session,
-      cwd: task.worktree,
-      command: agentCommand,
-      env: this.launchEnv(this.briefFor(task), agentEnv),
-    });
-
-    await setStateLabel(config, task.issue, 'in_progress');
-
-    state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
-      permission_mode: '--permission-mode plan',
-    });
-
-    const planModeTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'agent-running' as const };
-    await statusComment.updateStatusComment(config.repo, task.issue, {
-      task: planModeTask,
-      message: 'Agent re-launched in plan mode per `@foundry plan`. It will produce a plan for review instead of implementing directly. `@foundry stop` to cancel.',
-      historyEntry: 'Switched to plan mode via @foundry plan',
-    });
-
-    log.success(`Switched #${task.issue} to plan mode via @foundry plan`);
-  }
-
-  private async handleCommandStart(task: TaskState, message: string): Promise<void> {
-    const config = this.config;
-    const repoDir = this.repoDir;
-
-    await triggerPreviewDown(config, task);
-
-    if (task.status !== 'claimed') {
-      const worker = getWorker(config);
-      await worker.handleFor(task.tmux_session).kill();
-    }
-    try { git.removeWorktree(task.worktree, repoDir); } catch {}
-    try { git.deleteBranch(task.branch, repoDir); } catch {}
-    try { git.deleteRemoteBranch(task.branch, repoDir); } catch {}
-
-    state.removeTask(config.repo, task.issue);
-
-    await setStateLabel(config, task.issue, 'ready');
-
-    if (message) {
-      try {
-        await github.addComment(config.repo, task.issue,
-          `**Foundry: Starting** — Re-queued per \`@foundry start\`. Additional context from the user:\n\n${message}`);
-      } catch {}
-    } else {
-      try {
-        await github.addComment(config.repo, task.issue,
-          '**Foundry: Starting** — Re-queued per `@foundry start`. Will be claimed on the next poll cycle.');
-      } catch {}
-    }
-
-    log.success(`Re-queued #${task.issue} via @foundry start`);
   }
 
   // ── Completed agent sub-handlers ─────────────────────────────────────
@@ -921,7 +707,7 @@ export class EventHandler {
         await statusComment.updateStatusComment(config.repo, task.issue, {
           task: { ...fresh(), status: 'failed' },
           prUrl,
-          message: previewVerify.formatPreviewVerify(verified) + '\n\n`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
+          message: previewVerify.formatPreviewVerify(verified) + '\n\n' + FAILED_FOOTER,
           historyEntry: 'Preview verification failed',
         });
         return;
@@ -937,7 +723,7 @@ export class EventHandler {
         message,
         verified ? `Preview verification passed (${verified.results.length} check${verified.results.length === 1 ? '' : 's'}).` : null,
         '',
-        'Foundry is watching this PR. Submit a review with **Request changes**, or reply on this issue with feedback.',
+        'Foundry is watching this PR. Submit a review with **Request changes**, or comment `@foundry go <feedback>` on this issue.',
       ].filter(l => l !== null).join('\n'),
       historyEntry: verified ? `${historyEntry}, preview verified` : historyEntry,
     });
@@ -945,7 +731,6 @@ export class EventHandler {
 
   private async handleCompleted(task: TaskState, outcome?: AgentOutcome): Promise<void> {
     const config = this.config;
-    const repoDir = this.repoDir;
 
     log.info(`Running verification for #${task.issue}...`);
     state.updateTaskStatus(config.repo, task.issue, 'verifying');
@@ -1003,7 +788,7 @@ export class EventHandler {
         const pushFailedTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
         await statusComment.updateStatusComment(config.repo, task.issue, {
           task: pushFailedTask,
-          message: `Push failed:\n\n${err.message}`,
+          message: `Push failed:\n\n${err.message}\n\n${FAILED_FOOTER}`,
           historyEntry: 'Push failed',
         });
         return;
@@ -1035,7 +820,7 @@ export class EventHandler {
           const prFailTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
           await statusComment.updateStatusComment(config.repo, task.issue, {
             task: prFailTask,
-            message: `PR creation failed:\n\n${err.message}`,
+            message: `PR creation failed:\n\n${err.message}\n\n${FAILED_FOOTER}`,
             historyEntry: 'PR creation failed',
           });
         }
@@ -1066,6 +851,9 @@ export class EventHandler {
         }
       }
 
+      // The branch is pushed so `@foundry go` can send the agent back to it.
+      const preserved = preserveWork(task, this.repoDir, 'verification failed');
+
       state.updateTaskStatus(config.repo, task.issue, 'failed');
       await claim.markFailed(config, task.issue);
 
@@ -1078,8 +866,9 @@ export class EventHandler {
           .filter(r => !r.success)
           .map(r => `\`\`\`\n${r.output.slice(-1000)}\n\`\`\``)
           .join('\n'),
+        ...workOnBranch(task, preserved),
         '',
-        '`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
+        FAILED_FOOTER,
       ].join('\n');
 
       const verifyFailTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
@@ -1097,6 +886,7 @@ export class EventHandler {
 
     if (inputRound > config.max_input_rounds) {
       log.error(`#${task.issue} exceeded max input rounds (${config.max_input_rounds}). Marking failed.`);
+      const preserved = preserveWork(task, this.repoDir, 'too many questions');
       state.updateTaskStatus(config.repo, task.issue, 'failed', {
         input_request_count: inputRound,
         last_agent_message: outcome.final_message ?? undefined,
@@ -1105,7 +895,7 @@ export class EventHandler {
       const giveUpTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
       await statusComment.updateStatusComment(config.repo, task.issue, {
         task: giveUpTask,
-        message: `Exceeded ${config.max_input_rounds} input rounds. The agent has been unable to complete this task. Manual intervention required.`,
+        message: [`Exceeded ${config.max_input_rounds} input rounds. The agent has been unable to complete this task.`, ...workOnBranch(task, preserved), '', FAILED_FOOTER].join('\n'),
         historyEntry: `Gave up after ${config.max_input_rounds} input rounds`,
       });
       return;
@@ -1142,7 +932,7 @@ export class EventHandler {
 
     preserveWork(task, this.repoDir, 'plan review');
 
-    // Post the plan-review comment separately — it has its own marker used for detecting responses
+    // Post the plan-review comment separately — it has its own marker.
     const planComment = [
       '<!-- foundry-plan-review -->',
       '**Foundry Agent — Plan for Review**',
@@ -1150,7 +940,7 @@ export class EventHandler {
       outcome.final_message ?? 'No plan content captured.',
       '',
       '---',
-      'Reply to this issue to approve the plan, or with feedback to have it revised.',
+      'Comment `@foundry go` to approve the plan, or `@foundry go <feedback>` to have it revised.',
       '',
       'Or: `@foundry restart` · `@foundry stop`',
     ].join('\n');
@@ -1167,63 +957,23 @@ export class EventHandler {
     const planTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'plan-review' as const };
     await statusComment.updateStatusComment(config.repo, task.issue, {
       task: planTask,
-      message: 'Plan ready for review. Reply to the plan comment above to approve or provide feedback.',
+      message: 'Plan ready for review. `@foundry go` approves it; `@foundry go <feedback>` revises it.',
       historyEntry: 'Plan completed, awaiting review',
     });
 
     log.success(`Plan posted for #${task.issue}. Awaiting human review.`);
   }
 
-  // ── Shared resume helpers ────────────────────────────────────────────
+  // ── Relaunch ─────────────────────────────────────────────────────────
 
-  private async launchAgentFromClaimed(task: TaskState, message: string): Promise<void> {
-    const config = this.config;
-    ensureWorktree(task, this.repoDir);
-
-    const issue = await github.getIssue(config.repo, task.issue);
-    const issueLabels = issue.labels.map(l => l.name);
-
-    const backend = resolveBackend(config, task.agent_backend);
-    const logDir = state.getLogDir(config.repo, task.issue);
-    const stateDir = state.getTaskStateDir(config.repo, task.issue);
-    const permissionMode = resolvePermissionMode(issueLabels, config);
-
-    const body = message
-      ? `${issue.body ?? ''}\n\n---\nAdditional instructions:\n${message}`
-      : issue.body ?? '';
-
-    const params: AgentLaunchParams = {
-      worktree: task.worktree,
-      issue_url: issue.html_url,
-      issue_number: issue.number,
-      repo: config.repo,
-      title: issue.title,
-      body,
-      labels: issueLabels,
-      log_dir: logDir,
-      state_dir: stateDir,
-      permission_mode: permissionMode,
-    };
-
-    const agentCommand = backend.resolveCommand(params);
-    const agentEnv = backend.resolveEnv(params);
-
-    const worker = getWorker(config);
-    await worker.spawn({
-      id: task.tmux_session,
-      cwd: task.worktree,
-      command: agentCommand,
-      env: this.launchEnv(this.briefFor(task), agentEnv),
-    });
-
-    state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
-      agent_command: agentCommand,
-      permission_mode: permissionMode,
-    });
-    log.success(`Agent launched from claimed state for #${task.issue} in ${task.tmux_session}`);
-  }
-
-  private async resumeAgent(task: TaskState, humanResponse: string): Promise<void> {
+  /**
+   * Launch the agent again on the task's branch. Sessions do not survive
+   * jobs, so this is a fresh process: the worktree is recreated from the
+   * pushed branch, the thread goes in the issue file, and why it is being
+   * launched goes in FOUNDRY_RESUME_CONTEXT. Always in auto mode: a plan has
+   * been approved or a human has asked for work.
+   */
+  private async relaunch(task: TaskState, humanText: string, kind: ResumeKind): Promise<void> {
     const config = this.config;
     ensureWorktree(task, this.repoDir);
 
@@ -1242,37 +992,33 @@ export class EventHandler {
       issue_number: task.issue,
       repo: task.repo,
       title: task.title,
-      body: humanResponse,
+      body: humanText,
       labels: [],
       log_dir: logDir,
       state_dir: stateDir,
       permission_mode: '--dangerously-skip-permissions',
     };
 
-    // The agent is relaunched, not resumed: sessions do not survive jobs. What
-    // it asked and what the human answered go in FOUNDRY_RESUME_CONTEXT, which
-    // the preset's prompt includes.
     const command = backend.resolveCommand(launchParams);
-    const resumeKind = task.status === 'plan-review' ? 'plan' : 'answer';
 
     await worker.spawn({
       id: task.tmux_session,
       cwd: task.worktree,
       command,
-      env: this.launchEnv(this.briefFor(task), backend.resolveEnv(launchParams), {
-        FOUNDRY_RESUME_CONTEXT: buildResumeContext(task, humanResponse, resumeKind),
+      env: await this.launchEnv(this.briefFor(task), backend.resolveEnv(launchParams), {
+        FOUNDRY_RESUME_CONTEXT: buildResumeContext(task, humanText, kind),
       }),
     });
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
       permission_mode: '--dangerously-skip-permissions',
     });
-    log.success(`Resumed agent for #${task.issue} in ${task.tmux_session}`);
+    log.success(`Relaunched agent for #${task.issue} in ${task.tmux_session} (${kind})`);
   }
 
+  /** A review requested changes: relaunch with the review, within the input-round cap. */
   private async resumeAgentForPR(task: TaskState, feedback: string): Promise<void> {
     const config = this.config;
-    ensureWorktree(task, this.repoDir);
 
     const inputRound = (task.input_request_count ?? 0) + 1;
     if (inputRound > config.max_input_rounds) {
@@ -1282,42 +1028,13 @@ export class EventHandler {
       const prGiveUpTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
       await statusComment.updateStatusComment(config.repo, task.issue, {
         task: prGiveUpTask,
-        message: `Exceeded ${config.max_input_rounds} input rounds for PR feedback. Manual intervention required.`,
+        message: `Exceeded ${config.max_input_rounds} input rounds for PR feedback.\n\n${FAILED_FOOTER}`,
         historyEntry: `Gave up after ${config.max_input_rounds} PR feedback rounds`,
       });
       return;
     }
 
-    const worker = getWorker(config);
-    await worker.handleFor(task.tmux_session).kill();
-
-    const backend = resolveBackend(config, task.agent_backend);
-    const logDir = state.getLogDir(config.repo, task.issue);
-    const stateDir = state.getTaskStateDir(config.repo, task.issue);
-
-    const launchParams: AgentLaunchParams = {
-      worktree: task.worktree,
-      issue_url: `https://github.com/${task.repo}/issues/${task.issue}`,
-      issue_number: task.issue,
-      repo: task.repo,
-      title: task.title,
-      body: feedback,
-      labels: [],
-      log_dir: logDir,
-      state_dir: stateDir,
-      permission_mode: '--dangerously-skip-permissions',
-    };
-
-    const command = backend.resolveCommand(launchParams);
-
-    await worker.spawn({
-      id: task.tmux_session,
-      cwd: task.worktree,
-      command,
-      env: this.launchEnv(this.briefFor(task), backend.resolveEnv(launchParams), {
-        FOUNDRY_RESUME_CONTEXT: buildResumeContext(task, feedback, 'review'),
-      }),
-    });
+    await this.relaunch(task, feedback, 'review');
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
       input_request_count: inputRound,
@@ -1327,7 +1044,7 @@ export class EventHandler {
     const prFeedbackTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'agent-running' as const };
     await statusComment.updateStatusComment(config.repo, task.issue, {
       task: prFeedbackTask,
-      message: `Agent is addressing PR review feedback (round ${inputRound}). \`@foundry stop\` to cancel.`,
+      message: `Agent is addressing PR review feedback (round ${inputRound}). \`@foundry stop\` to stop it.`,
       historyEntry: `Resumed for PR feedback (round ${inputRound})`,
     });
 

@@ -129,6 +129,7 @@ type OctokitLike = {
     repos: {
       createDeployment(p: any): Promise<any>;
       createDeploymentStatus(p: any): Promise<any>;
+      getCollaboratorPermissionLevel(p: any): Promise<any>;
     };
     git: {
       deleteRef(p: any): Promise<any>;
@@ -542,6 +543,13 @@ export class OctokitClient implements GitHubClient {
   }
 
   // ── Repository ─────────────────────────────────────────────────────────
+
+  async getCollaboratorPermission(repo: string, username: string): Promise<string> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    const { data } = await ok.rest.repos.getCollaboratorPermissionLevel({ owner, repo: repoName, username });
+    return String(data.permission ?? 'none');
+  }
 
   async getRepoSlug(): Promise<string> {
     return execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], {

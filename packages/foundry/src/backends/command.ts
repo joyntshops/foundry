@@ -77,7 +77,7 @@ export function createCommandBackend(name: string, def: AgentBackendDef & { comm
  */
 export const AGENT_BRIEF = [
   'You are the developer assigned to this GitHub issue. The person who wrote it is a stakeholder, not a programmer, and will review your work as a pull request.',
-  'Read the issue and every comment on it before changing anything.',
+  'Read the issue file before changing anything: it holds the issue and every comment the humans have made, in order. Later comments refine or override earlier ones.',
   'Make reasonable implementation decisions yourself and list each one under `assumptions` in your report. Ask a question only when the answer materially changes the work, and offer concrete options.',
   'Change only what the issue needs. Follow the conventions already in the repository.',
   'Commit as you go with clear messages. Never push, open pull requests, or change labels; Foundry does that.',
@@ -87,6 +87,6 @@ export const AGENT_BRIEF = [
 
 export const CLAUDE_CODE_PRESET: AgentBackendDef & { command: string } = {
   type: 'command',
-  command: 'claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. Read the issue first: its title and body are in the file $FOUNDRY_ISSUE_FILE (the live issue with comments is at {issue_url} when you have network access). $FOUNDRY_RESUME_CONTEXT" --append-system-prompt "$FOUNDRY_AGENT_BRIEF" --max-turns "$FOUNDRY_MAX_TURNS" --json-schema "$FOUNDRY_REPORT_SCHEMA" --disallowedTools AskUserQuestion --verbose --output-format stream-json < /dev/null 2>&1 | tee {log_dir}/agent.log',
+  command: 'claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. Read the issue first: its title, body, and every human comment so far are in the file $FOUNDRY_ISSUE_FILE (the live issue is at {issue_url} when you have network access). $FOUNDRY_RESUME_CONTEXT" --append-system-prompt "$FOUNDRY_AGENT_BRIEF" --max-turns "$FOUNDRY_MAX_TURNS" --json-schema "$FOUNDRY_REPORT_SCHEMA" --disallowedTools AskUserQuestion --verbose --output-format stream-json < /dev/null 2>&1 | tee {log_dir}/agent.log',
   env: {},
 };

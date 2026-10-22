@@ -162,6 +162,10 @@ export function updateCheckRun(repo: string, checkRunId: number, opts: UpdateChe
   return _client.updateCheckRun(repo, checkRunId, opts);
 }
 
+export function getCollaboratorPermission(repo: string, username: string): Promise<string> {
+  return _client.getCollaboratorPermission(repo, username);
+}
+
 export function getRepoSlug(): Promise<string> {
   return _client.getRepoSlug();
 }

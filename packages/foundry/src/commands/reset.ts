@@ -1,6 +1,6 @@
 /**
  * foundry reset <issue> — undo everything Foundry created for a task on GitHub
- * and put the issue back to `state:ready`.
+ * and clear its state label. `@foundry go` starts it again.
  *
  * Works from any checkout with no local state: the task is rebuilt from the
  * issue itself (claim comment, state label, PR, preview comment). Order is
@@ -81,8 +81,8 @@ export async function runReset(issueArg: string, opts: { force?: boolean }): Pro
   }
 
   // 4. Label
-  act(`Set state label → ${config.labels.ready}`);
-  if (!dryRun) await setStateLabel(config, issue, 'ready');
+  act('Clear the state label');
+  if (!dryRun) await setStateLabel(config, issue, null);
 
   // 5. Local state, if this checkout had any
   if (!dryRun) state.removeTask(config.repo, issue);
@@ -93,7 +93,7 @@ export async function runReset(issueArg: string, opts: { force?: boolean }): Pro
       await github.addComment(config.repo, issue, [
         '**Foundry reset**',
         '',
-        'Branch, PR, and preview removed. The issue is `' + config.labels.ready + '` again and will be claimed fresh.',
+        'Branch, PR, and preview removed. Comment `@foundry go` to start it again from scratch.',
       ].join('\n'));
     } catch {}
   }

@@ -271,6 +271,11 @@ export class GhCliClient implements GitHubClient {
 
   // ── Repository ─────────────────────────────────────────────────────────
 
+  async getCollaboratorPermission(repo: string, username: string): Promise<string> {
+    const raw = gh(['api', `repos/${repo}/collaborators/${username}/permission`, '--jq', '.permission']);
+    return raw.trim() || 'none';
+  }
+
   async getRepoSlug(): Promise<string> {
     return gh(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
   }

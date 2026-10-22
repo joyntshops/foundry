@@ -305,4 +305,12 @@ describe('GhCliClient', () => {
       expect(slug).toBe('owner/repo');
     });
   });
+
+  describe('getCollaboratorPermission', () => {
+    it('calls the permission endpoint and returns the permission', async () => {
+      mockExec.mockReturnValue('admin\n');
+      expect(await client.getCollaboratorPermission('owner/repo', 'alice')).toBe('admin');
+      expect(mockExec).toHaveBeenCalledWith('gh', ['api', 'repos/owner/repo/collaborators/alice/permission', '--jq', '.permission'], expect.objectContaining({ encoding: 'utf-8' }));
+    });
+  });
 });

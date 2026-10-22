@@ -52,10 +52,12 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 - **One `state:*` label per issue.** Always go through `setStateLabel`. Task recovery reads the label to learn the status, so a second label is a corrupted record.
 - **Every job starts with nothing.** Anything a later job needs must be on GitHub before this one exits: labels, the claim comment, the status comment, the PR, the preview comment. If you add task state, add it to a comment and to `task-recovery.ts`.
-- **Finish transitions in-job, or dispatch.** Events caused by the job's token do not start other runs, except `workflow_dispatch` and `repository_dispatch`. A transition that relies on "the next run will pick it up" stalls. `continueIfRequeued` in `commands/action.ts` finishes in-job; `stale-prs.ts` dispatches the workflow with `{issue, command, message}` inputs when the work belongs to another issue's concurrency group.
+- **Finish transitions in-job, or dispatch.** Events caused by the job's token do not start other runs, except `workflow_dispatch` and `repository_dispatch`. A transition that relies on "the next run will pick it up" stalls. `@foundry restart` starts the issue again inside the same job; `stale-prs.ts` dispatches the workflow with `{issue, command, message}` inputs when the work belongs to another issue's concurrency group.
 - **Behavior goes in `EventHandler`.** `action.ts` is composition only.
 - **Never branch on prose.** Control flow reads the agent's typed report and facts Foundry can check, nothing else. No report, an invalid report, or a report that contradicts git fails closed. If a new decision needs information only the agent has, add a field to `AGENT_REPORT_SCHEMA`; do not match text.
 - **Issue text is hostile input.** Titles and bodies reach a shell. Use the `FOUNDRY_ISSUE_*` env vars; `{title}`/`{body}` are escaped for double quotes only.
+- **Three commands, nothing else starts work.** `@foundry go`, `@foundry restart`, `@foundry stop` are the only human actions (`lib/webhook.ts`). Labels are status (`state:*`, Foundry-owned) and settings (`mode:*`, `agent:*`); plain comments are context and reach the agent through the issue file (`lib/thread.ts`). Do not add a label trigger or a comment trigger; add to what `go` does. Commenters must have write access (`lib/authorize.ts`).
+- **Every non-success ending pushes the branch** (`preserveWork`), so `go` on a failed task has something to continue from.
 - **Foundry is not the agent.** Backends are configured commands. Do not special-case Claude beyond parsing its transcript format.
 - **`url_template` wins.** Provider command output is only read as a URL when there is no template. `gh workflow run` prints a run URL and this bit us.
 
@@ -67,7 +69,7 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 ## Testing a change for real
 
-`joyntshops/foundry-demo` is the dogfood repo (private, default branch `integration`). Its workflow uses `joyntshops/foundry@main`; point it at a branch to test unmerged work, then switch it back. Open an issue there, label it `state:ready`, and watch Actions. Expected: claim comment, agent commit, PR into `integration`, `state:ready-for-human-review`, preview comment with a GitHub Pages URL. Merge the PR to exercise `pull_request.closed` → `state:done` → preview down.
+`joyntshops/foundry-demo` is the dogfood repo (private, default branch `integration`). Its workflow uses `joyntshops/foundry@main`; point it at a branch to test unmerged work, then switch it back. Open an issue there, comment `@foundry go`, and watch Actions. Expected: claim comment, agent commit, PR into `integration`, `state:ready-for-human-review`, preview comment with a GitHub Pages URL. Merge the PR to exercise `pull_request.closed` → `state:done` → preview down.
 
 ## Docs
 

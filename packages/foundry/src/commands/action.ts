@@ -2,18 +2,20 @@
  * foundry action — run the Foundry state machine for one GitHub event.
  *
  * Designed to be the entry point of the composite GitHub Action. A job is
- * started by a GitHub event (issue labeled, comment created, PR closed, review
- * submitted), this command maps the event to FoundryEvents, dispatches them
- * through the same EventHandler the runner uses, and, when a handler launched
- * an agent, waits for it and feeds the outcome back in. The job ends when the
- * state machine has nothing left to do for this event.
+ * started by a GitHub event (comment created, PR closed, review submitted),
+ * this command maps the event to FoundryEvents, dispatches them through the
+ * EventHandler, and, when a handler launched an agent, waits for it and feeds
+ * the outcome back in. The job ends when the state machine has nothing left
+ * to do for this event.
  *
- * Differences from `foundry run`:
  *   - No polling. One event in, one job.
  *   - The agent runs as a subprocess of this process (SubprocessWorker), so
  *     the job log is the agent transcript.
  *   - Local state starts empty every time. Tasks referenced by the event are
  *     rebuilt from GitHub (task-recovery.ts) before mapping.
+ *   - Every transition finishes in this job or is handed on by dispatch;
+ *     nothing waits for "the next run" (events caused by the job's token do
+ *     not start one).
  */
 import * as fs from 'node:fs';
 import { loadConfig, getConfigDir } from '../config.js';
@@ -22,7 +24,7 @@ import { webhookToEvents } from '../lib/webhook.js';
 import { recoverTask, issueNumberFromPayload } from '../lib/task-recovery.js';
 import { buildAgentCompletedEvent, agentLogPath } from '../lib/completion.js';
 import { resolveWorker } from '../lib/workers/index.js';
-import * as github from '../lib/github.js';
+import { canCommand } from '../lib/authorize.js';
 import * as state from '../lib/state.js';
 import * as log from '../lib/log.js';
 import type { FoundryConfig, TaskState } from '../types.js';
@@ -83,38 +85,16 @@ export async function runAction(opts: ActionOptions): Promise<void> {
   const handler = new EventHandler(config, repoDir);
 
   for (const event of events) {
+    if (event.type === 'command' && event.via === 'comment' && !(await canCommand(config, event.commentAuthor))) {
+      log.warn(`Ignoring "${event.command}" on #${event.issue} from ${event.commentAuthor}: write access to ${config.repo} is required.`);
+      continue;
+    }
     log.info(`Handling ${describe(event)}`);
     await handler.handleEvent(event);
     await driveToCompletion(config, repoDir, handler);
   }
 
-  await continueIfRequeued(config, repoDir, handler, issueNumber);
-
   writeOutputs(config, issueNumber);
-}
-
-/**
- * `@foundry restart` and `@foundry start` end by dropping the task and putting
- * `state:ready` back on the issue, expecting the next poll to pick it up. In a
- * job there is no next poll, and a label added with the job's own token does
- * not start another run. So if the issue we acted on is now ready and
- * untracked, carry straight on into issue_ready here.
- */
-async function continueIfRequeued(
-  config: FoundryConfig,
-  repoDir: string,
-  handler: EventHandler,
-  issueNumber: number | null,
-): Promise<void> {
-  if (issueNumber === null) return;
-  if (state.getTask(config.repo, issueNumber)) return;
-
-  const issue = await github.getIssue(config.repo, issueNumber);
-  if (!github.hasLabel(issue, config.labels.ready)) return;
-
-  log.info(`#${issueNumber} was re-queued. Continuing into issue_ready in this job.`);
-  await handler.handleEvent({ type: 'issue_ready', issue });
-  await driveToCompletion(config, repoDir, handler);
 }
 
 /**
@@ -150,11 +130,8 @@ async function driveToCompletion(config: FoundryConfig, repoDir: string, handler
 
 function describe(event: FoundryEvent): string {
   switch (event.type) {
-    case 'issue_ready':
-    case 'issue_claim':
-      return `${event.type} #${event.issue.number}`;
     case 'command':
-      return `command "${event.command}" on #${event.task.issue} by ${event.commentAuthor}`;
+      return `command "${event.command}" on #${event.issue} (${event.task ? event.task.status : 'unclaimed'}) by ${event.commentAuthor}`;
     case 'pr_preview':
       return `pr_preview ${event.action} for PR #${event.pr_number} (${event.branch} → ${event.base})`;
     case 'pr_approved':

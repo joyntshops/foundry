@@ -15,15 +15,15 @@ If you would rather not run the CLI, create these labels by hand and copy [examp
 
 | Label | Purpose |
 |---|---|
-| `state:ready` | Task ready for Foundry to claim |
-| `state:in-progress` | Task claimed; agent running |
-| `state:waiting-for-input` | Agent asked a question; reply on the issue |
-| `state:plan-review` | Agent posted a plan; approve with `@foundry continue` |
+| `state:in-progress` | Agent running |
+| `state:waiting-for-input` | Agent asked a question; answer with `@foundry go <answer>` |
+| `state:plan-review` | Agent posted a plan; approve with `@foundry go` |
 | `state:ready-for-human-review` | PR is open |
-| `state:failed` | Something went wrong; see the issue comments |
+| `state:failed` | Something went wrong; see the issue comments; `@foundry go` continues |
 | `state:done` | PR merged, task complete |
-| `state:claim` | Claim and set up the branch without starting an agent |
-| `mode:plan` / `mode:auto` / `mode:default` | Agent permission mode for this issue |
+| `mode:plan` / `mode:auto` / `mode:default` | Agent permission mode for this issue (set before `@foundry go`) |
+
+The `state:*` labels are Foundry's status display; only Foundry sets them. Nothing happens when a human adds one.
 
 ## 2. Configure
 
@@ -66,11 +66,11 @@ Add `.github/workflows/foundry.yml` from the template in [GitHub Action](github-
 
 Optionally run `foundry setup-bot` to create a GitHub App and add its ID and private key as secrets. With them, Foundry's comments and PRs carry the App's name and its pushes trigger your other workflows. Without them, the job's built-in token is used and everything still works.
 
-Nothing runs anywhere until an issue is labeled.
+Nothing runs anywhere until someone comments `@foundry go` on an issue.
 
 ## 4. Create a task
 
-Open a GitHub Issue with a clear brief and add the label `state:ready`. Add `mode:plan` first if you want to approve a plan before any code is written.
+Open a GitHub Issue with a clear brief (the `Foundry task` issue template, written by `init`, has the shape that works) and comment `@foundry go`. Add the `mode:plan` label first if you want to approve a plan before any code is written. Anything else written on the issue before or after is given to the agent at its next launch; only `@foundry go` starts it.
 
 ## 5. Watch it
 
@@ -82,19 +82,16 @@ Comment on the issue:
 
 | Comment | Effect |
 |---|---|
-| `@foundry continue <message>` | Relaunch the agent with your message |
-| `@foundry plan <message>` | Relaunch in plan mode |
-| `@foundry replan` | Re-read the issue body and relaunch |
+| `@foundry go <message>` | Proceed from the branch with your message: answer a question, approve or revise a plan, send a PR back, resume a failed task |
 | `@foundry restart` | Discard all work and start over |
-| `@foundry start <message>` | Re-queue a failed or stopped task |
-| `@foundry stop` | Mark failed |
+| `@foundry stop` | Stop the agent; the branch stays |
 
-Or submit a PR review with **Request changes**; the review is fed back to the agent. Full details in [Workflows](workflows.md).
+Or submit a PR review with **Request changes**; the review is fed back to the agent. Only people with write access to the repo can command Foundry. Full details in [Workflows](workflows.md).
 
 ## 7. Stop or undo
 
-To stop a running job, press **Cancel** on the run in the Actions UI, then `@foundry restart` or `@foundry start` to re-queue. To undo a task entirely from any checkout:
+`@foundry stop` cancels the running job (or press **Cancel** on the run in the Actions UI). `@foundry go` continues from the branch; `@foundry restart` starts over. To undo a task entirely from any checkout:
 
 ```bash
-foundry reset 42 --force     # remove branch, PR, preview; back to state:ready
+foundry reset 42 --force     # remove branch, PR, preview; @foundry go starts it again
 ```

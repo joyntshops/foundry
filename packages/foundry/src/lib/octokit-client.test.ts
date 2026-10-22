@@ -41,6 +41,9 @@ function createMockOctokit() {
       git: {
         deleteRef: vi.fn(),
       },
+      repos: {
+        getCollaboratorPermissionLevel: vi.fn(),
+      },
     },
   } as any;
 }
@@ -324,6 +327,14 @@ describe('OctokitClient', () => {
       expect(octokit.rest.reactions.createForIssueComment).toHaveBeenCalledWith({
         owner: 'o', repo: 'r', comment_id: 456, content: 'eyes',
       });
+    });
+  });
+
+  describe('getCollaboratorPermission', () => {
+    it('reads the collapsed permission for the user', async () => {
+      octokit.rest.repos.getCollaboratorPermissionLevel.mockResolvedValue({ data: { permission: 'write', role_name: 'maintain' } });
+      expect(await client.getCollaboratorPermission('owner/repo', 'alice')).toBe('write');
+      expect(octokit.rest.repos.getCollaboratorPermissionLevel).toHaveBeenCalledWith({ owner: 'owner', repo: 'repo', username: 'alice' });
     });
   });
 });

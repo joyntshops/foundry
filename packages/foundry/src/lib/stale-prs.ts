@@ -5,7 +5,7 @@
  * After a PR merges, every other open PR into the same base that belongs to
  * a Foundry task is checked. GitHub computes mergeability lazily after the
  * base changes, so each check polls until the answer is known. For each PR
- * that now conflicts, Foundry dispatches its own workflow with a `continue`
+ * that now conflicts, Foundry dispatches its own workflow with a `go`
  * command for the owning issue. `workflow_dispatch` is one of the two event
  * types GitHub still delivers when the job's own token causes them, and the
  * dispatched job runs under that issue's concurrency group like any other
@@ -121,10 +121,10 @@ export async function handleStalePRs(config: FoundryConfig, base: string, merged
   for (const s of stale) {
     log.info(`PR #${s.pr_number} (#${s.issue}) conflicts with ${base}; sending the agent to resolve it.`);
     const instruction = conflictInstruction(base, mergedPR ?? 0);
-    const dispatched = dispatchCommand(s.issue, 'continue', instruction);
+    const dispatched = dispatchCommand(s.issue, 'go', instruction);
     const note = dispatched
       ? `**${base} moved** (PR #${mergedPR ?? '?'} merged) and PR #${s.pr_number} now conflicts with it. Foundry has sent the agent to rebase and resolve.`
-      : `**${base} moved** (PR #${mergedPR ?? '?'} merged) and PR #${s.pr_number} now conflicts with it. Foundry could not start the agent automatically; reply here with \`@foundry continue\` and the instruction below.\n\n> ${instruction}`;
+      : `**${base} moved** (PR #${mergedPR ?? '?'} merged) and PR #${s.pr_number} now conflicts with it. Foundry could not start the agent automatically; comment \`@foundry go\` with the instruction below.\n\n> ${instruction}`;
     try { await github.addComment(config.repo, s.issue, note); } catch (err: any) {
       log.warn(`Could not note the conflict on #${s.issue}: ${err.message}`);
     }

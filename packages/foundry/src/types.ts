@@ -16,15 +16,18 @@ export interface AgentBackendDef {
 export interface FoundryConfig {
   repo: string;                         // e.g. "joyntshops/foundry"
 
+  /**
+   * State labels. Foundry owns them: exactly one is on a tracked issue at a
+   * time and only Foundry adds or removes them. Humans never set a state
+   * label to make something happen; they comment a command.
+   */
   labels: {
-    ready: string;                      // default "state:ready"
     in_progress: string;                // default "state:in-progress"
     done: string;                       // default "state:done"
     ready_for_review: string;           // default "state:ready-for-human-review"
     waiting_for_input: string;          // default "state:waiting-for-input"
     failed: string;                     // default "state:failed"
     plan_review: string;                // default "state:plan-review"
-    claim: string;                      // default "state:claim"
   };
 
   mode_labels?: {
@@ -47,14 +50,15 @@ export interface FoundryConfig {
   verify_preview?: string[];
   integration_rebuild: string;          // e.g. "npm run build"
 
+  /**
+   * The three commands, the only comments that start or stop work. Every
+   * other comment is context: it reaches the agent through the issue file
+   * on the next launch, and never starts a job.
+   */
   comment_triggers: {
-    replan: string;                     // default "@foundry replan"
+    go: string;                         // default "@foundry go"
     restart: string;                    // default "@foundry restart"
     stop: string;                       // default "@foundry stop"
-    continue: string;                   // default "@foundry continue"
-    plan: string;                       // default "@foundry plan"
-    start: string;                      // default "@foundry start"
-    claim: string;                      // default "@foundry claim"
   };
 
   version_sources: string[];            // ordered list of version file paths (package.json, Cargo.toml, pyproject.toml)

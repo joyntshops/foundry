@@ -27,6 +27,7 @@ export class MockGitHubClient implements GitHubClient {
   prReviews: PRReview[] = [];
   prReviewComments: PRReviewComment[] = [];
   repoSlug = 'owner/repo';
+  collaboratorPermission = 'write';
   checkRunId = 12345;
 
   // Error injection
@@ -160,6 +161,11 @@ export class MockGitHubClient implements GitHubClient {
 
   async updateCheckRun(repo: string, checkRunId: number, opts: UpdateCheckRunOpts): Promise<void> {
     this.record('updateCheckRun', [repo, checkRunId, opts]);
+  }
+
+  async getCollaboratorPermission(repo: string, username: string): Promise<string> {
+    this.record('getCollaboratorPermission', [repo, username]);
+    return this.collaboratorPermission;
   }
 
   async getRepoSlug(): Promise<string> {

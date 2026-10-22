@@ -11,14 +11,12 @@ const CONFIG_FILENAME = '.joynt-foundry.yml';
 const DEFAULTS: FoundryConfig = {
   repo: '',
   labels: {
-    ready: 'state:ready',
     in_progress: 'state:in-progress',
     done: 'state:done',
     ready_for_review: 'state:ready-for-human-review',
     waiting_for_input: 'state:waiting-for-input',
     failed: 'state:failed',
     plan_review: 'state:plan-review',
-    claim: 'state:claim',
   },
   mode_labels: {
     plan: 'mode:plan',
@@ -34,13 +32,9 @@ const DEFAULTS: FoundryConfig = {
   verify_preview: [],
   integration_rebuild: '',
   comment_triggers: {
-    replan: '@foundry replan',
+    go: '@foundry go',
     restart: '@foundry restart',
     stop: '@foundry stop',
-    continue: '@foundry continue',
-    plan: '@foundry plan',
-    start: '@foundry start',
-    claim: '@foundry claim',
   },
   version_sources: [],
   tag_prefix: 'v',
