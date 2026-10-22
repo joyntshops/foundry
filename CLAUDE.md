@@ -25,6 +25,7 @@ packages/foundry/src/
   lib/preview-verify.ts      verify_preview: wait for the URL, run commands against it, gate ready-for-review
   lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
   lib/stale-prs.ts           after a merge, find sibling PRs that now conflict and dispatch their agents (workflow_dispatch)
+  lib/review.ts              approve → rebase onto base, wait for checks, merge (rebase method), integration_rebuild; shared by `foundry review`
   lib/reconcile.ts           schedule trigger: in-progress issues with no live run → failed
   commands/cancelled.ts      if: cancelled() step: a cancelled job's task → failed
   lib/worktree.ts            preserveWork (commit+push before a job ends waiting) and ensureWorktree (recreate on resume)
@@ -62,8 +63,7 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 1. No verify-to-agent retry loop; a verification failure stops the task.
 2. Comments on PRs (commands or replies) resolve to the PR number, not the issue; the workflow template excludes them.
-3. `foundry review` is manual; automating it on PR approval is the next target.
-5. Plan mode (`--permission-mode plan` under `-p` with structured output) is wired but untested on a real run.
+3. Plan mode (`--permission-mode plan` under `-p` with structured output) is wired but untested on a real run.
 
 ## Testing a change for real
 

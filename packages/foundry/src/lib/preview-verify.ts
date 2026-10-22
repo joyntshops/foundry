@@ -20,6 +20,10 @@ export interface PreviewVerifyInput {
   cwd: string;
   /** Extra environment, e.g. FOUNDRY_PR_NUMBER. FOUNDRY_PREVIEW_URL is always set. */
   env?: Record<string, string>;
+  /** The commit the preview should be serving; expands {sha} in ready_match and sets FOUNDRY_SHA. */
+  sha?: string;
+  branch?: string;
+  pr_number?: number;
 }
 
 export interface PreviewVerifyOutcome {
@@ -37,22 +41,39 @@ export async function waitForUrl(
   timeoutMs: number,
   pollMs: number = READY_POLL_MS,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ready: boolean; status?: number; attempts: number }> {
+  bodyMatch?: string,
+): Promise<{ ready: boolean; status?: number; attempts: number; matched?: boolean }> {
   const deadline = Date.now() + timeoutMs;
   let attempts = 0;
   let status: number | undefined;
+  let matched: boolean | undefined;
   while (true) {
     attempts++;
     try {
       const res = await fetchImpl(url, { method: 'GET', redirect: 'follow' });
       status = res.status;
-      if (res.status < 500 && res.status !== 404) return { ready: true, status, attempts };
+      if (res.status < 500 && res.status !== 404) {
+        if (!bodyMatch) return { ready: true, status, attempts };
+        // A redeploy serves the previous version until the new one lands; the
+        // marker (usually the commit SHA) tells them apart.
+        matched = (await res.text()).includes(bodyMatch);
+        if (matched) return { ready: true, status, attempts, matched };
+      }
     } catch {
       status = undefined;
     }
-    if (Date.now() >= deadline) return { ready: false, status, attempts };
+    if (Date.now() >= deadline) return { ready: false, status, attempts, matched };
     await new Promise(r => setTimeout(r, Math.min(pollMs, Math.max(0, deadline - Date.now()))));
   }
+}
+
+/** `{sha}`, `{branch}`, `{pr_number}` in ready_match. Undefined when unset. */
+export function expandReadyMatch(template: string | undefined, input: PreviewVerifyInput): string | undefined {
+  if (!template) return undefined;
+  return template
+    .replace(/\{sha\}/g, input.sha ?? '')
+    .replace(/\{branch\}/g, input.branch ?? '')
+    .replace(/\{pr_number\}/g, input.pr_number === undefined ? '' : String(input.pr_number));
 }
 
 export function isConfigured(config: FoundryConfig): boolean {
@@ -69,19 +90,27 @@ export async function verifyPreview(config: FoundryConfig, input: PreviewVerifyI
   const timeoutS = config.preview?.ready_timeout_seconds ?? DEFAULT_READY_TIMEOUT_S;
 
   const start = Date.now();
-  const ready = await waitForUrl(input.url, timeoutS * 1000);
+  const match = expandReadyMatch(config.preview?.ready_match, input);
+  const ready = await waitForUrl(input.url, timeoutS * 1000, undefined, undefined, match);
   if (!ready.ready) {
+    const why = ready.matched === false
+      ? `answered (${ready.status}) but never contained "${match}"`
+      : `did not answer (last status ${ready.status ?? 'no response'})`;
     results.push({
       command: `wait for ${input.url}`,
       success: false,
-      output: `Preview did not answer within ${timeoutS}s (${ready.attempts} attempts, last status ${ready.status ?? 'no response'}).`,
+      output: `Preview ${why} within ${timeoutS}s (${ready.attempts} attempts).`,
       duration_ms: Date.now() - start,
     });
     return { passed: false, url: input.url, results };
   }
-  log.info(`Preview is up (${ready.status}) after ${ready.attempts} attempt${ready.attempts === 1 ? '' : 's'}.`);
+  log.info(`Preview is up (${ready.status}${match ? `, contains "${match}"` : ''}) after ${ready.attempts} attempt${ready.attempts === 1 ? '' : 's'}.`);
 
-  const env = { ...(input.env ?? {}), FOUNDRY_PREVIEW_URL: input.url };
+  const env = {
+    ...(input.env ?? {}),
+    ...(input.sha ? { FOUNDRY_SHA: input.sha } : {}),
+    FOUNDRY_PREVIEW_URL: input.url,
+  };
   for (const cmd of commands) {
     const r = runVerifyStep(cmd, input.cwd, env);
     results.push(r);

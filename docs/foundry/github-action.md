@@ -28,6 +28,7 @@ A human then acts on GitHub. Each action is another event, another job:
 | `issue_comment.created` | body starts with `@foundry <cmd>` | `continue`, `plan`, `start`, `restart`, `replan`, `stop` |
 | `issue_comment.created` | any human comment while the issue is `state:waiting-for-input` or `state:plan-review` | the answer; agent relaunched with it |
 | `pull_request_review.submitted` | state is `changes_requested` | feed review back to agent |
+| `pull_request_review.submitted` | state is `approved`, on a task PR or a `pull_request_bases` PR | rebase onto the base, wait for checks, merge (rebase method), `integration_rebuild`, complete the task or tear the promotion preview down |
 | `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down; then check sibling PRs for conflicts |
 | `workflow_dispatch` | inputs `issue`, `command`, `message` | the command, as if commented; how Foundry hands work to itself |
 | `pull_request.opened` / `synchronize` / `reopened` / `closed` | base in `preview.pull_request_bases` | preview up / redeploy / down for a non-task PR |
@@ -73,7 +74,8 @@ jobs:
       (github.event_name == 'pull_request' &&
         (github.event.pull_request.merged == true ||
          github.event.pull_request.base.ref == 'main')) ||
-      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
+      (github.event_name == 'pull_request_review' &&
+        (github.event.review.state == 'changes_requested' || github.event.review.state == 'approved')) ||
       github.event_name == 'workflow_dispatch' ||
       github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -133,6 +135,8 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 **Nothing Foundry does may depend on triggering another run.** Events caused by the job's built-in token do not start workflow runs, with two exceptions: `workflow_dispatch` and `repository_dispatch`. Preview up/down use `gh workflow run`, which is `workflow_dispatch`, so they are fine. Merges are done by humans, so `pull_request.closed` fires. The only paths that used to rely on a follow-up run were `@foundry restart` and `@foundry start`, which re-add `state:ready`; `foundry action` now detects a re-queued issue and continues straight into `issue_ready` in the same job. Design any new transition the same way: finish it in-job, or make it a dispatch.
 
 **No branching on prose.** What happens after the agent exits is decided from facts Foundry can check (run error, commits) and the agent's typed report (`done`, `needs_input`, `plan_ready`, `blocked`), submitted as Claude Code structured output or via `foundry report`. Contradictions and missing reports fail closed. The regex heuristics this replaced misread "I have not completed this" as completion and treated "can't tell" as success. Details in [Agent Backends](agent-backends.md#the-agent-report).
+
+**Approval is the merge button.** An approving review on a task PR, or on a promotion PR into a `pull_request_bases` branch, runs the same flow `foundry review` does from a checkout: rebase the branch onto its base and push with `--force-with-lease`, wait for the PR's checks on the rebased head, merge with the rebase method, run `integration_rebuild`, and finish the lifecycle in the same job (task → `state:done`, promotion PR → preview down). A conflict sends the task's agent to rebase and asks for a second approval once it is clean. Red or still-pending checks stop before the merge, with the reason on the PR. The job's own check (`GITHUB_JOB`) is ignored while waiting, since it is never finished while it looks at itself. `review.merge_on_approval: false` turns this off. Branch protection with *require up to date* and *linear history* is compatible and recommended; GitHub still does not run review workflows on a PR with conflicts, so approve after it is clean.
 
 **Stale PRs are handled from the merge, never from reviews.** When a PR merges into `integration`, the same job lists the other open Foundry PRs into that base, waits for GitHub to recompute mergeability, and for each one that now conflicts dispatches the workflow with a `continue` command carrying a rebase instruction. `workflow_dispatch` is used because it is one of the two event types GitHub delivers even when the job's own token caused it, and the dispatched job runs under the conflicting issue's own concurrency group. Reviews cannot do this: GitHub does not run `pull_request_review` workflows for a PR that has conflicts.
 

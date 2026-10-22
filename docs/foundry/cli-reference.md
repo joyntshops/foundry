@@ -127,7 +127,7 @@ foundry review https://...     # PR URL
 5. Run `integration_rebuild`
 6. Label the issue `state:ready-for-human-review`
 
-Automating this on PR approval is planned; today it is a manual step.
+An approving review on the PR runs exactly this; the command exists for doing it from a checkout.
 
 ### `foundry release <type>`
 

@@ -20,6 +20,7 @@ import { writeIssueFile } from './issue-file.js';
 import * as previewVerify from './preview-verify.js';
 import * as path from 'node:path';
 import * as stalePRs from './stale-prs.js';
+import * as review from './review.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
@@ -35,6 +36,7 @@ import type {
   HumanResponseEvent,
   PlanApprovedEvent,
   PRPreviewEvent,
+  PRApprovedEvent,
 } from './events.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -183,6 +185,44 @@ export class EventHandler {
         return this.handlePlanApproved(event);
       case 'pr_preview':
         return this.handlePRPreview(event);
+      case 'pr_approved':
+        return this.handlePRApproved(event);
+    }
+  }
+
+  // ── Approval → rebase, checks, merge ──────────────────────────────────
+
+  private async handlePRApproved(event: PRApprovedEvent): Promise<void> {
+    const config = this.config;
+    const label = `PR #${event.pr_number} (${event.branch} → ${event.base})`;
+    log.info(`${label} approved by ${event.reviewer}. Reviewing...`);
+
+    const outcome = await review.reviewAndMerge(config, this.repoDir, {
+      pr_number: event.pr_number, branch: event.branch, base: event.base, reviewer: event.reviewer,
+    });
+
+    if (!outcome.merged) {
+      log.warn(`${label} not merged: ${outcome.reason} (${outcome.detail}).`);
+      // A conflict is work for the agent, when there is one.
+      if ((outcome.reason === 'conflicting' || outcome.reason === 'rebase_failed') && event.task) {
+        const instruction = stalePRs.conflictInstruction(event.base, 0).replace(' (PR #0 merged)', '');
+        const dispatched = stalePRs.dispatchCommand(event.task.issue, 'continue', instruction);
+        const note = dispatched
+          ? `PR #${event.pr_number} was approved but conflicts with \`${event.base}\`. Foundry has sent the agent to rebase and resolve; approve again once it is clean.`
+          : `PR #${event.pr_number} was approved but conflicts with \`${event.base}\`. Reply with \`@foundry continue\` and:\n\n> ${instruction}`;
+        try { await github.addComment(config.repo, event.task.issue, note); } catch {}
+      }
+      return;
+    }
+
+    // Merged in this job: the pull_request.closed event may never arrive
+    // (GITHUB_TOKEN), so complete the lifecycle here. Both paths are
+    // idempotent if it does arrive.
+    if (event.task) {
+      await this.handlePRMerged({ type: 'pr_merged', task: event.task, base: event.base });
+    } else {
+      await this.handlePRPreview({ type: 'pr_preview', action: 'down', pr_number: event.pr_number, branch: event.branch, base: event.base, sha: outcome.sha });
+      await stalePRs.handleStalePRs(config, event.base, event.pr_number);
     }
   }
 
@@ -258,6 +298,7 @@ export class EventHandler {
         url,
         cwd,
         env: { FOUNDRY_BRANCH: event.branch, FOUNDRY_PR_NUMBER: String(event.pr_number) },
+        sha: event.sha, branch: event.branch, pr_number: event.pr_number,
       });
     } finally {
       try { git.removeWorktree(cwd, this.repoDir); } catch {}
@@ -869,6 +910,7 @@ export class EventHandler {
             FOUNDRY_BRANCH: current.branch,
             FOUNDRY_PR_NUMBER: String(current.pr_number ?? ''),
           },
+          sha: git.headSha(current.worktree), branch: current.branch, pr_number: current.pr_number,
         });
       }
 

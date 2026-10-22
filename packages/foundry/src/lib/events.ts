@@ -18,7 +18,8 @@ export type FoundryEvent =
   | AgentCompletedEvent
   | HumanResponseEvent
   | PlanApprovedEvent
-  | PRPreviewEvent;
+  | PRPreviewEvent
+  | PRApprovedEvent;
 
 export interface CommandEvent {
   type: 'command';
@@ -76,6 +77,17 @@ export interface PRPreviewEvent {
   branch: string;
   base: string;
   sha: string;
+}
+
+/** An approving review on a task PR or a `pull_request_bases` PR: rebase, check, merge. */
+export interface PRApprovedEvent {
+  type: 'pr_approved';
+  pr_number: number;
+  branch: string;
+  base: string;
+  reviewer: string;
+  /** Set when the PR belongs to a Foundry task. */
+  task?: TaskState;
 }
 
 export interface PlanApprovedEvent {

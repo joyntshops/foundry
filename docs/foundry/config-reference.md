@@ -109,6 +109,12 @@ preview:
   comment: true                           # Post/update PR comment (default true)
   # pull_request_bases: [main]            # also preview non-task PRs into these branches
   # ready_timeout_seconds: 300            # how long verify_preview waits for the URL to answer
+  # ready_match: "{sha}"                  # body text that must appear before the preview counts as up
+
+# ── Review (optional) ────────────────────────────────────────────────
+review:
+  merge_on_approval: true                 # approve → rebase, checks, merge (rebase method)
+  checks_timeout_seconds: 900             # how long to wait for the PR's checks after the rebase
 
 # ── GitHub Deployments (optional) ───────────────────────────────────
 
@@ -187,6 +193,7 @@ Configuration for preview/staging environments deployed per-task.
 - `down_command` — Shell command to tear down the preview environment (`provider` mode). Same template variables.
 - `comment` — Whether to post/update a PR comment with the preview URL. Default `true`.
 - `ready_timeout_seconds` — How long `verify_preview` waits for the preview URL to answer before giving up. Default `300`.
+- `ready_match` — Text the preview's body must contain before it counts as up; `{sha}`, `{branch}`, `{pr_number}` are expanded. Without it, a redeploy is verified against the previous version that is still being served. Have the page print its commit and set `"{sha}"`.
 - `pull_request_bases` — Base branches whose pull requests get a preview even when they are not Foundry tasks (up on open, redeploy on push, down on close). Typically `[main]` for the promotion PR from `integration`. See [Preview Environments](preview-environments.md#previews-for-pull-requests-that-are-not-tasks).
 
 ### `github_deployments`
@@ -196,6 +203,10 @@ Configuration for creating GitHub Deployment objects alongside preview environme
 - `environment` — GitHub environment name used for the deployment (e.g. `"preview"`, `"staging"`). Default `"preview"`.
 - `production` — Whether the environment is a production environment. Default `false`.
 - `auto_inactive` — Whether to automatically mark the deployment as `inactive` when the preview is torn down. Default `true`.
+
+### `review`
+- `merge_on_approval` — An approving review on a task PR, or a promotion PR into a `preview.pull_request_bases` branch, rebases the branch onto its base, waits for checks, merges with the rebase method, and runs `integration_rebuild`. Default `true`. See [GitHub Action](github-action.md#decisions-and-gotchas).
+- `checks_timeout_seconds` — How long to wait for the PR's checks after the rebase. Default `900`.
 
 ### `github_backend`
 Which GitHub API backend to use. Options:

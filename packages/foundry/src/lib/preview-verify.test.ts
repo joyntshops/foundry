@@ -84,7 +84,35 @@ describe('verifyPreview', () => {
     const out = await verifyPreview(cfg(['echo never'], 1), { url: 'http://127.0.0.1:1/', cwd: os.tmpdir() });
     expect(out.passed).toBe(false);
     expect(out.results[0].command).toMatch(/^wait for /);
-    expect(out.results[0].output).toMatch(/did not answer within 1s/);
+    expect(out.results[0].output).toMatch(/did not answer .*within 1s/);
+  });
+});
+
+describe('ready_match', () => {
+  it('waits until the body contains the marker, not just a 200', async () => {
+    // The page already answers 200 with the old content; the SHA never appears.
+    const r = await waitForUrl(`${base}/ok`, 150, 20, undefined, 'deadbeef');
+    expect(r.ready).toBe(false);
+    expect(r.matched).toBe(false);
+    expect(r.status).toBe(200);
+  });
+
+  it('is ready once the marker is present', async () => {
+    const r = await waitForUrl(`${base}/ok`, 1000, 20, undefined, 'Hello World');
+    expect(r).toMatchObject({ ready: true, matched: true });
+  });
+
+  it('verifyPreview expands {sha} and reports a stale page as a failed wait', async () => {
+    const c = cfg(['echo never'], 1); c.preview!.ready_match = '{sha}';
+    const out = await verifyPreview(c, { url: `${base}/ok`, cwd: os.tmpdir(), sha: 'cafebabe' });
+    expect(out.passed).toBe(false);
+    expect(out.results[0].output).toMatch(/never contained "cafebabe"/);
+  });
+
+  it('sets FOUNDRY_SHA for the commands', async () => {
+    const out = await verifyPreview(cfg(['echo "sha=$FOUNDRY_SHA"']), { url: `${base}/ok`, cwd: os.tmpdir(), sha: 'cafebabe' });
+    expect(out.passed).toBe(true);
+    expect(out.results[0].output).toContain('sha=cafebabe');
   });
 });
 

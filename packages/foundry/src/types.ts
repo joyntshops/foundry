@@ -81,6 +81,19 @@ export interface FoundryConfig {
     pull_request_bases?: string[];
     /** How long to wait for the preview URL to answer before verify_preview runs. Default 300. */
     ready_timeout_seconds?: number;
+    /**
+     * Text the preview's body must contain before it counts as up, with
+     * {sha}, {branch}, {pr_number} expanded. Without it a redeploy is
+     * verified against the previous version still being served.
+     */
+    ready_match?: string;
+  };
+
+  review?: {
+    /** On an approving review: rebase onto the base, wait for checks, merge (rebase method). Default true. */
+    merge_on_approval?: boolean;
+    /** How long to wait for the PR's checks before giving up. Default 900. */
+    checks_timeout_seconds?: number;
   };
 
   github_deployments?: {

@@ -150,6 +150,10 @@ export function createReactionForIssueComment(repo: string, commentId: number, r
   return _client.createReactionForIssueComment(repo, commentId, reaction);
 }
 
+export function listCheckRuns(repo: string, sha: string): Promise<Array<{ name: string; status: string; conclusion: string | null }>> {
+  return _client.listCheckRuns(repo, sha);
+}
+
 export function createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
   return _client.createCheckRun(repo, opts);
 }

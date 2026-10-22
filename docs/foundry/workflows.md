@@ -12,7 +12,7 @@ Everything on this page is driven from GitHub: labels start work, comments steer
 5. Foundry verifies (lint/build/test)
 6. PR opened → integration
 7. Human reviews PR
-8. Approve and merge the PR into integration (foundry review <pr> from a runner rebases first)
+8. Approve the PR: Foundry rebases it onto integration, waits for checks, and merges
 9. PR integration → test (manual)
 10. PR integration → main (manual)
 ```
@@ -116,7 +116,7 @@ Two ways to send the agent back to work on a PR:
 
 ## Review Flow
 
-`foundry review` is a CLI command run from a checkout with the `integration` branch available. Triggering it automatically on PR approval is planned.
+Approving the PR on GitHub runs this flow automatically (`review.merge_on_approval`, on by default). `foundry review` is the same code from a checkout.
 
 ```bash
 foundry review 42

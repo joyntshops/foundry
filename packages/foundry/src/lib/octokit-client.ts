@@ -124,6 +124,7 @@ type OctokitLike = {
     checks: {
       create(p: any): Promise<any>;
       update(p: any): Promise<any>;
+      listForRef(p: any): Promise<any>;
     };
     repos: {
       createDeployment(p: any): Promise<any>;
@@ -504,6 +505,13 @@ export class OctokitClient implements GitHubClient {
   }
 
   // ── Check Runs ─────────────────────────────────────────────────────────
+
+  async listCheckRuns(repo: string, sha: string): Promise<Array<{ name: string; status: string; conclusion: string | null }>> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    const { data } = await ok.rest.checks.listForRef({ owner, repo: repoName, ref: sha, per_page: 100 });
+    return data.check_runs.map((c: any) => ({ name: c.name, status: c.status, conclusion: c.conclusion ?? null }));
+  }
 
   async createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
     const ok = await this.octokit();
