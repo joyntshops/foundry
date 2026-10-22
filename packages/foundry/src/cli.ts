@@ -87,6 +87,26 @@ program
     await runReport(opts);
   });
 
+program
+  .command('cancelled')
+  .description('After a cancelled job: mark the task failed so the issue is not left in-progress (run from an `if: cancelled()` step)')
+  .option('--event-name <name>', 'GitHub event name (default: $GITHUB_EVENT_NAME)')
+  .option('--event-path <path>', 'Path to the event JSON payload (default: $GITHUB_EVENT_PATH)')
+  .action(async (opts) => {
+    const { runCancelled } = await import('./commands/cancelled.js');
+    await runCancelled(opts);
+  });
+
+program
+  .command('reconcile')
+  .description('Mark in-progress issues with no live run as failed (also runs on the schedule trigger)')
+  .action(async () => {
+    const { loadConfig, getConfigDir } = await import('./config.js');
+    const { reconcile } = await import('./lib/reconcile.js');
+    const changed = await reconcile(loadConfig(), getConfigDir());
+    console.log(`${changed.length} issue(s) marked failed.`);
+  });
+
 // ── Operate on a task from any checkout ───────────────────────────────
 
 program

@@ -46,6 +46,7 @@ export function createCommandBackend(name: string, def: AgentBackendDef & { comm
       const env: Record<string, string> = {
         FOUNDRY_AGENT_BRIEF: AGENT_BRIEF,
         FOUNDRY_RESUME_CONTEXT: '',
+        FOUNDRY_MAX_TURNS: '150',
         FOUNDRY_ISSUE_NUMBER: String(params.issue_number),
         FOUNDRY_ISSUE_URL: params.issue_url,
         FOUNDRY_ISSUE_TITLE: params.title,
@@ -86,6 +87,6 @@ export const AGENT_BRIEF = [
 
 export const CLAUDE_CODE_PRESET: AgentBackendDef & { command: string } = {
   type: 'command',
-  command: 'claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. Read the issue first: its title and body are in the file $FOUNDRY_ISSUE_FILE (the live issue with comments is at {issue_url} when you have network access). $FOUNDRY_RESUME_CONTEXT" --append-system-prompt "$FOUNDRY_AGENT_BRIEF" --json-schema "$FOUNDRY_REPORT_SCHEMA" --disallowedTools AskUserQuestion --verbose --output-format stream-json < /dev/null 2>&1 | tee {log_dir}/agent.log',
+  command: 'claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. Read the issue first: its title and body are in the file $FOUNDRY_ISSUE_FILE (the live issue with comments is at {issue_url} when you have network access). $FOUNDRY_RESUME_CONTEXT" --append-system-prompt "$FOUNDRY_AGENT_BRIEF" --max-turns "$FOUNDRY_MAX_TURNS" --json-schema "$FOUNDRY_REPORT_SCHEMA" --disallowedTools AskUserQuestion --verbose --output-format stream-json < /dev/null 2>&1 | tee {log_dir}/agent.log',
   env: {},
 };

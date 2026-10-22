@@ -26,6 +26,12 @@ inputs:
     description: 'Install the Claude Code CLI on the runner before running.'
     required: false
     default: 'true'
+  claude-code-version:
+    description: >-
+      Claude Code CLI version to install. Pinned so a CLI release cannot change
+      Foundry's behaviour under you; pass `latest` to opt out.
+    required: false
+    default: '2.1.251'
   node-version:
     description: 'Node.js version for Foundry itself.'
     required: false
@@ -71,7 +77,7 @@ runs:
     - name: Install Claude Code
       if: inputs.install-claude-code == 'true'
       shell: bash
-      run: npm install -g @anthropic-ai/claude-code
+      run: npm install -g "@anthropic-ai/claude-code@${{ inputs.claude-code-version }}"
 
     - name: Configure git identity
       shell: bash
@@ -90,3 +96,14 @@ runs:
         FOUNDRY_GITHUB_BACKEND: octokit
         CI: '1'
       run: node "$GITHUB_ACTION_PATH/packages/foundry/dist/cli.js" action
+
+    # The job was cancelled (Actions UI, or `@foundry stop` cancelling it via
+    # the concurrency group). The agent is gone; make sure the issue says so.
+    - name: Clean up after cancellation
+      if: cancelled()
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        FOUNDRY_GITHUB_BACKEND: octokit
+      run: node "$GITHUB_ACTION_PATH/packages/foundry/dist/cli.js" cancelled

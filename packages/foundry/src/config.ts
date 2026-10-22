@@ -28,6 +28,8 @@ const DEFAULTS: FoundryConfig = {
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
   max_input_rounds: 3,
+  agent_max_turns: 150,
+  reconcile_stale_minutes: 120,
   verify: [],
   verify_preview: [],
   integration_rebuild: '',

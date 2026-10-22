@@ -123,6 +123,31 @@ describe('determineOutcome', () => {
     expect(o.final_message).toMatch(/Finished!/);
   });
 
+  it('a non-zero exit with no report names the exit code', () => {
+    commit();
+    fs.writeFileSync(log, '');
+    const o = determineOutcome(log, repo, 'base', { exitCode: 137 });
+    expect(o.type).toBe('errored');
+    expect(o.reason).toBe('The agent process exited with code 137 and submitted no report.');
+  });
+
+  it('a signal death with no report says so', () => {
+    fs.writeFileSync(log, '');
+    expect(determineOutcome(log, repo, 'base', { exitCode: null }).reason).toMatch(/killed by a signal/);
+  });
+
+  it('a report still wins over a non-zero exit code', () => {
+    commit();
+    writeLog([init, result({ structured_output: { status: 'done', summary: 'ok' } })]);
+    expect(determineOutcome(log, repo, 'base', { exitCode: 1 }).type).toBe('completed');
+  });
+
+  it('carries cost, turns, and duration from the result event', () => {
+    commit();
+    writeLog([init, result({ structured_output: { status: 'done', summary: 'ok' }, total_cost_usd: 0.4321, num_turns: 12, duration_ms: 65000 })]);
+    expect(determineOutcome(log, repo, 'base').usage).toEqual({ cost_usd: 0.4321, turns: 12, duration_ms: 65000 });
+  });
+
   it('invalid report → errored with the validation error', () => {
     writeLog([init, result({ structured_output: { status: 'maybe', summary: 'x' } })]);
     expect(determineOutcome(log, repo, 'base').reason).toMatch(/status must be one of/);
