@@ -2,11 +2,11 @@
 
 ## Moving Integration Branch
 
-Foundry uses a **moving `integration` branch** as the merge target for all feature PRs. This branch is the staging area for all in-progress work.
+Foundry uses a **moving integration branch** as the merge target for all feature PRs. This branch is the staging area for all in-progress work. Its name, and the production branch's, come from `branches:` in `.joynt-foundry.yml` (defaults `integration` and `main`); a repo keeps whatever names its deploy tooling already uses. On this page `integration` and `main` mean those configured branches.
 
 ```
 feature/42-add-login ──┐
-feature/57-fix-nav  ───┤──► integration ──► test ──► main
+feature/57-fix-nav  ───┤──► integration ──► main
 feature/63-add-api  ───┘
 ```
 
@@ -15,11 +15,14 @@ feature/63-add-api  ───┘
 | Branch | Purpose | Who merges |
 |--------|---------|------------|
 | `feature/*` | Individual task branches | Foundry (via PR) |
-| `integration` | Collects all features | Human approval, then merge. `foundry review <pr>` from a checkout rebases first; automating it on approval is planned. |
-| `test` | Staging/QA | Manual PR from integration |
-| `main` | Production | Manual PR from integration |
+| `integration` | Collects all features | A human approves the PR; Foundry rebases it onto integration, waits for checks, and merges (`review.merge_on_approval`). `foundry review <pr>` does the same from a checkout. |
+| `main` | Production | Manual PR from integration. With `preview.pull_request_bases: [main]` the promotion PR gets its own preview and the same approve-to-merge flow. |
+
+Some repos keep a staging branch between the two (core-stack's `test`, for example). Foundry does not manage it; it is a manual PR from integration like `main` is.
 
 ### Setup
+
+`foundry init` creates the integration branch if it is missing. To use an existing branch instead, name it in config and skip this:
 
 ```bash
 git checkout -b integration
