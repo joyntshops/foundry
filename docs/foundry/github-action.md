@@ -7,7 +7,7 @@ This page is written for whoever picks this up next, human or agent. It records 
 ## What a run looks like
 
 ```
-issue labeled state:ready
+human comments "@foundry go" on an issue
   → job starts
   → foundry action: claim (labels + structured claim comment)
   → create worktree from origin/integration
@@ -23,10 +23,9 @@ A human then acts on GitHub. Each action is another event, another job:
 
 | GitHub event | Condition | Foundry transition |
 |---|---|---|
-| `issues.labeled` | label is `state:ready` | claim + run agent |
-| `issues.labeled` | label is `state:claim` | claim only, no agent |
-| `issue_comment.created` | body starts with `@foundry <cmd>` | `continue`, `plan`, `start`, `restart`, `replan`, `stop` |
-| `issue_comment.created` | any human comment while the issue is `state:waiting-for-input` or `state:plan-review` | the answer; agent relaunched with it |
+| `issue_comment.created` | body starts with `@foundry go`, by a user with write access, on an issue (not a PR) | start the issue, or proceed from the branch with the thread |
+| `issue_comment.created` | `@foundry restart` | discard the branch, start over in the same job |
+| `issue_comment.created` | `@foundry stop` | cancel the running job (concurrency), keep the branch, mark failed |
 | `pull_request_review.submitted` | state is `changes_requested` | feed review back to agent |
 | `pull_request_review.submitted` | state is `approved`, on a task PR or a `pull_request_bases` PR | rebase onto the base, wait for checks, merge (rebase method), `integration_rebuild`, complete the task or tear the promotion preview down |
 | `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down; then check sibling PRs for conflicts |
@@ -39,7 +38,6 @@ A human then acts on GitHub. Each action is another event, another job:
 ```yaml
 name: Foundry
 on:
-  issues:              { types: [labeled] }
   issue_comment:       { types: [created] }
   pull_request:        { types: [opened, synchronize, reopened, closed] }
   pull_request_review: { types: [submitted] }
@@ -62,15 +60,15 @@ permissions:
 
 jobs:
   foundry:
+    # Comments: only `@foundry` commands, only on issues (not PRs), only from
+    # people associated with the repo. The job re-checks the commenter's
+    # permission (write or admin) before acting.
     if: >-
-      (github.event_name == 'issues' &&
-        (github.event.label.name == 'state:ready' || github.event.label.name == 'state:claim')) ||
       (github.event_name == 'issue_comment' &&
         !endsWith(github.event.comment.user.login, '[bot]') &&
         !github.event.issue.pull_request &&
-        (contains(github.event.comment.body, '@foundry') ||
-         contains(github.event.issue.labels.*.name, 'state:waiting-for-input') ||
-         contains(github.event.issue.labels.*.name, 'state:plan-review'))) ||
+        startsWith(github.event.comment.body, '@foundry') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request' &&
         (github.event.pull_request.merged == true ||
          github.event.pull_request.base.ref == 'main')) ||
@@ -132,7 +130,7 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 ## Decisions and gotchas
 
-**Nothing Foundry does may depend on triggering another run.** Events caused by the job's built-in token do not start workflow runs, with two exceptions: `workflow_dispatch` and `repository_dispatch`. Preview up/down use `gh workflow run`, which is `workflow_dispatch`, so they are fine. Merges are done by humans, so `pull_request.closed` fires. The only paths that used to rely on a follow-up run were `@foundry restart` and `@foundry start`, which re-add `state:ready`; `foundry action` now detects a re-queued issue and continues straight into `issue_ready` in the same job. Design any new transition the same way: finish it in-job, or make it a dispatch.
+**Nothing Foundry does may depend on triggering another run.** Events caused by the job's built-in token do not start workflow runs, with two exceptions: `workflow_dispatch` and `repository_dispatch`. Preview up/down use `gh workflow run`, which is `workflow_dispatch`, so they are fine. Merges are done by humans, so `pull_request.closed` fires. `@foundry restart` discards the task and starts it again inside the same job rather than putting a label back and hoping. Design any new transition the same way: finish it in-job, or make it a dispatch.
 
 **No branching on prose.** What happens after the agent exits is decided from facts Foundry can check (run error, commits) and the agent's typed report (`done`, `needs_input`, `plan_ready`, `blocked`), submitted as Claude Code structured output or via `foundry report`. Contradictions and missing reports fail closed. The regex heuristics this replaced misread "I have not completed this" as completion and treated "can't tell" as success. Details in [Agent Backends](agent-backends.md#the-agent-report).
 
@@ -150,7 +148,7 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **Task state is rebuilt from GitHub every run.** The file store under `~/.joynt-foundry/` is empty in every fresh job. `lib/task-recovery.ts` reconstructs a `TaskState` from the latest claim comment (`<!-- foundry-claim-block -->`), the issue's current `state:*` label, the PR for the branch, and the preview comment (`<!-- foundry-preview -->`). This is why the single-state-label invariant (`setStateLabel`) is load-bearing: recovery reads the label to learn the status.
 
-**There is no session resume; there is a hand-off.** `claude --resume` would need the session file from the job that asked, and that job is gone. Instead: when a job ends with the agent waiting (question or plan), Foundry commits anything uncommitted and pushes the branch. When the human answers, the next job recreates the worktree from that branch and relaunches the agent with `FOUNDRY_RESUME_CONTEXT` set to "you stopped because X; the human replied Y; continue from the branch, do not start over". The preset's prompt includes that variable. A plain reply is enough; `@foundry continue` is only needed to nudge a task that is not waiting.
+**There is no session resume; there is a hand-off.** `claude --resume` would need the session file from the job that asked, and that job is gone. Instead: when a job ends with the agent waiting (question or plan), Foundry commits anything uncommitted and pushes the branch. When the human answers, the next job recreates the worktree from that branch and relaunches the agent with `FOUNDRY_RESUME_CONTEXT` set to "you stopped because X; the human replied Y; continue from the branch, do not start over". The preset's prompt includes that variable. The human replies with `@foundry go <answer>`; a plain reply is context for the next launch and starts nothing.
 
 **Stopping a run.** `@foundry stop` works: the template sets `cancel-in-progress` for that comment, so GitHub cancels the issue's running job, the action's `if: cancelled()` step marks the task failed, and the stop command's own job tears the preview down. Cancel from the Actions UI has the same effect through the same cleanup step. Either way the issue never stays at `state:in-progress` with nothing running.
 
@@ -160,7 +158,9 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **The Claude Code version is pinned** in `action.yml` (`claude-code-version`). Four CLI behaviours surprised us on the first day; a release should not change Foundry under you. Bump deliberately, or pass `latest`.
 
-**The `if:` filter matters for cost.** Every `issues.labeled` event, including the ones Foundry itself causes, would otherwise start a runner that does ~40 seconds of setup and exits. The filter in the template starts a job only for `state:ready`, `state:claim`, `@foundry` comments from humans, merged PRs, and change-request reviews.
+**The `if:` filter matters for cost and for safety.** Every `issue_comment` event, including Foundry's own status comments, would otherwise start a runner that does ~40 seconds of setup and exits. The filter in the template starts a job only for `@foundry` comments on issues from `OWNER`/`MEMBER`/`COLLABORATOR` authors, PR events on listed bases or merges, reviews, dispatches, and the schedule. `author_association` is on the comment payload, so it costs nothing to check; it is coarse (a `MEMBER` may have read access only), which is why the job then asks the API for the commenter's actual permission and requires write.
+
+**Who may start a run is Foundry's to decide, not GitHub's.** A GitHub App's permissions govern what the App may do to the repo, not who may address it; the event that starts a job is a comment, and anyone who can see the issue can comment. There is no native "only these users may invoke this App" setting. Interaction limits and conversation locks exist but are blunt. The two gates above are the mechanism.
 
 **Stacked PRs only retarget if the base branch is deleted.** Learned the hard way: a PR stacked on a feature branch merged into that branch instead of `main` because the feature branch was kept at merge time. Merge with "Delete branch" or expect to open a follow-up PR.
 
@@ -168,7 +168,7 @@ Symptoms and fixes from real runs are collected in [Troubleshooting](troubleshoo
 
 ## Known limitations (as of first version)
 
-- `@foundry` commands left as **PR comments** are not yet resolved to their issue. Comment on the issue.
+- `@foundry` commands left as **PR comments** are not yet resolved to their issue and are ignored. Comment on the issue.
 - No verify-to-agent retry loop yet: a verification failure posts the output and marks the task failed.
 - No `if: cancelled()` label cleanup step yet.
 - `deployment_id` is not recovered, so preview-down under the action cannot mark a GitHub Deployment inactive; the target repo's teardown workflow should do that itself (the demo's does).

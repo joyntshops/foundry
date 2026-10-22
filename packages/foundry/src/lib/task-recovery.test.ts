@@ -65,7 +65,7 @@ describe('issueNumberFromPayload', () => {
   });
 
   it('reads the issue from workflow_dispatch inputs', () => {
-    expect(issueNumberFromPayload({ inputs: { issue: '41', command: 'continue' } }, config)).toBe(41);
+    expect(issueNumberFromPayload({ inputs: { issue: '41', command: 'go' } }, config)).toBe(41);
   });
 
   it('returns null when nothing identifies an issue', () => {
@@ -80,13 +80,12 @@ describe('statusFromLabels', () => {
     expect(statusFromLabels(config, ['state:waiting-for-input'])).toBe('waiting-for-input');
     expect(statusFromLabels(config, ['state:plan-review'])).toBe('plan-review');
     expect(statusFromLabels(config, ['state:in-progress'])).toBe('agent-running');
-    expect(statusFromLabels(config, ['state:claim'])).toBe('claimed');
     expect(statusFromLabels(config, ['state:failed'])).toBe('failed');
     expect(statusFromLabels(config, ['state:done'])).toBe('done');
   });
 
   it('returns null for untracked issues', () => {
-    expect(statusFromLabels(config, ['state:ready', 'mode:plan'])).toBeNull();
+    expect(statusFromLabels(config, ['mode:plan'])).toBeNull();
     expect(statusFromLabels(config, [])).toBeNull();
   });
 });
@@ -139,6 +138,13 @@ describe('recoverTask', () => {
     expect(task!.preview_url).toBe('https://pr-9.example.test');
     expect(task!.worktree).toBe('/w/wts/42-add-login');
     expect(task!.claimed_at).toBe('2026-09-02T10:00:00Z');
+  });
+
+  it('ignores a closed PR on the branch (left by a restart)', async () => {
+    mock.comments = [{ id: 1, body: CLAIM, user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:00:00.000Z' }];
+    mock.prStatus = { state: 'CLOSED', url: 'https://github.com/o/r/pull/8' };
+    const task = await recoverTask(config, '/w', 42);
+    expect(task!.pr_url).toBeUndefined();
   });
 
   it('uses the most recent claim when the issue was re-claimed', async () => {

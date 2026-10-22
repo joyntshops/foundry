@@ -70,11 +70,11 @@ export async function reconcile(config: FoundryConfig, repoDir: string, now: Dat
       if (task) {
         await statusComment.updateStatusComment(config.repo, s.issue, {
           task: { ...task, status: 'failed' },
-          message: `No Foundry job has reported on this issue for ${s.ageMinutes ?? 'an unknown number of'} minutes; the run that claimed it is gone (cancelled, timed out, or the runner died).\n\n\`@foundry restart\` to retry from scratch · \`@foundry start\` to re-queue`,
+          message: `No Foundry job has reported on this issue for ${s.ageMinutes ?? 'an unknown number of'} minutes; the run that claimed it is gone (cancelled, timed out, or the runner died).\n\n\`@foundry go\` to continue from the branch · \`@foundry restart\` to start over`,
           historyEntry: 'Reconciled: no live run',
         });
       } else {
-        await github.addComment(config.repo, s.issue, 'Foundry found this issue marked in-progress with no live run and no claim record. Marked failed; re-add `state:ready` to try again.');
+        await github.addComment(config.repo, s.issue, 'Foundry found this issue marked in-progress with no live run and no claim record. Marked failed; comment `@foundry go` to try again.');
       }
     } catch (err: any) {
       log.warn(`Reconcile: could not update #${s.issue}: ${err.message}`);

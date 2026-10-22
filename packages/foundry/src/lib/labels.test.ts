@@ -24,10 +24,10 @@ function issueWith(labels: string[]) {
 describe('allStateLabels', () => {
   it('returns every configured state label exactly once', () => {
     const labels = allStateLabels(config);
-    expect(labels).toHaveLength(8);
-    expect(new Set(labels).size).toBe(8);
-    expect(labels).toContain('state:ready');
-    expect(labels).toContain('state:claim');
+    expect(labels).toHaveLength(6);
+    expect(new Set(labels).size).toBe(6);
+    expect(labels).toContain('state:in-progress');
+    expect(labels).toContain('state:done');
   });
 });
 
@@ -59,12 +59,12 @@ describe('setStateLabel', () => {
   });
 
   it('never touches mode or agent labels', async () => {
-    mock.issue = issueWith(['state:ready', 'mode:plan', 'agent:claude']);
+    mock.issue = issueWith(['state:failed', 'mode:plan', 'agent:claude']);
 
     await setStateLabel(config, 1, 'in_progress');
 
     const removed = mock.getCalls('removeLabel').map(c => c.args[2]);
-    expect(removed).toEqual(['state:ready']);
+    expect(removed).toEqual(['state:failed']);
   });
 
   it('is a no-op when the target is already the only state label', async () => {
@@ -87,17 +87,17 @@ describe('setStateLabel', () => {
   });
 
   it('skips the issue fetch when currentLabels are provided', async () => {
-    await setStateLabel(config, 1, 'in_progress', ['state:ready']);
+    await setStateLabel(config, 1, 'in_progress', ['state:failed']);
 
     expect(mock.getCalls('getIssue')).toHaveLength(0);
-    expect(mock.getCalls('removeLabel').map(c => c.args[2])).toEqual(['state:ready']);
+    expect(mock.getCalls('removeLabel').map(c => c.args[2])).toEqual(['state:failed']);
     expect(mock.getCalls('addLabel').map(c => c.args[2])).toEqual(['state:in-progress']);
   });
 
   it('honours custom label names from config', async () => {
     const custom: FoundryConfig = {
       ...config,
-      labels: { ...config.labels, ready: 'todo', in_progress: 'doing' },
+      labels: { ...config.labels, failed: 'todo', in_progress: 'doing' },
     };
     mock.issue = issueWith(['todo']);
 

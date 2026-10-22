@@ -2,13 +2,18 @@
 
 Everything below was hit on real runs. Fixes are in the version noted where relevant.
 
-## Nothing happened after I added `state:ready`
+## Nothing happened after I commented `@foundry go`
 
-1. The workflow must be on the **default branch**. `issues` and `issue_comment` events only trigger workflows from there.
-2. The label must be exactly what `.joynt-foundry.yml` says under `labels.ready` (default `state:ready`).
-3. Check Actions → Foundry. A run marked **skipped** means the job's `if:` filtered the event; that is expected for labels Foundry adds itself.
-4. `.joynt-foundry.yml` must exist at the repo root on that branch.
-5. Labels added by the CLI with your own token (for example after `foundry reset`) do fire `issues.labeled`, since it is your token, not the job's. Labels added *inside* a job with the built-in token do not; that is why `restart` and `start` continue in the same job instead.
+1. The workflow must be on the **default branch**. `issue_comment` events only trigger workflows from there.
+2. The comment must *start* with `@foundry go` (or whatever `comment_triggers.go` says). A mention mid-sentence is just text.
+3. You must have **write** access to the repository. The workflow `if:` admits only `OWNER`/`MEMBER`/`COLLABORATOR` authors, and the job then checks the actual permission and logs `write access ... is required` when it refuses.
+4. Check Actions → Foundry. A run marked **skipped** means the job's `if:` filtered the event; that is expected for Foundry's own comments.
+5. `.joynt-foundry.yml` must exist at the repo root on that branch.
+6. Comments on the **PR** are ignored; comment on the issue.
+
+## I added `state:ready` (or another label) and nothing happened
+
+Labels are status, not commands. Only Foundry sets `state:*`. Comment `@foundry go`.
 
 ## `Some specified paths were not resolved, unable to cache dependencies`
 
@@ -49,17 +54,17 @@ Foundry decides what happens next from a typed report, never from the agent's pr
 
 ## `The agent reported the task done, but the branch has no commits`
 
-Exactly that: the report said `done` and git disagrees. Usually the agent edited files and never committed. `@foundry restart`, and say "commit your changes" in the issue if it recurs.
+Exactly that: the report said `done` and git disagrees. Usually the agent edited files and never committed. `@foundry go` with "commit your changes" (the branch, if anything was committed, is kept), or `@foundry restart`.
 
 ## Verification failed
 
-Foundry labels the task `state:failed` and posts each command's result and the failing output on the issue. Fix the cause (often the verify command itself, or a dependency the runner image lacks) and `@foundry restart`, or check the branch out locally and run the commands by hand. A verify-to-agent retry loop is planned; today a failure stops the task.
+Foundry labels the task `state:failed` and posts each command's result and the failing output on the issue. The branch is pushed. Fix the cause (often the verify command itself, or a dependency the runner image lacks) and `@foundry go`, or check the branch out locally and run the commands by hand. A verify-to-agent retry loop is planned; today a failure stops the task.
 
 ## A PR went stale after another one merged
 
 Foundry handles this: after any merge into `integration`, it checks the other open Foundry PRs and, for each that now conflicts, posts a note on the issue and dispatches the agent with a rebase instruction. If the note says Foundry *could not* start the agent, the workflow is missing the `workflow_dispatch` trigger or `actions: write`; add them from the template, then reply with the quoted instruction. Requesting changes on the conflicting PR does nothing, because GitHub runs no workflow for a PR with conflicts.
 
-## `@foundry continue` on a PR comment did nothing
+## `@foundry go` on a PR comment did nothing
 
 Not yet supported: a comment on the PR carries the PR number, not the issue number. Comment on the issue instead.
 
@@ -69,11 +74,11 @@ The workflow must set `cancel-in-progress` for stop comments (template: `cancel-
 
 ## An issue is stuck at `state:in-progress` with no run
 
-The job died without cleanup (runner failure, `timeout-minutes`, or an older template without the cancel step). The `schedule` trigger runs `foundry reconcile` every 30 minutes and marks such issues failed once the status comment is older than `reconcile_stale_minutes`. To do it now from a checkout: `foundry reconcile`. Then `@foundry restart` or `@foundry start`.
+The job died without cleanup (runner failure, `timeout-minutes`, or an older template without the cancel step). The `schedule` trigger runs `foundry reconcile` every 30 minutes and marks such issues failed once the status comment is older than `reconcile_stale_minutes`. To do it now from a checkout: `foundry reconcile`. Then `@foundry go` to continue from the branch, or `@foundry restart` to start over.
 
 ## I answered the agent's question and nothing happened
 
-A plain reply only starts a job while the issue is labeled `state:waiting-for-input` or `state:plan-review`, and only on the **issue**, not the PR. Check the label; if the task is in another state, use `@foundry continue <answer>`. The workflow template's `if:` must include the two label checks (older copies only admitted `@foundry` comments).
+A plain reply starts nothing; it is kept as context for the next launch. Answer with `@foundry go <answer>` on the **issue** (not the PR). Older workflow templates admitted plain replies on waiting issues; the current one does not.
 
 ## The relaunched agent lost its earlier work
 
@@ -93,7 +98,7 @@ Point the workflow at a branch: `uses: joyntshops/foundry@your-branch`. Composit
 
 ```bash
 foundry reset 42            # dry run: shows what it would remove
-foundry reset 42 --force    # preview down, close PR, delete branch, state:ready
+foundry reset 42 --force    # preview down, close PR, delete branch, clear the state label
 ```
 
 Works from any checkout; the task is rebuilt from the issue's claim comment.

@@ -71,7 +71,7 @@ describe('currentWorkflowFile', () => {
 
 describe('dispatchCommand', () => {
   it('returns false and does not shell out when there is no workflow to dispatch', () => {
-    expect(dispatchCommand(41, 'continue', 'x')).toBe(false);
+    expect(dispatchCommand(41, 'go', 'x')).toBe(false);
   });
 });
 
@@ -84,7 +84,7 @@ describe('handleStalePRs', () => {
     const note = mock.getCalls('addComment')[0];
     expect(note.args[1]).toBe(41);
     expect(note.args[2]).toContain('PR #11 now conflicts');
-    expect(note.args[2]).toContain('@foundry continue');
+    expect(note.args[2]).toContain('@foundry go');
   });
 
   it('is quiet when nothing conflicts', async () => {

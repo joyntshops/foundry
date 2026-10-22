@@ -11,15 +11,13 @@ repo: "org/repo"                        # GitHub owner/repo
 
 # ── Labels ───────────────────────────────────────────────────────────
 
-labels:
-  ready: "state:ready"                  # Task eligible for claiming
-  in_progress: "state:in-progress"      # Task claimed by a runner
+labels:                                 # Foundry's status display; only Foundry sets these
+  in_progress: "state:in-progress"      # Agent running
   done: "state:done"                    # Task completed
   ready_for_review: "state:ready-for-human-review"  # Awaiting human review
   waiting_for_input: "state:waiting-for-input"  # Agent needs human input
   failed: "state:failed"                # Task failed
   plan_review: "state:plan-review"       # Agent produced a plan, awaiting approval
-  claim: "state:claim"                  # Claim-only: set up worktree without starting agent
 
 # ── Mode Labels (optional) ──────────────────────────────────────────
 
@@ -56,14 +54,10 @@ verify_preview:
 
 # ── Comment Triggers ─────────────────────────────────────────────────
 
-comment_triggers:
-  replan: "@foundry replan"             # Kill agent, re-read issue, relaunch
-  restart: "@foundry restart"           # Discard work, re-queue as ready
-  stop: "@foundry stop"                 # Kill agent, mark failed
-  continue: "@foundry continue"         # Resume agent with message
-  plan: "@foundry plan"                 # Relaunch in plan mode
-  start: "@foundry start"              # Re-queue a failed/stopped task
-  claim: "@foundry claim"              # Claim issue without starting agent (comment trigger)
+comment_triggers:                       # the only comments that start or stop work
+  go: "@foundry go"                     # start, or proceed from the branch with the thread
+  restart: "@foundry restart"           # discard the branch, start over
+  stop: "@foundry stop"                 # stop the agent, keep the branch
 
 # ── Versioning ───────────────────────────────────────────────────────
 
@@ -131,7 +125,7 @@ github_deployments:
 GitHub repository in `owner/repo` format.
 
 ### `labels`
-Label names used by Foundry to track task state. Customize if your repo uses different label conventions. Includes `plan_review` for the plan-review workflow and `claim` for the claim-only workflow (claim without starting an agent).
+Label names Foundry uses to show task state. Customize if your repo uses different label conventions. Only Foundry adds or removes them; a human adding one changes nothing.
 
 ### `mode_labels`
 Label names that control agent permission mode. Apply one of these labels to an issue to override the default auto mode. `plan` makes the agent produce a plan for approval before implementing. `default` uses Claude Code's default permission mode (asks before tool use).
@@ -158,10 +152,10 @@ Ordered list of shell commands run in the task worktree before opening a PR. Fai
 Shell command run after merging into integration (via `foundry review`).
 
 ### `verify_preview`
-Ordered list of shell commands run **against the live preview** after it is up, in the branch's worktree, with `FOUNDRY_PREVIEW_URL` in the environment (plus `FOUNDRY_BRANCH`, `FOUNDRY_PR_NUMBER`, `FOUNDRY_ISSUE`). Fail-fast. Foundry first waits for the URL to answer (`preview.ready_timeout_seconds`). A task is not marked `state:ready-for-human-review` until these pass; a failure fails the task with the output on the issue. Also runs for non-task PRs previewed via `pull_request_bases`, with the result posted on the PR. Default `[]`. See [Preview Environments](preview-environments.md#verifying-against-the-preview).
+Ordered list of shell commands run **against the live preview** after it is up, in the branch's worktree, with `FOUNDRY_PREVIEW_URL` in the environment (plus `FOUNDRY_BRANCH`, `FOUNDRY_PR_NUMBER`, `FOUNDRY_ISSUE`). Fail-fast. Foundry first waits for the URL to answer (`preview.ready_timeout_seconds`). A task is not marked `state:ready-for-human-review` until these pass; a failure fails the task with the output on the issue, and the branch is pushed so `@foundry go` can send the agent back to it. Also runs for non-task PRs previewed via `pull_request_bases`, with the result posted on the PR. Default `[]`. See [Preview Environments](preview-environments.md#verifying-against-the-preview).
 
 ### `comment_triggers`
-Strings matched in issue comments to trigger agent commands; each comment is an `issue_comment` event and a job. Commands that accept a message (`continue`, `start`, `plan`) match as a prefix — everything after the trigger string becomes the message. See [Controlling Foundry](workflows.md#controlling-foundry) for the full command reference.
+The three strings that, at the start of an issue comment, start or stop work. `go` takes a message: everything after the trigger, same line or following lines. `restart` and `stop` must be the first line on their own. Every other comment is context for the agent's next launch and starts nothing. Only commenters with write access to the repo are obeyed. See [The three commands](workflows.md#the-three-commands).
 
 ### `version_sources`
 **Ordered** list of version file paths (relative to repo root). All are bumped to the same version on `foundry release`. The first entry is the primary version source. Supported file types: `package.json`, `Cargo.toml`, `pyproject.toml`.

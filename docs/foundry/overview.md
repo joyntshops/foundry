@@ -9,7 +9,7 @@ Foundry is a GitHub Action. It is not a coding agent, and it is not a server.
 | Concept | Description |
 |---------|-------------|
 | **Task** | A GitHub Issue that Foundry has claimed. Its lifecycle is a `state:*` label; exactly one is present at any time. |
-| **Event** | Something that moves a task: a label added, an `@foundry` comment, a review requesting changes, a PR merged. Each one starts a job. |
+| **Event** | Something that moves a task: an `@foundry go|restart|stop` comment, a review, a PR merged. Each one starts a job. Labels and plain comments are inputs the agent reads, never triggers. |
 | **Job** | One run of the Action for one event. It performs one transition and exits. Nothing persists between jobs except what is on GitHub. |
 | **Agent Backend** | The CLI command that does the coding. Pluggable; selected by config or by an `agent:*` label. It runs as a subprocess of the job. |
 | **Verification** | Lint, typecheck, build, and tests run in the worktree. No PR is opened until they pass. |
@@ -18,14 +18,14 @@ Foundry is a GitHub Action. It is not a coding agent, and it is not a server.
 
 ## What Foundry does
 
-1. **Claims** a `state:ready` issue: label swap plus a structured claim comment that doubles as the task's durable record.
+1. **Claims** the issue when a human comments `@foundry go`: `state:in-progress` plus a structured claim comment that doubles as the task's durable record.
 2. **Isolates** the work in a git worktree on a feature branch cut from `origin/integration`.
-3. **Launches** the configured agent with the issue as its brief.
+3. **Launches** the configured agent with the issue and every human comment on it as its brief.
 4. **Classifies** the outcome from the agent's transcript: completed, needs input, plan ready, or errored.
 5. **Verifies** the result. Failures are posted back to the issue.
 6. **Opens a PR** into `integration` and labels the issue `state:ready-for-human-review`.
 7. **Deploys a preview** and posts its URL on the PR.
-8. **Listens** for the human. Each `@foundry` command, review, or merge is a new event and a new job: relaunch the agent with the human's message, mark the task `state:done`, tear the preview down.
+8. **Listens** for the human. Each `@foundry go`, review, or merge is a new event and a new job: relaunch the agent from the branch with the whole thread, mark the task `state:done`, tear the preview down.
 
 ## What Foundry does not do
 

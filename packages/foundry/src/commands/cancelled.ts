@@ -12,6 +12,7 @@ import * as preview from '../lib/preview.js';
 import * as statusComment from '../lib/status-comment.js';
 import { setStateLabel } from '../lib/labels.js';
 import { recoverTask, issueNumberFromPayload } from '../lib/task-recovery.js';
+import { preserveWork } from '../lib/worktree.js';
 import * as log from '../lib/log.js';
 
 export async function runCancelled(opts: { eventName?: string; eventPath?: string }): Promise<void> {
@@ -43,6 +44,8 @@ export async function runCancelled(opts: { eventName?: string; eventPath?: strin
   }
 
   log.warn(`Run for #${issue} was cancelled. Marking failed.`);
+  // This step runs inside the cancelled job, so the worktree is still here.
+  const preserved = preserveWork(task, getConfigDir(), 'run cancelled');
   await setStateLabel(config, issue, 'failed');
   if (task.preview_url) {
     try { await preview.previewDown(config, task); } catch {}
@@ -50,7 +53,12 @@ export async function runCancelled(opts: { eventName?: string; eventPath?: strin
   try {
     await statusComment.updateStatusComment(config.repo, issue, {
       task: { ...task, status: 'failed' },
-      message: 'The run was cancelled before the agent finished. Work the agent had committed may be on the branch; anything uncommitted is gone.\n\n`@foundry restart` to retry from scratch · `@foundry start` to re-queue',
+      message: [
+        'The run was cancelled before the agent finished.',
+        preserved.pushed ? `Work so far is on \`${task.branch}\`.` : 'Nothing was pushed.',
+        '',
+        '`@foundry go` to continue from the branch · `@foundry restart` to start over',
+      ].join('\n'),
       historyEntry: 'Run cancelled',
     });
   } catch (err: any) {

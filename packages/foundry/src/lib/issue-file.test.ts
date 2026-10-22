@@ -14,6 +14,20 @@ describe('issue file', () => {
     expect(text).toBe('# Issue #7: Add login\n\nhttps://github.com/o/r/issues/7\n\n## What\nA login page.\n');
   });
 
+  it('appends the human thread after the body, oldest first', () => {
+    const text = renderIssueFile({ number: 7, title: 't', body: 'Body.', url: 'u', comments: [
+      { author: 'alice', created_at: '2026-01-01T00:00:00Z', body: 'Also dark mode.' },
+      { author: 'bob', created_at: '2026-01-02T00:00:00Z', body: 'Keep it small.' },
+    ] });
+    expect(text).toContain('Body.\n\n---\n\n## Comments');
+    expect(text.indexOf('### @alice · 2026-01-01T00:00:00Z\n\nAlso dark mode.')).toBeLessThan(text.indexOf('### @bob'));
+    expect(text).toContain('Keep it small.');
+  });
+
+  it('has no comments section when there is no thread', () => {
+    expect(renderIssueFile({ number: 7, title: 't', body: 'b', url: 'u', comments: [] })).not.toContain('## Comments');
+  });
+
   it('marks an empty body', () => {
     expect(renderIssueFile({ number: 1, title: 't', body: '  ', url: 'u' })).toContain('_(no description)_');
   });

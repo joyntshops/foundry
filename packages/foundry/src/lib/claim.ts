@@ -32,44 +32,13 @@ function buildClaimComment(info: ClaimInfo): string {
     '',
     '| Command | Description |',
     '|---------|-------------|',
-    '| `@foundry stop` | Stop the agent and mark task failed |',
-    '| `@foundry restart` | Discard work and start fresh |',
-    '| `@foundry replan` | Re-read the issue and relaunch the agent |',
-    '| `@foundry plan [message]` | Restart in plan mode (produces a plan for review) |',
-    '| `@foundry continue [message]` | Resume agent with additional instructions |',
-    '| `@foundry start [message]` | Re-queue a failed/stopped task |',
+    '| `@foundry go [message]` | Continue from the branch: answer a question, approve a plan, resume after a failure |',
+    '| `@foundry restart` | Discard the branch and start over |',
+    '| `@foundry stop` | Stop the agent; the branch stays |',
     '',
-    'Message can be on the same line or start on the next line (multiline supported).',
+    'Every comment on this issue is given to the agent on its next launch; only these three start or stop it. The message can be on the same line or start on the next line.',
     '',
     '</details>',
-    '<!-- /foundry-claim-block -->',
-  ].join('\n');
-}
-
-function buildClaimOnlyComment(info: ClaimInfo): string {
-  return [
-    '<!-- foundry-claim-block -->',
-    '**Foundry Claim** (claim-only — no agent running)',
-    '',
-    '| Field | Value |',
-    '|-------|-------|',
-    `| Runner | \`${info.runner_id}\` |`,
-    `| Branch | \`${info.branch}\` |`,
-    `| Worktree | \`${info.worktree}\` |`,
-    `| Worker | \`${info.tmux_session}\` |`,
-    `| Agent Backend | \`${info.agent_backend}\` |`,
-    `| Claimed At | ${new Date().toISOString()} |`,
-    '',
-    'No agent is running. Use one of the commands below to direct this task:',
-    '',
-    '| Command | Description |',
-    '|---------|-------------|',
-    '| `@foundry plan [message]` | Launch agent in plan mode (produces a plan for review) |',
-    '| `@foundry continue [message]` | Launch agent with optional instructions |',
-    '| `@foundry stop` | Cancel claim and mark task failed |',
-    '| `@foundry restart` | Discard claim and re-queue as ready |',
-    '',
-    'Message can be on the same line or start on the next line (multiline supported).',
     '<!-- /foundry-claim-block -->',
   ].join('\n');
 }
@@ -109,39 +78,6 @@ export async function claimIssue(
 
   // Step 3: Verify — re-fetch issue and check our claim is the active one
   await sleep(1000); // brief delay to avoid race
-
-  const comments = await github.getComments(config.repo, issue.number);
-  const claimComments = comments
-    .filter(c => c.body.includes('<!-- foundry-claim-block -->'))
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-  if (claimComments.length === 0) return false;
-
-  const latestClaim = parseClaimComment(claimComments[0].body);
-  if (!latestClaim) return false;
-
-  return latestClaim.runner_id === runnerId;
-}
-
-/**
- * Claim an issue without starting an agent. Returns true if this runner owns it.
- */
-export async function claimIssueOnly(
-  config: FoundryConfig,
-  issue: GitHubIssue,
-  claimInfo: ClaimInfo,
-): Promise<boolean> {
-  const runnerId = state.getRunnerId();
-
-  // Step 1: Make in-progress the sole state label
-  const currentLabels = issue.labels.map(l => l.name);
-  await setStateLabel(config, issue.number, 'in_progress', currentLabels);
-
-  // Step 2: Post claim-only comment
-  await github.addComment(config.repo, issue.number, buildClaimOnlyComment(claimInfo));
-
-  // Step 3: Verify — re-fetch issue and check our claim is the active one
-  await sleep(1000);
 
   const comments = await github.getComments(config.repo, issue.number);
   const claimComments = comments

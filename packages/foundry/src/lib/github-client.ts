@@ -102,4 +102,6 @@ export interface GitHubClient {
 
   // Repository
   getRepoSlug(): Promise<string>;
+  /** The user's permission on the repo: admin, write, read, or none (maintain/triage collapse to write/read). */
+  getCollaboratorPermission(repo: string, username: string): Promise<string>;
 }

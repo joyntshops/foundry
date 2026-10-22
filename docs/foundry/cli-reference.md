@@ -68,7 +68,7 @@ foundry action [--event-name <name>] [--event-path <file>]
 1. Loads `.joynt-foundry.yml` from the checkout
 2. Rebuilds the referenced task from GitHub (claim comment, labels, PR, preview comment)
 3. Maps the payload to Foundry events and dispatches them
-4. If a handler launched an agent, waits for it as a subprocess, classifies the outcome, and continues; if the task was re-queued, continues into `issue_ready` in the same job
+4. If a handler launched an agent, waits for it as a subprocess, classifies the outcome, and continues (`@foundry restart` starts the issue again in the same job)
 5. Writes `issue`, `status`, `branch`, `pr-url`, `log-dir`, `log-path` to `$GITHUB_OUTPUT`
 
 Useful locally as a dry run against a saved payload: any event that maps to nothing exits 0 after recovery, which checks auth and config. See [GitHub Action](github-action.md).
@@ -94,14 +94,14 @@ These rebuild the task from GitHub, so they work from any checkout with no local
 
 ### `foundry reset <issue>`
 
-Undo everything Foundry created for a task and put the issue back to `state:ready`. Dry-run by default.
+Undo everything Foundry created for a task and clear its state label. Dry-run by default.
 
 ```bash
 foundry reset 42            # show what would be removed
 foundry reset 42 --force    # do it
 ```
 
-In order: tear down the preview, close the PR if open, delete the remote branch, set the state label to `ready`, post a note on the issue. The next `issues.labeled` event does not fire for a label the CLI added with your own token, so if you want it re-run immediately, remove and re-add `state:ready` by hand, or comment `@foundry start`.
+In order: tear down the preview, close the PR if open, delete the remote branch, clear the state label, post a note on the issue. Comment `@foundry go` to start it again.
 
 ### `foundry preview up <issue>` / `down <issue>` / `status <issue>`
 
@@ -125,7 +125,7 @@ foundry review https://...     # PR URL
 3. Push the rebased branch
 4. Merge into `integration`
 5. Run `integration_rebuild`
-6. Label the issue `state:ready-for-human-review`
+6. Complete the task: `state:done`, close the issue, tear the preview down
 
 An approving review on the PR runs exactly this; the command exists for doing it from a checkout.
 

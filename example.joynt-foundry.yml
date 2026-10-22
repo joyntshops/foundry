@@ -10,18 +10,16 @@ repo: "your-org/your-repo"
 # ── Labels (defaults shown) ───────────────────────────────────────────
 # Exactly one state:* label is on an issue at any time.
 labels:
-  ready: "state:ready"                              # eligible for claiming
   in_progress: "state:in-progress"                  # claimed; agent running
   waiting_for_input: "state:waiting-for-input"      # agent asked a question
   plan_review: "state:plan-review"                  # plan posted, awaiting approval
   ready_for_review: "state:ready-for-human-review"  # PR open
   failed: "state:failed"
   done: "state:done"
-  claim: "state:claim"                              # claim + branch, no agent
 
 # Applied by humans to choose the agent's permission mode for an issue.
 mode_labels:
-  plan: "mode:plan"          # plan first, implement after @foundry continue
+  plan: "mode:plan"          # plan first, implement after @foundry go
   auto: "mode:auto"          # full permissions (default when no mode label)
   default: "mode:default"    # agent's own default permission mode
 
@@ -43,14 +41,10 @@ verify:
 integration_rebuild: "npm run build"
 
 # ── Comment commands (defaults shown) ─────────────────────────────────
-comment_triggers:
-  continue: "@foundry continue"   # relaunch with a message
-  plan: "@foundry plan"           # relaunch in plan mode
-  replan: "@foundry replan"       # re-read the issue, relaunch
-  restart: "@foundry restart"     # discard everything, re-queue
-  start: "@foundry start"         # re-queue a failed/stopped task
-  stop: "@foundry stop"           # mark failed
-  claim: "@foundry claim"         # claim without starting the agent
+comment_triggers:                 # the only comments that start or stop work
+  go: "@foundry go"               # start, or proceed from the branch with the whole thread
+  restart: "@foundry restart"     # discard the branch, start over
+  stop: "@foundry stop"           # stop the agent, keep the branch
 
 # ── Unified versioning ────────────────────────────────────────────────
 # Every file that shares one version. First entry is the primary.

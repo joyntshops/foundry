@@ -111,7 +111,7 @@ program
 
 program
   .command('reset <issue>')
-  .description('Remove the branch, PR, and preview for a task and set it back to state:ready')
+  .description('Remove the branch, PR, and preview for a task; `@foundry go` starts it again')
   .option('--force', 'Actually execute (default is dry-run)')
   .action(async (issue, opts) => {
     const { runReset } = await import('./commands/reset.js');

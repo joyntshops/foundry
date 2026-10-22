@@ -180,7 +180,7 @@ Previews are managed automatically by the Action:
 |-------|--------|
 | PR created or updated (push to existing PR) | `previewUp` -- deploy and post comment |
 | PR merged | `previewDown` -- tear down and mark inactive |
-| `@foundry stop` / `@foundry restart` / `@foundry start` | `previewDown` -- tear down before stopping or restarting |
+| `@foundry stop` / `@foundry restart` | `previewDown` -- tear down before stopping or restarting |
 | `foundry reset` | `previewDown` -- tear down as part of full cleanup |
 
 No manual `foundry preview up/down` calls are needed during normal operation. The CLI subcommands exist for debugging and one-off use; they rebuild the task from the issue, so they work from any checkout.

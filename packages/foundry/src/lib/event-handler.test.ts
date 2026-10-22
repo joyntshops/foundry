@@ -83,8 +83,11 @@ vi.mock('./state.js', () => ({
 
 vi.mock('./claim.js', () => ({
   claimIssue: vi.fn().mockResolvedValue(true),
-  claimIssueOnly: vi.fn().mockResolvedValue(true),
   markFailed: vi.fn(),
+}));
+
+vi.mock('./thread.js', () => ({
+  collectThread: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('./verify.js', () => ({
@@ -155,6 +158,7 @@ import * as github from './github.js';
 import * as worktree from './worktree.js';
 import * as statusComment from './status-comment.js';
 import * as issueFile from './issue-file.js';
+import * as thread from './thread.js';
 import * as previewMod from './preview.js';
 import * as previewVerify from './preview-verify.js';
 import * as stalePRs from './stale-prs.js';
@@ -170,23 +174,17 @@ function makeConfig(): FoundryConfig {
   return {
     repo: 'owner/repo',
     labels: {
-      ready: 'state:ready',
       in_progress: 'state:in-progress',
       done: 'state:done',
       ready_for_review: 'state:ready-for-human-review',
       waiting_for_input: 'state:waiting-for-input',
       failed: 'state:failed',
       plan_review: 'state:plan-review',
-      claim: 'state:claim',
     },
     comment_triggers: {
-      replan: '@foundry replan',
+      go: '@foundry go',
       restart: '@foundry restart',
       stop: '@foundry stop',
-      continue: '@foundry continue',
-      plan: '@foundry plan',
-      start: '@foundry start',
-      claim: '@foundry claim',
     },
     branch_template: 'feature/{issue}-{slug}',
     worktree_base: '../wts',
@@ -218,6 +216,12 @@ function makeTask(overrides?: Partial<TaskState>): TaskState {
   };
 }
 
+const ISSUE = { number: 42, title: 'Fix bug', body: 'Build it', labels: [] as Array<{ name: string }>, html_url: 'https://github.com/owner/repo/issues/42', state: 'open' };
+
+function cmd(command: 'go' | 'restart' | 'stop', task: TaskState | null, message?: string): FoundryEvent {
+  return { type: 'command', issue: 42, task, command, message, commentId: 1, commentAuthor: 'alice', via: 'comment' };
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────
 
 describe('EventHandler', () => {
@@ -231,20 +235,14 @@ describe('EventHandler', () => {
     vi.mocked(state.getAllTasks).mockReturnValue([]);
   });
 
-  describe('command event: stop', () => {
-    it('kills the worker and marks task as failed', async () => {
+  describe('@foundry stop', () => {
+    it('kills the worker, keeps the branch, marks the task failed', async () => {
       const task = makeTask();
-
-      await handler.handleEvent({
-        type: 'command',
-        task,
-        command: 'stop',
-        commentId: 1,
-        commentAuthor: 'alice',
-      });
+      await handler.handleEvent(cmd('stop', task));
 
       expect(mockWorkerHandleFor).toHaveBeenCalledWith('foundry-42');
       expect(mockWorkerKill).toHaveBeenCalled();
+      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'stopped');
       expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'failed');
       // setStateLabel strips every other state label, then adds the target.
       expect(github.transitionLabels).toHaveBeenCalledWith(
@@ -253,81 +251,117 @@ describe('EventHandler', () => {
         ['state:failed'],
         undefined,
       );
+      const msg = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2].message;
+      expect(msg).toContain('`@foundry go` to continue from the branch');
     });
 
-    it('skips kill for claimed tasks (no agent running)', async () => {
-      const task = makeTask({ status: 'claimed' });
-
-      await handler.handleEvent({
-        type: 'command',
-        task,
-        command: 'stop',
-        commentId: 1,
-        commentAuthor: 'alice',
-      });
-
+    it('does nothing on an issue that was never started', async () => {
+      await handler.handleEvent(cmd('stop', null));
       expect(mockWorkerHandleFor).not.toHaveBeenCalled();
-      expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'failed');
+      expect(state.updateTaskStatus).not.toHaveBeenCalled();
+      expect(github.transitionLabels).not.toHaveBeenCalled();
     });
   });
 
-  describe('command event: continue', () => {
-    it('resumes the agent', async () => {
-      const task = makeTask({ status: 'waiting-for-input', session_id: 'sess-123' });
-
-      await handler.handleEvent({
-        type: 'command',
-        task,
-        command: 'continue',
-        message: 'please fix the tests',
-        commentId: 2,
-        commentAuthor: 'alice',
-      });
-
-      // Should kill old session and spawn new one
-      expect(mockWorkerKill).toHaveBeenCalled();
-      expect(mockWorkerSpawn).toHaveBeenCalled();
+  describe('@foundry go', () => {
+    beforeEach(() => {
+      vi.mocked(github.getIssue).mockResolvedValue(ISSUE);
     });
-  });
 
-  describe('issue_ready event', () => {
-    it('claims the issue and spawns an agent', async () => {
-      const event: FoundryEvent = {
-        type: 'issue_ready',
-        issue: {
-          number: 10,
-          title: 'New feature',
-          body: 'Build it',
-          labels: [{ name: 'state:ready' }],
-          html_url: 'https://github.com/owner/repo/issues/10',
-          state: 'open',
-        },
-      };
-
-      await handler.handleEvent(event);
-
+    it('on an issue that was never started: claims it and spawns the agent', async () => {
+      await handler.handleEvent(cmd('go', null));
+      expect(github.getIssue).toHaveBeenCalledWith('owner/repo', 42);
       expect(claim.claimIssue).toHaveBeenCalled();
       expect(mockWorkerSpawn).toHaveBeenCalled();
       expect(state.upsertTask).toHaveBeenCalled();
+      expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_RESUME_CONTEXT).toBeUndefined();
     });
 
-    it('does nothing if claim fails', async () => {
+    it('does nothing if the claim fails', async () => {
       vi.mocked(claim.claimIssue).mockResolvedValueOnce(false);
-
-      await handler.handleEvent({
-        type: 'issue_ready',
-        issue: {
-          number: 10,
-          title: 'New feature',
-          body: 'Build it',
-          labels: [{ name: 'state:ready' }],
-          html_url: 'https://github.com/owner/repo/issues/10',
-          state: 'open',
-        },
-      });
-
+      await handler.handleEvent(cmd('go', null));
       expect(mockWorkerSpawn).not.toHaveBeenCalled();
       expect(state.upsertTask).not.toHaveBeenCalled();
+    });
+
+    it('honours mode:plan on a fresh start', async () => {
+      vi.mocked(github.getIssue).mockResolvedValue({ ...ISSUE, labels: [{ name: 'mode:plan' }] });
+      await handler.handleEvent(cmd('go', null));
+      const saved = vi.mocked(state.upsertTask).mock.calls[0][1];
+      expect(saved.permission_mode).toBe('--permission-mode plan');
+    });
+
+    it('on a waiting task: relaunches from the branch with the reply as the answer', async () => {
+      const task = makeTask({ status: 'waiting-for-input', last_agent_message: 'Tabs or a long form?' });
+      await handler.handleEvent(cmd('go', task, 'Tabs.'));
+      expect(worktree.ensureWorktree).toHaveBeenCalledWith(task, expect.any(String));
+      expect(mockWorkerKill).toHaveBeenCalled();
+      expect(github.transitionLabels).toHaveBeenCalledWith('owner/repo', 42, expect.arrayContaining(['state:waiting-for-input']), ['state:in-progress'], undefined);
+      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('RESUMING issue #42 on branch feature/42-fix');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Tabs or a long form?');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Tabs.');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('do not start over');
+      expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'agent-running', expect.objectContaining({ permission_mode: '--dangerously-skip-permissions' }));
+    });
+
+    it('on a plan-review task: tells the agent to implement', async () => {
+      await handler.handleEvent(cmd('go', makeTask({ status: 'plan-review' }), 'Go ahead.'));
+      expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_RESUME_CONTEXT).toContain('implement it now');
+    });
+
+    it('on a failed task: resumes from the branch and points at the thread', async () => {
+      await handler.handleEvent(cmd('go', makeTask({ status: 'failed' })));
+      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('`@foundry go`');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('(no message; see the thread in the issue file)');
+      expect(claim.claimIssue).not.toHaveBeenCalled();
+    });
+
+    it('on an open PR: resumes with the PR named, without the review-round cap', async () => {
+      const task = makeTask({ status: 'pr-open', pr_number: 5, pr_url: 'https://github.com/owner/repo/pull/5', input_request_count: 99 });
+      await handler.handleEvent(cmd('go', task, 'Rename it.'));
+      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('pull request https://github.com/owner/repo/pull/5 is open');
+      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Rename it.');
+      expect(claim.markFailed).not.toHaveBeenCalled();
+    });
+
+    it('on a task whose label still says running: the job is gone, so resume', async () => {
+      await handler.handleEvent(cmd('go', makeTask({ status: 'agent-running' })));
+      expect(mockWorkerSpawn).toHaveBeenCalled();
+    });
+
+    it('on a claim with no state label (after reset): starts fresh', async () => {
+      await handler.handleEvent(cmd('go', makeTask({ status: 'claimed' })));
+      expect(claim.claimIssue).toHaveBeenCalled();
+    });
+  });
+
+  describe('@foundry restart', () => {
+    beforeEach(() => {
+      vi.mocked(github.getIssue).mockResolvedValue(ISSUE);
+    });
+
+    it('discards the task and starts it again in the same job', async () => {
+      const task = makeTask({ status: 'failed' });
+      await handler.handleEvent(cmd('restart', task));
+      expect(state.removeTask).toHaveBeenCalledWith('owner/repo', 42);
+      expect(claim.claimIssue).toHaveBeenCalled();
+      expect(mockWorkerSpawn).toHaveBeenCalled();
+      // the label is never set to anything a human would have to add
+      for (const c of vi.mocked(github.transitionLabels).mock.calls) expect(c[3]).not.toContain('state:ready');
+    });
+
+    it('kills a running agent first', async () => {
+      await handler.handleEvent(cmd('restart', makeTask({ status: 'agent-running' })));
+      expect(mockWorkerKill).toHaveBeenCalled();
+    });
+
+    it('on an issue that was never started: same as go', async () => {
+      await handler.handleEvent(cmd('restart', null));
+      expect(state.removeTask).not.toHaveBeenCalled();
+      expect(claim.claimIssue).toHaveBeenCalled();
     });
   });
 
@@ -377,7 +411,7 @@ describe('EventHandler', () => {
   });
 
   describe('agent_completed event: errored', () => {
-    it('marks task as failed', async () => {
+    it('marks task as failed and keeps the branch', async () => {
       const task = makeTask();
       const outcome: AgentOutcome = {
         type: 'errored',
@@ -397,25 +431,7 @@ describe('EventHandler', () => {
         expect.objectContaining({ last_agent_message: 'Something went wrong' }),
       );
       expect(claim.markFailed).toHaveBeenCalledWith(expect.anything(), 42);
-    });
-  });
-
-  describe('human_response event', () => {
-    it('resumes the agent with the human response', async () => {
-      const task = makeTask({ status: 'waiting-for-input', session_id: 'sess-abc' });
-
-      await handler.handleEvent({
-        type: 'human_response',
-        task,
-        response: 'Use the database approach',
-      });
-
-      expect(mockWorkerKill).toHaveBeenCalled();
-      expect(mockWorkerSpawn).toHaveBeenCalled();
-      expect(state.updateTaskStatus).toHaveBeenCalledWith(
-        'owner/repo', 42, 'agent-running',
-        expect.objectContaining({ permission_mode: '--dangerously-skip-permissions' }),
-      );
+      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'errored');
     });
   });
 
@@ -434,49 +450,6 @@ describe('EventHandler', () => {
         expect.objectContaining({ last_agent_message: 'Please fix the error handling in main.ts' }),
       );
       // Should resume the agent
-      expect(mockWorkerSpawn).toHaveBeenCalled();
-    });
-  });
-
-  describe('issue_claim event', () => {
-    it('claims the issue without spawning an agent', async () => {
-      await handler.handleEvent({
-        type: 'issue_claim',
-        issue: {
-          number: 15,
-          title: 'Claimed issue',
-          body: 'Just claim, no agent',
-          labels: [{ name: 'state:claim' }],
-          html_url: 'https://github.com/owner/repo/issues/15',
-          state: 'open',
-        },
-      });
-
-      expect(claim.claimIssueOnly).toHaveBeenCalled();
-      expect(state.upsertTask).toHaveBeenCalled();
-
-      // Verify the task was saved with 'claimed' status
-      const savedTask = vi.mocked(state.upsertTask).mock.calls[0][1];
-      expect(savedTask.status).toBe('claimed');
-    });
-  });
-
-  describe('plan_approved event', () => {
-    it('transitions labels and resumes agent', async () => {
-      const task = makeTask({ status: 'plan-review', session_id: 'sess-plan' });
-
-      await handler.handleEvent({
-        type: 'plan_approved',
-        task,
-        response: 'Looks good, go ahead',
-      });
-
-      expect(github.transitionLabels).toHaveBeenCalledWith(
-        'owner/repo', 42,
-        expect.arrayContaining(['state:plan-review']),
-        ['state:in-progress'],
-        undefined,
-      );
       expect(mockWorkerSpawn).toHaveBeenCalled();
     });
   });
@@ -500,22 +473,14 @@ describe('EventHandler', () => {
       expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'plan review');
     });
 
-    it('a human reply recreates the worktree and relaunches with the exchange in the environment', async () => {
-      const task = makeTask({ status: 'waiting-for-input', last_agent_message: 'Tabs or a long form?' });
-      await handler.handleEvent({ type: 'human_response', task, response: 'Tabs.' });
-      expect(worktree.ensureWorktree).toHaveBeenCalledWith(task, expect.any(String));
-      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
-      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('RESUMING issue #42 on branch feature/42-fix');
-      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Tabs or a long form?');
-      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('Tabs.');
-      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('do not start over');
-    });
-
-    it('plan approval tells the agent to implement', async () => {
-      const task = makeTask({ status: 'plan-review' });
-      await handler.handleEvent({ type: 'plan_approved', task, response: 'Go ahead.' });
-      const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
-      expect(env.FOUNDRY_RESUME_CONTEXT).toContain('implement it now');
+    it('verification failure pushes the branch and says so', async () => {
+      vi.mocked(verify.runVerifyPipeline).mockReturnValueOnce({ passed: false, results: [{ command: 'npm test', success: false, output: 'boom', duration_ms: 1 }] } as any);
+      const task = makeTask();
+      await handler.handleEvent({ type: 'agent_completed', task, outcome: { type: 'completed', session_id: 's', final_message: 'ok', ask_user_questions: null, report: { status: 'done', summary: 'ok' } } });
+      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'verification failed');
+      const call = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(call.message).toMatch(/Work so far is on `feature\/42-fix/);
+      expect(call.message).toContain('`@foundry go` to continue from the branch');
     });
 
     it('review feedback is framed as a review', async () => {
@@ -529,17 +494,27 @@ describe('EventHandler', () => {
   });
 
   describe('the issue is delivered as a file', () => {
-    it('on first launch, from the issue payload', async () => {
-      const issue = { number: 42, title: 'Add login', body: '## What\nA page.', html_url: 'u', state: 'open', labels: [] as any[] };
-      await handler.handleEvent({ type: 'issue_ready', issue });
-      expect(issueFile.writeIssueFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ number: 42, title: 'Add login', body: '## What\nA page.' }));
+    it('on first launch, from the fetched issue, with the thread so far', async () => {
+      vi.mocked(github.getIssue).mockResolvedValue({ ...ISSUE, title: 'Add login', body: '## What\nA page.' });
+      vi.mocked(thread.collectThread).mockResolvedValueOnce([{ author: 'alice', created_at: 't', body: 'Also dark mode.' }]);
+      await handler.handleEvent(cmd('go', null));
+      expect(issueFile.writeIssueFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+        number: 42, title: 'Add login', body: '## What\nA page.', comments: [{ author: 'alice', created_at: 't', body: 'Also dark mode.' }],
+      }));
       expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_ISSUE_FILE).toBe('/tmp/state/42/issue.md');
     });
 
     it('on relaunch, from the body stored on the task', async () => {
       const task = makeTask({ status: 'waiting-for-input', issue_body: 'stored body' });
-      await handler.handleEvent({ type: 'human_response', task, response: 'ok' });
+      await handler.handleEvent(cmd('go', task, 'ok'));
       expect(issueFile.writeIssueFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ body: 'stored body' }));
+    });
+
+    it('a thread that cannot be read does not block the launch', async () => {
+      vi.mocked(thread.collectThread).mockRejectedValueOnce(new Error('api down'));
+      await handler.handleEvent(cmd('go', makeTask({ status: 'failed' })));
+      expect(issueFile.writeIssueFile).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ comments: [] }));
+      expect(mockWorkerSpawn).toHaveBeenCalled();
     });
   });
 
@@ -635,8 +610,8 @@ describe('EventHandler', () => {
     });
 
     it('every launch carries FOUNDRY_MAX_TURNS from config', async () => {
-      const issue = { number: 42, title: 'T', body: '', html_url: 'u', state: 'open', labels: [] as any[] };
-      await handler.handleEvent({ type: 'issue_ready', issue });
+      vi.mocked(github.getIssue).mockResolvedValue(ISSUE);
+      await handler.handleEvent(cmd('go', null));
       expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_MAX_TURNS).toBe('150');
     });
   });
@@ -654,7 +629,7 @@ describe('EventHandler', () => {
       vi.mocked(reviewMod.reviewAndMerge).mockResolvedValueOnce({ merged: false, reason: 'conflicting', detail: 'x' });
       const task = makeTask({ pr_number: 9 });
       await handler.handleEvent({ type: 'pr_approved', pr_number: 9, branch: task.branch, base: 'integration', reviewer: 'alice', task });
-      expect(stalePRs.dispatchCommand).toHaveBeenCalledWith(42, 'continue', expect.stringContaining('rebase please'));
+      expect(stalePRs.dispatchCommand).toHaveBeenCalledWith(42, 'go', expect.stringContaining('rebase please'));
       expect(github.addComment).toHaveBeenCalledWith('owner/repo', 42, expect.stringContaining('approve again once it is clean'));
       expect(github.closeIssue).not.toHaveBeenCalled();
     });

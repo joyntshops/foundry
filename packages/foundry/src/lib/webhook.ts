@@ -1,9 +1,16 @@
 /**
  * GitHub event mapping — converts a GitHub event payload (as delivered to a
  * GitHub Actions job in $GITHUB_EVENT_PATH) into FoundryEvent instances.
+ *
+ * What starts work is deliberately small:
+ *   - an `@foundry go|restart|stop` comment on an issue (not on a PR),
+ *   - a review requesting changes or approving,
+ *   - a merge,
+ *   - a `workflow_dispatch` carrying one of the three commands.
+ * Labels never start anything and plain comments never start anything.
  */
-import type { FoundryEvent } from './events.js';
-import type { FoundryConfig, TaskState, GitHubIssue } from '../types.js';
+import type { FoundryEvent, FoundryCommand } from './events.js';
+import type { FoundryConfig } from '../types.js';
 import * as state from './state.js';
 
 // ── Event mapping ───────────────────────────────────────────────────────
@@ -24,8 +31,6 @@ export function webhookToEvents(
   switch (fullEvent) {
     case 'issue_comment.created':
       return mapIssueComment(payload, config);
-    case 'issues.labeled':
-      return mapIssueLabeled(payload, config);
     case 'pull_request.opened':
     case 'pull_request.reopened':
     case 'pull_request.synchronize':
@@ -41,6 +46,55 @@ export function webhookToEvents(
   }
 }
 
+// ── Commands ────────────────────────────────────────────────────────────
+
+export interface ParsedFoundryCommand {
+  name: FoundryCommand;
+  message?: string;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Recognise a command at the very start of a comment. `go` takes a message
+ * (same line or following lines); `restart` and `stop` are the first line on
+ * their own. A mention anywhere else in a comment is just text.
+ */
+export function parseFoundryCommand(body: string, config: FoundryConfig): ParsedFoundryCommand | null {
+  const t = config.comment_triggers;
+  const trimmed = body.trim();
+  const firstLine = trimmed.split('\n')[0].trim();
+
+  if (new RegExp('^' + escapeRegExp(t.go) + '(?=\\s|$)').test(trimmed)) {
+    const msg = trimmed.slice(t.go.length).trim();
+    return { name: 'go', message: msg || undefined };
+  }
+  if (firstLine === t.restart) return { name: 'restart' };
+  if (firstLine === t.stop) return { name: 'stop' };
+  return null;
+}
+
+/**
+ * The part of a comment that is not the command: the message after `go`, or
+ * whatever followed a `restart`/`stop` line. Null when the comment is not a
+ * command at all. Used to keep command comments in the agent's thread
+ * without the command text itself.
+ */
+export function commandRemainder(body: string, config: FoundryConfig): string | null {
+  const cmd = parseFoundryCommand(body, config);
+  if (!cmd) return null;
+  if (cmd.name === 'go') return cmd.message ?? '';
+  const lines = body.trim().split('\n');
+  return lines.slice(1).join('\n').trim();
+}
+
+/** Comments by GitHub Apps, Actions, and Foundry itself are never commands or context. */
+export function isBotLogin(login: string): boolean {
+  return login.includes('[bot]') || login === 'github-actions' || login === 'foundry';
+}
+
 // ── issue_comment.created ───────────────────────────────────────────────
 
 function mapIssueComment(
@@ -51,75 +105,30 @@ function mapIssueComment(
   const issue = payload.issue;
   if (!comment || !issue) return [];
 
-  const body: string = comment.body ?? '';
-  const author: string = comment.user?.login ?? '';
+  // A comment on a pull request arrives as an issue_comment whose number is
+  // the PR's. It is not resolved to its issue yet, and must never be mistaken
+  // for the issue with the same number.
+  if (issue.pull_request) return [];
 
-  // Ignore bot comments
-  if (author.includes('[bot]') || author === 'github-actions' || author === 'foundry') {
-    return [];
-  }
+  const author: string = comment.user?.login ?? '';
+  if (isBotLogin(author)) return [];
+
+  const command = parseFoundryCommand(comment.body ?? '', config);
+  if (!command) return [];
 
   const issueNumber: number = issue.number;
-  const repo = config.repo;
+  const task = state.getAllTasks(config.repo).find(t => t.issue === issueNumber) ?? null;
 
-  // Look up existing task for this issue
-  const task = state.getAllTasks(repo).find(t => t.issue === issueNumber);
-  if (!task) return [];
-
-  const command = parseFoundryCommand(body, config);
-  if (command) {
-    return [{
-      type: 'command',
-      task,
-      command: command.name,
-      message: command.message,
-      commentId: comment.id,
-      commentAuthor: author,
-    }];
-  }
-
-  // A plain reply on an issue where the agent is waiting is the answer.
-  if (body.trim() === '') return [];
-  if (task.status === 'waiting-for-input') {
-    return [{ type: 'human_response', task, response: body }];
-  }
-  if (task.status === 'plan-review') {
-    return [{ type: 'plan_approved', task, response: body }];
-  }
-
-  return [];
-}
-
-interface ParsedFoundryCommand {
-  name: 'replan' | 'restart' | 'stop' | 'continue' | 'plan' | 'start';
-  message?: string;
-}
-
-function parseFoundryCommand(body: string, config: FoundryConfig): ParsedFoundryCommand | null {
-  const triggers = config.comment_triggers;
-  const trimmed = body.trim();
-  const firstLine = trimmed.split('\n')[0].trim();
-
-  // Commands that accept trailing message
-  if (trimmed.startsWith(triggers.continue)) {
-    const msg = trimmed.slice(triggers.continue.length).trim();
-    return { name: 'continue', message: msg || undefined };
-  }
-  if (trimmed.startsWith(triggers.start)) {
-    const msg = trimmed.slice(triggers.start.length).trim();
-    return { name: 'start', message: msg || undefined };
-  }
-  if (trimmed.startsWith(triggers.plan)) {
-    const msg = trimmed.slice(triggers.plan.length).trim();
-    return { name: 'plan', message: msg || undefined };
-  }
-
-  // Exact-match commands (first line only)
-  if (firstLine === triggers.replan) return { name: 'replan' };
-  if (firstLine === triggers.restart) return { name: 'restart' };
-  if (firstLine === triggers.stop) return { name: 'stop' };
-
-  return null;
+  return [{
+    type: 'command',
+    issue: issueNumber,
+    task,
+    command: command.name,
+    message: command.message,
+    commentId: comment.id,
+    commentAuthor: author,
+    via: 'comment',
+  }];
 }
 
 // ── workflow_dispatch ───────────────────────────────────────────────────
@@ -137,53 +146,25 @@ function mapWorkflowDispatch(
   const issueNumber = parseInt(String(inputs.issue ?? ''), 10);
   if (!Number.isFinite(issueNumber)) return [];
 
-  const task = state.getAllTasks(config.repo).find(t => t.issue === issueNumber);
-  if (!task) return [];
-
-  const trigger = (config.comment_triggers as Record<string, string>)[String(inputs.command ?? '')];
-  if (!trigger) return [];
+  const name = String(inputs.command ?? '') as FoundryCommand;
+  if (!(name in config.comment_triggers)) return [];
+  const trigger = config.comment_triggers[name];
   const body = inputs.message ? `${trigger}\n${inputs.message}` : trigger;
   const command = parseFoundryCommand(body, config);
   if (!command) return [];
 
+  const task = state.getAllTasks(config.repo).find(t => t.issue === issueNumber) ?? null;
+
   return [{
     type: 'command',
+    issue: issueNumber,
     task,
     command: command.name,
     message: command.message,
     commentId: 0,
     commentAuthor: payload.sender?.login ?? 'workflow_dispatch',
+    via: 'dispatch',
   }];
-}
-
-// ── issues.labeled ──────────────────────────────────────────────────────
-
-function mapIssueLabeled(
-  payload: Record<string, any>,
-  config: FoundryConfig,
-): FoundryEvent[] {
-  const label: string = payload.label?.name ?? '';
-  const issue = payload.issue;
-  if (!issue) return [];
-
-  const ghIssue: GitHubIssue = {
-    number: issue.number,
-    title: issue.title,
-    body: issue.body ?? null,
-    labels: (issue.labels ?? []).map((l: any) => ({ name: l.name })),
-    html_url: issue.html_url,
-    state: issue.state,
-  };
-
-  if (label === config.labels.ready) {
-    return [{ type: 'issue_ready', issue: ghIssue }];
-  }
-
-  if (label === config.labels.claim) {
-    return [{ type: 'issue_claim', issue: ghIssue }];
-  }
-
-  return [];
 }
 
 // ── pull_request.closed (merged) ────────────────────────────────────────

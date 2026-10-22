@@ -61,7 +61,6 @@ export function statusFromLabels(config: FoundryConfig, labels: string[]): TaskS
   if (has(L.plan_review)) return 'plan-review';
   if (has(L.waiting_for_input)) return 'waiting-for-input';
   if (has(L.in_progress)) return 'agent-running';
-  if (has(L.claim)) return 'claimed';
   return null;
 }
 
@@ -75,7 +74,9 @@ function permissionModeFromLabels(config: FoundryConfig, labels: string[]): stri
 
 /**
  * Rebuild the TaskState for an issue from GitHub. Returns null when the issue
- * has never been claimed by Foundry (no claim comment).
+ * has never been claimed by Foundry (no claim comment). A claim with no state
+ * label (after `foundry reset`) comes back as `claimed`, which `@foundry go`
+ * treats as a fresh start.
  */
 export async function recoverTask(
   config: FoundryConfig,
@@ -99,8 +100,10 @@ export async function recoverTask(
   let pr_url: string | undefined;
   let pr_number: number | undefined;
   try {
+    // Only an open PR is the task's PR: a restart deletes the branch, which
+    // closes the old one, and the next completion must open a new one.
     const pr = await github.getPRStatus(config.repo, branch);
-    if (pr?.url) {
+    if (pr?.url && /^open$/i.test(pr.state)) {
       pr_url = pr.url;
       pr_number = github.extractPRNumber(pr.url) ?? undefined;
     }
