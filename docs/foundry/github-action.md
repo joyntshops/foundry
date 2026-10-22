@@ -10,7 +10,7 @@ This page is written for whoever picks this up next, human or agent. It records 
 human comments "@foundry go" on an issue
   → job starts
   → foundry action: claim (labels + structured claim comment)
-  → create worktree from origin/integration
+  → create worktree from origin/<branches.integration>
   → run the agent as a subprocess of the job (transcript = job log)
   → wait; classify outcome from the stream-json log
   → completed: verify → push → PR to integration → state:ready-for-human-review → preview up

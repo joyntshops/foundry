@@ -36,6 +36,17 @@ export interface FoundryConfig {
     default: string;                    // default "mode:default"
   };
 
+  /**
+   * The repo's long-lived branches, by name. Feature branches are cut from
+   * and merged into `integration`; `production` is what it is promoted to.
+   * Never assumed: onboarding must not require renaming a branch that
+   * deploy tooling already keys on.
+   */
+  branches: {
+    integration: string;                // default "integration"
+    production: string;                 // default "main"
+  };
+
   branch_template: string;              // default "feature/{issue}-{slug}"
   worktree_base: string;                // default "../wts"
 

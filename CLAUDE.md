@@ -58,6 +58,7 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 - **Issue text is hostile input.** Titles and bodies reach a shell. Use the `FOUNDRY_ISSUE_*` env vars; `{title}`/`{body}` are escaped for double quotes only.
 - **Three commands, nothing else starts work.** `@foundry go`, `@foundry restart`, `@foundry stop` are the only human actions (`lib/webhook.ts`). Labels are status (`state:*`, Foundry-owned) and settings (`mode:*`, `agent:*`); plain comments are context and reach the agent through the issue file (`lib/thread.ts`). Do not add a label trigger or a comment trigger; add to what `go` does. Commenters must have write access (`lib/authorize.ts`).
 - **Every non-success ending pushes the branch** (`preserveWork`), so `go` on a failed task has something to continue from.
+- **Branch names come from config.** `lib/branches.ts` (`integrationBranch`, `productionBranch`, `resolveBaseBranch`) is the only place that knows them. Never write `'integration'` or `'main'` in code: onboarding must not require renaming a branch that a repo's deploy tooling keys on. A missing integration branch is an error, never a fallback to production.
 - **Foundry is not the agent.** Backends are configured commands. Do not special-case Claude beyond parsing its transcript format.
 - **`url_template` wins.** Provider command output is only read as a URL when there is no template. `gh workflow run` prints a run URL and this bit us.
 

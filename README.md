@@ -32,7 +32,7 @@
        issue ──▶ agent ──▶ verify ──▶ integration
 ```
 
-GitHub Issues are the task control plane. Comment `@foundry go` on an issue and Foundry claims it, runs a coding agent in an isolated git worktree, verifies the result, opens a PR into a moving `integration` branch, and stands up a preview environment. Humans review on GitHub. Three comments are the whole control surface: `@foundry go`, `@foundry restart`, `@foundry stop`. Every other comment is context the agent reads; labels show status.
+GitHub Issues are the task control plane. Comment `@foundry go` on an issue and Foundry claims it, runs a coding agent in an isolated git worktree, verifies the result, opens a PR into a moving integration branch (yours, by name; nothing is renamed), and stands up a preview environment. Humans review on GitHub. Three comments are the whole control surface: `@foundry go`, `@foundry restart`, `@foundry stop`. Every other comment is context the agent reads; labels show status.
 
 Foundry is a **GitHub Action**. There is no server to run and no machine to keep awake. Every GitHub event that matters starts a job, the job performs one transition of the task's state machine, and state lives on GitHub: in labels, a structured claim comment, the PR, and the preview comment.
 
@@ -50,7 +50,7 @@ Foundry is the orchestration layer, not the agent. It runs Claude Code, aider, o
 ```
 human comments @foundry go on an issue
   → claim (state:in-progress + claim comment)
-  → worktree from origin/integration
+  → worktree from origin/<integration branch>
   → agent runs; transcript is the job log
   → outcome classified: completed · needs input · plan ready · errored
   → verify (lint, typecheck, build, test); no PR until green

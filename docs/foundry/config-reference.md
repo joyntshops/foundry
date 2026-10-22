@@ -28,6 +28,9 @@ mode_labels:
 
 # ── Branching & Worktrees ────────────────────────────────────────────
 
+branches:
+  integration: "integration"            # Feature branches are cut from and merged into this
+  production: "main"                    # What the integration branch is promoted to
 branch_template: "feature/{issue}-{slug}"   # {issue} = number, {slug} = slugified title
 worktree_base: "./wts"                      # Relative to repo root; add to .gitignore
 
@@ -129,6 +132,9 @@ Label names Foundry uses to show task state. Customize if your repo uses differe
 
 ### `mode_labels`
 Label names that control agent permission mode. Apply one of these labels to an issue to override the default auto mode. `plan` makes the agent produce a plan for approval before implementing. `default` uses Claude Code's default permission mode (asks before tool use).
+
+### `branches`
+The repo's long-lived branches, by name. `integration` is the moving branch feature branches are cut from and merged into; `production` is what it is promoted to (`foundry sync-integration` merges it back). Defaults `integration` and `main`. Set them to whatever the repo already deploys from: Foundry never asks a repo to rename a branch that its hosting, protection rules, or deploy workflows key on. The integration branch must exist on the remote; a `@foundry go` on a repo whose configured branch is missing is refused with the reason on the issue, never silently based on production.
 
 ### `branch_template`
 Template for feature branch names. Variables: `{issue}` (number), `{slug}` (slugified title, max 40 chars).

@@ -2,6 +2,8 @@
 
 Everything on this page is driven from GitHub. Three comments start or stop work, reviews send it back, merges finish it. Each of those is an event, and each event is one Actions job.
 
+`integration` and `main` throughout mean the branches named under `branches:` in `.joynt-foundry.yml`; a repo keeps whatever names it deploys from.
+
 ## The three commands
 
 Humans act on a task with exactly three comments on its **issue**:

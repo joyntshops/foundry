@@ -17,6 +17,7 @@ import * as verify from './verify.js';
 import * as agentOutput from './agent-output.js';
 import { prepareLaunch } from './agent-report.js';
 import { preserveWork, ensureWorktree, type PreserveResult } from './worktree.js';
+import { integrationBranch, resolveBaseBranch } from './branches.js';
 import { writeIssueFile } from './issue-file.js';
 import { collectThread, type ThreadComment } from './thread.js';
 import * as previewVerify from './preview-verify.js';
@@ -437,7 +438,7 @@ export class EventHandler {
       await worker.handleFor(task.tmux_session).kill();
     }
 
-    const preserved = preserveWork(task, this.repoDir, 'stopped');
+    const preserved = preserveWork(this.config, task, this.repoDir, 'stopped');
     await triggerPreviewDown(config, task);
 
     state.updateTaskStatus(config.repo, task.issue, 'failed');
@@ -466,6 +467,21 @@ export class EventHandler {
     const issueLabels = issue.labels.map(l => l.name);
     const backend = resolveBackendForIssue(config, issueLabels);
 
+    try { git.fetchAll(repoDir); } catch (err: any) {
+      log.warn(`Fetch failed: ${err.message}`);
+    }
+
+    // The base must exist before anything is claimed: a misnamed integration
+    // branch is a configuration error, reported on the issue, not a fallback.
+    let base: string;
+    try {
+      base = resolveBaseBranch(config, repoDir);
+    } catch (err: any) {
+      log.error(err.message);
+      try { await github.addComment(config.repo, issue.number, `**Foundry cannot start.** ${err.message}`); } catch {}
+      return;
+    }
+
     log.info(`Claiming #${issue.number}: ${issue.title}`);
 
     const claimed = await claim.claimIssue(config, issue, {
@@ -482,14 +498,6 @@ export class EventHandler {
     }
 
     log.success(`Claimed #${issue.number}`);
-
-    try { git.fetchAll(repoDir); } catch (err: any) {
-      log.warn(`Fetch failed: ${err.message}`);
-    }
-
-    const base = git.remoteBranchExists('integration', repoDir)
-      ? 'origin/integration'
-      : 'origin/main';
 
     if (git.worktreeExists(worktree, repoDir)) {
       log.info(`Removing stale worktree from previous attempt: ${worktree}`);
@@ -589,7 +597,7 @@ export class EventHandler {
     log.success(`Auto-cleaned resources for #${task.issue}.`);
 
     // integration moved: any sibling PR that now conflicts gets its agent back.
-    await stalePRs.handleStalePRs(config, event.base ?? 'integration', task.pr_number);
+    await stalePRs.handleStalePRs(config, event.base ?? integrationBranch(config), task.pr_number);
   }
 
   // ── PR Review ────────────────────────────────────────────────────────
@@ -642,7 +650,7 @@ export class EventHandler {
     const config = this.config;
     log.error(`Agent for #${task.issue} ${outcome.type}: ${outcome.reason ?? 'no reason given'}`);
 
-    const preserved = preserveWork(task, this.repoDir, outcome.type);
+    const preserved = preserveWork(this.config, task, this.repoDir, outcome.type);
 
     state.updateTaskStatus(config.repo, task.issue, 'failed', {
       last_agent_message: outcome.final_message ?? undefined,
@@ -804,7 +812,7 @@ export class EventHandler {
             title: `#${task.issue}: ${task.title}`,
             body: buildPRBody(task, outcome),
             head: task.branch,
-            base: 'integration',
+            base: integrationBranch(config),
           });
           log.success(`PR created: ${prUrl}`);
           const prNumber = github.extractPRNumber(prUrl);
@@ -852,7 +860,7 @@ export class EventHandler {
       }
 
       // The branch is pushed so `@foundry go` can send the agent back to it.
-      const preserved = preserveWork(task, this.repoDir, 'verification failed');
+      const preserved = preserveWork(this.config, task, this.repoDir, 'verification failed');
 
       state.updateTaskStatus(config.repo, task.issue, 'failed');
       await claim.markFailed(config, task.issue);
@@ -886,7 +894,7 @@ export class EventHandler {
 
     if (inputRound > config.max_input_rounds) {
       log.error(`#${task.issue} exceeded max input rounds (${config.max_input_rounds}). Marking failed.`);
-      const preserved = preserveWork(task, this.repoDir, 'too many questions');
+      const preserved = preserveWork(this.config, task, this.repoDir, 'too many questions');
       state.updateTaskStatus(config.repo, task.issue, 'failed', {
         input_request_count: inputRound,
         last_agent_message: outcome.final_message ?? undefined,
@@ -903,7 +911,7 @@ export class EventHandler {
 
     log.info(`#${task.issue} needs input (round ${inputRound}).`);
 
-    const preserved = preserveWork(task, this.repoDir, 'waiting for input');
+    const preserved = preserveWork(this.config, task, this.repoDir, 'waiting for input');
 
     try {
       await setStateLabel(config, task.issue, 'waiting_for_input');
@@ -930,7 +938,7 @@ export class EventHandler {
   private async handlePlanCompleted(task: TaskState, outcome: AgentOutcome): Promise<void> {
     const config = this.config;
 
-    preserveWork(task, this.repoDir, 'plan review');
+    preserveWork(this.config, task, this.repoDir, 'plan review');
 
     // Post the plan-review comment separately — it has its own marker.
     const planComment = [
@@ -975,7 +983,7 @@ export class EventHandler {
    */
   private async relaunch(task: TaskState, humanText: string, kind: ResumeKind): Promise<void> {
     const config = this.config;
-    ensureWorktree(task, this.repoDir);
+    ensureWorktree(this.config, task, this.repoDir);
 
     await setStateLabel(config, task.issue, 'in_progress');
 

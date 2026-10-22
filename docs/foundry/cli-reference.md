@@ -111,6 +111,8 @@ Manage a task's preview environment by hand. `up` runs the configured deploy and
 
 ## Integration branch
 
+`integration` and `main` below mean the branches named under `branches:` in `.joynt-foundry.yml`.
+
 ### `foundry review <target>`
 
 Rebase a feature PR onto `integration`, merge it, and run `integration_rebuild`. Run from a checkout.
