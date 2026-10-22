@@ -166,11 +166,10 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 Symptoms and fixes from real runs are collected in [Troubleshooting](troubleshooting.md#github-action).
 
-## Known limitations (as of first version)
+## Known limitations
 
 - `@foundry` commands left as **PR comments** are not yet resolved to their issue and are ignored. Comment on the issue.
-- No verify-to-agent retry loop yet: a verification failure posts the output and marks the task failed.
-- No `if: cancelled()` label cleanup step yet.
+- No verify-to-agent retry loop yet: a verification failure posts the output, pushes the branch, and marks the task failed; `@foundry go` sends the agent back to it.
 - `deployment_id` is not recovered, so preview-down under the action cannot mark a GitHub Deployment inactive; the target repo's teardown workflow should do that itself (the demo's does).
 
 ## Outputs
