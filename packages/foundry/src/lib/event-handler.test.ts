@@ -40,6 +40,12 @@ vi.mock('./preview-verify.js', () => ({
 
 vi.mock('./stale-prs.js', () => ({
   handleStalePRs: vi.fn().mockResolvedValue([]),
+  conflictInstruction: vi.fn().mockReturnValue('rebase please (PR #0 merged)'),
+  dispatchCommand: vi.fn().mockReturnValue(true),
+}));
+
+vi.mock('./review.js', () => ({
+  reviewAndMerge: vi.fn().mockResolvedValue({ merged: true, sha: 'newsha', rebased: true }),
 }));
 
 vi.mock('./worktree.js', () => ({
@@ -152,6 +158,7 @@ import * as issueFile from './issue-file.js';
 import * as previewMod from './preview.js';
 import * as previewVerify from './preview-verify.js';
 import * as stalePRs from './stale-prs.js';
+import * as reviewMod from './review.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
@@ -631,6 +638,38 @@ describe('EventHandler', () => {
       const issue = { number: 42, title: 'T', body: '', html_url: 'u', state: 'open', labels: [] as any[] };
       await handler.handleEvent({ type: 'issue_ready', issue });
       expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_MAX_TURNS).toBe('150');
+    });
+  });
+
+  describe('pr_approved', () => {
+    it('reviews, merges, and completes the task in the same job', async () => {
+      const task = makeTask({ pr_number: 9, pr_url: 'https://github.com/owner/repo/pull/9' });
+      await handler.handleEvent({ type: 'pr_approved', pr_number: 9, branch: task.branch, base: 'integration', reviewer: 'alice', task });
+      expect(reviewMod.reviewAndMerge).toHaveBeenCalledWith(expect.anything(), expect.any(String), { pr_number: 9, branch: task.branch, base: 'integration', reviewer: 'alice' });
+      expect(github.closeIssue).toHaveBeenCalledWith('owner/repo', 42);
+      expect(stalePRs.handleStalePRs).toHaveBeenCalledWith(expect.anything(), 'integration', 9);
+    });
+
+    it('a conflicting task PR is handed back to the agent', async () => {
+      vi.mocked(reviewMod.reviewAndMerge).mockResolvedValueOnce({ merged: false, reason: 'conflicting', detail: 'x' });
+      const task = makeTask({ pr_number: 9 });
+      await handler.handleEvent({ type: 'pr_approved', pr_number: 9, branch: task.branch, base: 'integration', reviewer: 'alice', task });
+      expect(stalePRs.dispatchCommand).toHaveBeenCalledWith(42, 'continue', expect.stringContaining('rebase please'));
+      expect(github.addComment).toHaveBeenCalledWith('owner/repo', 42, expect.stringContaining('approve again once it is clean'));
+      expect(github.closeIssue).not.toHaveBeenCalled();
+    });
+
+    it('a merged promotion PR tears its preview down and checks siblings', async () => {
+      await handler.handleEvent({ type: 'pr_approved', pr_number: 40, branch: 'integration', base: 'main', reviewer: 'alice' });
+      expect(previewMod.findPreviewUrlOnPR).toHaveBeenCalledWith('owner/repo', 40);
+      expect(stalePRs.handleStalePRs).toHaveBeenCalledWith(expect.anything(), 'main', 40);
+    });
+
+    it('failing checks stop everything', async () => {
+      vi.mocked(reviewMod.reviewAndMerge).mockResolvedValueOnce({ merged: false, reason: 'checks_failed', detail: 'ci' });
+      await handler.handleEvent({ type: 'pr_approved', pr_number: 40, branch: 'integration', base: 'main', reviewer: 'alice' });
+      expect(previewMod.previewDownTarget).not.toHaveBeenCalled();
+      expect(stalePRs.dispatchCommand).not.toHaveBeenCalled();
     });
   });
 });

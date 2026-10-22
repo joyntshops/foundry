@@ -233,6 +233,12 @@ export class GhCliClient implements GitHubClient {
 
   // ── Check Runs ─────────────────────────────────────────────────────────
 
+  async listCheckRuns(repo: string, sha: string): Promise<Array<{ name: string; status: string; conclusion: string | null }>> {
+    const raw = gh(['api', `repos/${repo}/commits/${sha}/check-runs?per_page=100`]);
+    const data = JSON.parse(raw);
+    return (data.check_runs ?? []).map((c: any) => ({ name: c.name, status: c.status, conclusion: c.conclusion ?? null }));
+  }
+
   async createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
     const args: string[] = [
       'api', '--method', 'POST', `repos/${repo}/check-runs`,

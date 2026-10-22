@@ -146,6 +146,13 @@ export class MockGitHubClient implements GitHubClient {
     this.record('createReactionForIssueComment', [repo, commentId, reaction]);
   }
 
+  checkRuns: Array<{ name: string; status: string; conclusion: string | null }> = [];
+
+  async listCheckRuns(repo: string, sha: string): Promise<Array<{ name: string; status: string; conclusion: string | null }>> {
+    this.record('listCheckRuns', [repo, sha]);
+    return this.checkRuns;
+  }
+
   async createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number> {
     this.record('createCheckRun', [repo, opts]);
     return this.checkRunId;

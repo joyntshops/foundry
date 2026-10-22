@@ -98,6 +98,7 @@ export interface GitHubClient {
   // Check Runs
   createCheckRun(repo: string, opts: CreateCheckRunOpts): Promise<number>;
   updateCheckRun(repo: string, checkRunId: number, opts: UpdateCheckRunOpts): Promise<void>;
+  listCheckRuns(repo: string, sha: string): Promise<Array<{ name: string; status: string; conclusion: string | null }>>;
 
   // Repository
   getRepoSlug(): Promise<string>;

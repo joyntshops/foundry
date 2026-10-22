@@ -400,23 +400,36 @@ describe('webhookToEvents', () => {
       }
     });
 
-    it('returns empty array for approved reviews', () => {
+    it('maps an approved review on a task PR to pr_approved with the task', () => {
       const task = makeTask({ branch: 'feature/42-fix-bug' });
       mockGetAllTasks.mockReturnValue([task]);
-
       const events = webhookToEvents('pull_request_review', {
         action: 'submitted',
-        review: {
-          state: 'approved',
-          body: 'LGTM',
-          user: { login: 'reviewer' },
-        },
-        pull_request: {
-          head: { ref: 'feature/42-fix-bug' },
-        },
+        review: { state: 'approved', body: 'LGTM', user: { login: 'reviewer' } },
+        pull_request: { number: 9, head: { ref: 'feature/42-fix-bug' }, base: { ref: 'integration' } },
       }, config);
+      expect(events).toEqual([expect.objectContaining({ type: 'pr_approved', pr_number: 9, branch: 'feature/42-fix-bug', base: 'integration', reviewer: 'reviewer', task: expect.objectContaining({ issue: 42 }) })]);
+    });
 
-      expect(events).toEqual([]);
+    it('maps an approved review on a promotion PR to pr_approved without a task', () => {
+      mockGetAllTasks.mockReturnValue([]);
+      const cfg = makeConfig({ preview: { mode: 'template', url_template: 'u', pull_request_bases: ['main'] } });
+      const events = webhookToEvents('pull_request_review', {
+        action: 'submitted',
+        review: { state: 'approved', user: { login: 'r' } },
+        pull_request: { number: 40, head: { ref: 'integration' }, base: { ref: 'main' } },
+      }, cfg);
+      expect(events[0]).toMatchObject({ type: 'pr_approved', pr_number: 40, base: 'main' });
+      expect((events[0] as any).task).toBeUndefined();
+    });
+
+    it('ignores approvals on PRs that are neither tasks nor promotion PRs, or when disabled', () => {
+      mockGetAllTasks.mockReturnValue([]);
+      const payload = { action: 'submitted', review: { state: 'approved', user: { login: 'r' } }, pull_request: { number: 1, head: { ref: 'x' }, base: { ref: 'integration' } } };
+      expect(webhookToEvents('pull_request_review', payload, config)).toEqual([]);
+      const task = makeTask({ branch: 'x' });
+      mockGetAllTasks.mockReturnValue([task]);
+      expect(webhookToEvents('pull_request_review', payload, makeConfig({ review: { merge_on_approval: false } }))).toEqual([]);
     });
   });
 

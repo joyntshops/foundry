@@ -246,18 +246,30 @@ function mapPullRequestReview(
   const pr = payload.pull_request;
   if (!review || !pr) return [];
 
-  // Only act on "changes_requested" reviews
-  if (review.state !== 'changes_requested') return [];
-
   const branch: string = pr.head?.ref ?? '';
+  const base: string = pr.base?.ref ?? '';
   const repo = config.repo;
-
   const task = state.getAllTasks(repo).find(t => t.branch === branch);
-  if (!task) return [];
 
-  const feedback = buildReviewFeedback(review);
+  if (review.state === 'changes_requested') {
+    if (!task) return [];
+    return [{ type: 'pr_review', task, feedback: buildReviewFeedback(review) }];
+  }
 
-  return [{ type: 'pr_review', task, feedback }];
+  if (review.state === 'approved' && config.review?.merge_on_approval !== false) {
+    const promotion = (config.preview?.pull_request_bases ?? []).includes(base);
+    if (!task && !promotion) return [];
+    return [{
+      type: 'pr_approved',
+      pr_number: pr.number,
+      branch,
+      base,
+      reviewer: review.user?.login ?? 'unknown',
+      ...(task ? { task } : {}),
+    }];
+  }
+
+  return [];
 }
 
 function buildReviewFeedback(review: Record<string, any>): string {
