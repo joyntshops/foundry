@@ -68,7 +68,8 @@ export async function awaitChecks(
     const runs = await github.listCheckRuns(repo, sha);
     const result = summariseChecks(runs, opts.ignore ?? []);
     if (result.state !== 'pending' || Date.now() >= deadline) return result;
-    await new Promise(r => setTimeout(r, opts.pollMs ?? CHECKS_POLL_MS));
+    // Never sleep past the deadline; a 1s timeout must not take a 15s poll to notice.
+    await new Promise(r => setTimeout(r, Math.min(opts.pollMs ?? CHECKS_POLL_MS, Math.max(0, deadline - Date.now()))));
   }
 }
 
