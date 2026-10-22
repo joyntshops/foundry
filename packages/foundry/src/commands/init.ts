@@ -4,7 +4,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { stringify as toYaml } from 'yaml';
-import { CONFIG_FILENAME, loadConfig } from '../config.js';
+import { CONFIG_FILENAME, loadConfig, loadConfigSafe } from '../config.js';
 import * as github from '../lib/github.js';
 import * as log from '../lib/log.js';
 import * as git from '../lib/git.js';
@@ -102,6 +102,10 @@ const DEFAULT_CONFIG = {
     auto: 'mode:auto',
     default: 'mode:default',
   },
+  branches: {
+    integration: 'integration',
+    production: 'main',
+  },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
   verify: [] as string[],
@@ -162,20 +166,21 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     log.success('Created initial commit with .joynt-foundry.yml');
   }
 
-  // Create integration branch if it doesn't exist
-  if (!git.remoteBranchExists('integration') && !git.branchExists('integration')) {
-    log.info('Creating integration branch...');
+  // Create the integration branch if it doesn't exist
+  const integration = loadConfigSafe()?.branches?.integration ?? 'integration';
+  if (!git.remoteBranchExists(integration) && !git.branchExists(integration)) {
+    log.info(`Creating ${integration} branch...`);
     try {
       const prev = git.currentBranch();
-      git.createBranch('integration', 'HEAD');
-      git.push('integration');
+      git.createBranch(integration, 'HEAD');
+      git.push(integration);
       git.checkout(prev);
-      log.success('Created and pushed integration branch');
+      log.success(`Created and pushed ${integration} branch`);
     } catch (err) {
-      log.warn(`Failed to create integration branch: ${err}`);
+      log.warn(`Failed to create ${integration} branch: ${err}`);
     }
   } else {
-    log.info('Integration branch already exists.');
+    log.info(`Integration branch ${integration} already exists.`);
   }
 
   if (!opts.skipLabels) {

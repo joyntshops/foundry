@@ -7,6 +7,7 @@
 import { loadConfig, getConfigDir } from '../config.js';
 import * as github from '../lib/github.js';
 import * as log from '../lib/log.js';
+import { integrationBranch } from '../lib/branches.js';
 import { reviewAndMerge } from '../lib/review.js';
 
 export async function runReview(target: string): Promise<void> {
@@ -28,7 +29,7 @@ export async function runReview(target: string): Promise<void> {
     return;
   }
 
-  const outcome = await reviewAndMerge(config, repoDir, { pr_number: pr, branch, base: 'integration' });
+  const outcome = await reviewAndMerge(config, repoDir, { pr_number: pr, branch, base: integrationBranch(config) });
   if (!outcome.merged) {
     log.error(`PR #${pr} not merged: ${outcome.reason} (${outcome.detail})`);
     process.exitCode = 1;

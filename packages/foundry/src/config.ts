@@ -23,6 +23,10 @@ const DEFAULTS: FoundryConfig = {
     auto: 'mode:auto',
     default: 'mode:default',
   },
+  branches: {
+    integration: 'integration',
+    production: 'main',
+  },
   branch_template: 'feature/{issue}-{slug}',
   worktree_base: './wts',
   max_input_rounds: 3,

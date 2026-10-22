@@ -24,6 +24,9 @@ mode_labels:
   default: "mode:default"    # agent's own default permission mode
 
 # ── Branches and worktrees ────────────────────────────────────────────
+branches:
+  integration: "integration"   # feature branches are cut from and merged into this
+  production: "main"           # what integration is promoted to; whatever you deploy from today
 branch_template: "feature/{issue}-{slug}"   # {issue} number, {slug} from title
 worktree_base: "./wts"                      # inside the checkout; add to .gitignore
 

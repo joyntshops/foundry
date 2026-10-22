@@ -10,8 +10,8 @@
 import * as fs from 'node:fs';
 import * as git from './git.js';
 import * as log from './log.js';
-import { resolveBaseBranch } from './completion.js';
-import type { TaskState } from '../types.js';
+import { resolveBaseBranch } from './branches.js';
+import type { FoundryConfig, TaskState } from '../types.js';
 
 export interface PreserveResult {
   /** A commit was made for uncommitted changes. */
@@ -26,7 +26,7 @@ export interface PreserveResult {
  * Never throws; a failure is logged and reported in the result so the
  * status comment can say so.
  */
-export function preserveWork(task: TaskState, repoDir: string, reason: string): PreserveResult {
+export function preserveWork(config: FoundryConfig, task: TaskState, repoDir: string, reason: string): PreserveResult {
   const result: PreserveResult = { committed: false, pushed: false };
   const wt = task.worktree;
   if (!fs.existsSync(wt)) return result;
@@ -42,7 +42,7 @@ export function preserveWork(task: TaskState, repoDir: string, reason: string): 
   }
 
   try {
-    const base = resolveBaseBranch(repoDir);
+    const base = resolveBaseBranch(config, repoDir);
     if (git.countCommits(`${base}..HEAD`, wt) > 0) {
       git.push(task.branch, wt, true);
       result.pushed = true;
@@ -60,7 +60,7 @@ export function preserveWork(task: TaskState, repoDir: string, reason: string): 
  * In a fresh job it is recreated from the pushed branch; if the branch was
  * never pushed, from the base branch.
  */
-export function ensureWorktree(task: TaskState, repoDir: string): void {
+export function ensureWorktree(config: FoundryConfig, task: TaskState, repoDir: string): void {
   if (git.worktreeExists(task.worktree, repoDir) && fs.existsSync(task.worktree)) return;
 
   try { git.fetchAll(repoDir); } catch (err: any) {
@@ -74,7 +74,7 @@ export function ensureWorktree(task: TaskState, repoDir: string): void {
     git.addWorktreeTracking(task.worktree, task.branch, repoDir);
     log.info(`#${task.issue}: recreated worktree from origin/${task.branch}.`);
   } else {
-    const base = resolveBaseBranch(repoDir);
+    const base = resolveBaseBranch(config, repoDir);
     if (git.branchExists(task.branch, repoDir)) git.deleteBranch(task.branch, repoDir);
     git.addWorktree(task.worktree, task.branch, base, repoDir);
     log.info(`#${task.issue}: created worktree for ${task.branch} from ${base} (branch was never pushed).`);

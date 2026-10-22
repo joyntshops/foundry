@@ -45,7 +45,7 @@ export async function runCancelled(opts: { eventName?: string; eventPath?: strin
 
   log.warn(`Run for #${issue} was cancelled. Marking failed.`);
   // This step runs inside the cancelled job, so the worktree is still here.
-  const preserved = preserveWork(task, getConfigDir(), 'run cancelled');
+  const preserved = preserveWork(config, task, getConfigDir(), 'run cancelled');
   await setStateLabel(config, issue, 'failed');
   if (task.preview_url) {
     try { await preview.previewDown(config, task); } catch {}

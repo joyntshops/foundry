@@ -9,6 +9,7 @@ import { loadConfig, getConfigDir } from '../config.js';
 import * as git from '../lib/git.js';
 import * as version from '../lib/version.js';
 import * as log from '../lib/log.js';
+import { integrationBranch } from '../lib/branches.js';
 
 export async function runRelease(bumpType: string): Promise<void> {
   const config = loadConfig();
@@ -24,11 +25,12 @@ export async function runRelease(bumpType: string): Promise<void> {
     return;
   }
 
-  // Ensure we're on integration
+  // Ensure we're on the integration branch
+  const integration = integrationBranch(config);
   const branch = git.currentBranch(repoDir);
-  if (branch !== 'integration') {
-    log.error(`Must be on integration branch. Currently on: ${branch}`);
-    log.info('Run: git checkout integration');
+  if (branch !== integration) {
+    log.error(`Must be on the integration branch (${integration}). Currently on: ${branch}`);
+    log.info(`Run: git checkout ${integration}`);
     return;
   }
 
@@ -52,9 +54,9 @@ export async function runRelease(bumpType: string): Promise<void> {
   git.commitAll(`release: ${tagName}`, repoDir);
   log.success(`Committed version bump.`);
 
-  // Push integration
-  git.push('integration', repoDir);
-  log.success('Pushed integration.');
+  // Push the integration branch
+  git.push(integration, repoDir);
+  log.success(`Pushed ${integration}.`);
 
   log.info('');
   log.info('Next steps:');

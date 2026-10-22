@@ -64,7 +64,7 @@ export function push(branch: string, cwd?: string, force = false): void {
   git(args, cwd);
 }
 
-/** Number of commits in a revision range, e.g. `origin/integration..HEAD`. 0 on any error. */
+/** Number of commits in a revision range, e.g. `origin/<integration>..HEAD`. 0 on any error. */
 export function countCommits(range: string, cwd?: string): number {
   const out = gitSafe(['rev-list', '--count', range], cwd);
   return out === null ? 0 : Number(out) || 0;

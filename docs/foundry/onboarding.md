@@ -32,6 +32,12 @@ Edit `.joynt-foundry.yml`. The parts that matter most:
 ```yaml
 repo: your-org/your-repo
 
+# The branches you already have. Feature work is cut from and merged into
+# `integration`; `production` is what it is promoted to. Rename nothing.
+branches:
+  integration: integration
+  production: main
+
 # Run in the worktree before any PR is opened. Fail-fast.
 verify:
   - npm run lint

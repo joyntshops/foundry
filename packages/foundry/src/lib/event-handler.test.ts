@@ -58,7 +58,7 @@ vi.mock('./git.js', () => ({
   resolveWorktreePath: vi.fn().mockReturnValue('/tmp/wts/42'),
   workerId: vi.fn().mockReturnValue('foundry-42'),
   fetchAll: vi.fn(),
-  remoteBranchExists: vi.fn().mockReturnValue(false),
+  remoteBranchExists: vi.fn().mockImplementation((b: string) => b === 'integration' || b === 'test'),
   worktreeExists: vi.fn().mockReturnValue(false),
   branchExists: vi.fn().mockReturnValue(false),
   addWorktree: vi.fn(),
@@ -155,6 +155,7 @@ vi.mock('../backends/index.js', () => ({
 }));
 
 import * as github from './github.js';
+import * as git from './git.js';
 import * as worktree from './worktree.js';
 import * as statusComment from './status-comment.js';
 import * as issueFile from './issue-file.js';
@@ -242,7 +243,7 @@ describe('EventHandler', () => {
 
       expect(mockWorkerHandleFor).toHaveBeenCalledWith('foundry-42');
       expect(mockWorkerKill).toHaveBeenCalled();
-      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'stopped');
+      expect(worktree.preserveWork).toHaveBeenCalledWith(expect.anything(), task, expect.any(String), 'stopped');
       expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'failed');
       // setStateLabel strips every other state label, then adds the target.
       expect(github.transitionLabels).toHaveBeenCalledWith(
@@ -277,6 +278,25 @@ describe('EventHandler', () => {
       expect(mockWorkerSpawn.mock.calls.at(-1)![0].env.FOUNDRY_RESUME_CONTEXT).toBeUndefined();
     });
 
+    it('cuts the worktree from the configured integration branch and opens the PR against it', async () => {
+      const cfg = { ...makeConfig(), branches: { integration: 'test', production: 'main' } };
+      const h = new EventHandler(cfg, '/tmp/repo');
+      await h.handleEvent(cmd('go', null));
+      expect(git.addWorktree).toHaveBeenCalledWith('/tmp/wts/42', 'feature/42-fix', 'origin/test', '/tmp/repo');
+      vi.mocked(github.createPR).mockResolvedValue('https://github.com/owner/repo/pull/7');
+      await h.handleEvent({ type: 'agent_completed', task: makeTask(), outcome: { type: 'completed', session_id: 's', final_message: 'ok', ask_user_questions: null, report: { status: 'done', summary: 'ok' } } });
+      expect(github.createPR).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ base: 'test' }));
+    });
+
+    it('refuses to start, without claiming, when the integration branch is missing', async () => {
+      const cfg = { ...makeConfig(), branches: { integration: 'nope', production: 'main' } };
+      const h = new EventHandler(cfg, '/tmp/repo');
+      await h.handleEvent(cmd('go', null));
+      expect(claim.claimIssue).not.toHaveBeenCalled();
+      expect(mockWorkerSpawn).not.toHaveBeenCalled();
+      expect(github.addComment).toHaveBeenCalledWith('owner/repo', 42, expect.stringContaining('"nope" does not exist'));
+    });
+
     it('does nothing if the claim fails', async () => {
       vi.mocked(claim.claimIssue).mockResolvedValueOnce(false);
       await handler.handleEvent(cmd('go', null));
@@ -294,7 +314,7 @@ describe('EventHandler', () => {
     it('on a waiting task: relaunches from the branch with the reply as the answer', async () => {
       const task = makeTask({ status: 'waiting-for-input', last_agent_message: 'Tabs or a long form?' });
       await handler.handleEvent(cmd('go', task, 'Tabs.'));
-      expect(worktree.ensureWorktree).toHaveBeenCalledWith(task, expect.any(String));
+      expect(worktree.ensureWorktree).toHaveBeenCalledWith(expect.anything(), task, expect.any(String));
       expect(mockWorkerKill).toHaveBeenCalled();
       expect(github.transitionLabels).toHaveBeenCalledWith('owner/repo', 42, expect.arrayContaining(['state:waiting-for-input']), ['state:in-progress'], undefined);
       const env = mockWorkerSpawn.mock.calls.at(-1)![0].env;
@@ -431,7 +451,7 @@ describe('EventHandler', () => {
         expect.objectContaining({ last_agent_message: 'Something went wrong' }),
       );
       expect(claim.markFailed).toHaveBeenCalledWith(expect.anything(), 42);
-      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'errored');
+      expect(worktree.preserveWork).toHaveBeenCalledWith(expect.anything(), task, expect.any(String), 'errored');
     });
   });
 
@@ -460,7 +480,7 @@ describe('EventHandler', () => {
       await handler.handleEvent({ type: 'agent_completed', task, outcome: {
         type: 'needs-input', session_id: 's', final_message: 'Which?', ask_user_questions: [{ question: 'Which?', options: [], multiSelect: false }],
       } });
-      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'waiting for input');
+      expect(worktree.preserveWork).toHaveBeenCalledWith(expect.anything(), task, expect.any(String), 'waiting for input');
       const call = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
       expect(call.message).toMatch(/Work so far is on `feature\/42-fix/);
     });
@@ -470,14 +490,14 @@ describe('EventHandler', () => {
       await handler.handleEvent({ type: 'agent_completed', task, outcome: {
         type: 'plan-completed', session_id: 's', final_message: '1. Do it', ask_user_questions: null,
       } });
-      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'plan review');
+      expect(worktree.preserveWork).toHaveBeenCalledWith(expect.anything(), task, expect.any(String), 'plan review');
     });
 
     it('verification failure pushes the branch and says so', async () => {
       vi.mocked(verify.runVerifyPipeline).mockReturnValueOnce({ passed: false, results: [{ command: 'npm test', success: false, output: 'boom', duration_ms: 1 }] } as any);
       const task = makeTask();
       await handler.handleEvent({ type: 'agent_completed', task, outcome: { type: 'completed', session_id: 's', final_message: 'ok', ask_user_questions: null, report: { status: 'done', summary: 'ok' } } });
-      expect(worktree.preserveWork).toHaveBeenCalledWith(task, expect.any(String), 'verification failed');
+      expect(worktree.preserveWork).toHaveBeenCalledWith(expect.anything(), task, expect.any(String), 'verification failed');
       const call = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
       expect(call.message).toMatch(/Work so far is on `feature\/42-fix/);
       expect(call.message).toContain('`@foundry go` to continue from the branch');
@@ -596,6 +616,9 @@ describe('EventHandler', () => {
       const task = makeTask({ pr_url: 'https://github.com/owner/repo/pull/5', pr_number: 5 });
       await handler.handleEvent({ type: 'pr_merged', task, base: 'integration' });
       expect(stalePRs.handleStalePRs).toHaveBeenCalledWith(expect.anything(), 'integration', 5);
+      const h = new EventHandler({ ...makeConfig(), branches: { integration: 'test', production: 'main' } }, '/tmp/repo');
+      await h.handleEvent({ type: 'pr_merged', task });
+      expect(stalePRs.handleStalePRs).toHaveBeenLastCalledWith(expect.anything(), 'test', 5);
     });
   });
 

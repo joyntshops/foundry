@@ -19,4 +19,5 @@ export type { Worker, WorkerHandle, WorkerSpawnOpts } from './lib/worker.js';
 export { resolveWorker } from './lib/workers/index.js';
 export { SubprocessWorker } from './lib/workers/subprocess.js';
 export { recoverTask, issueNumberFromPayload, issueNumberFromBranch } from './lib/task-recovery.js';
-export { buildAgentCompletedEvent, resolveBaseBranch } from './lib/completion.js';
+export { buildAgentCompletedEvent } from './lib/completion.js';
+export { resolveBaseBranch, integrationBranch, productionBranch, MissingBranchError } from './lib/branches.js';
