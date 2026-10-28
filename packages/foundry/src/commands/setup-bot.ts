@@ -442,15 +442,12 @@ export async function runSetupBot(opts: SetupBotOptions = {}): Promise<void> {
   }
 
   log.info('');
-  log.success(`Setup complete! No other auth needed — Foundry will use the bot for all ${org} repos.`);
-  log.info('To use in CI, set these env vars:');
-  log.info(`  FOUNDRY_GITHUB_APP_ID=${appId}`);
-  log.info(`  FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH=/path/to/key.pem`);
-  log.info(`  FOUNDRY_GITHUB_APP_INSTALLATION_ID=${installationId}`);
-  if (webhookSecret) {
-    log.info(`  FOUNDRY_GITHUB_WEBHOOK_SECRET=<stored in ${jsonPath}>`);
-  }
+  log.success(`Setup complete. CLI commands on this machine use the saved credentials for ${org} repos automatically.`);
   log.info('');
-  log.info('NOTE: If you previously created this App, you may need to update its permissions');
-  log.info('via the GitHub UI to include "Checks: Write" and subscribe to "Issue comment" events.');
+  log.info('For the GitHub Action, add two repository secrets (the workflow template reads these names):');
+  log.info(`  gh secret set FOUNDRY_APP_ID --repo ${org}/<repo> --body ${appId}`);
+  log.info(`  gh secret set FOUNDRY_APP_PRIVATE_KEY --repo ${org}/<repo> < ${pemPath}`);
+  log.info('');
+  log.info('Then, in the App\'s settings, add Actions and Deployments (write) and accept the');
+  log.info('permission update on the installation; the manifest cannot request them.');
 }

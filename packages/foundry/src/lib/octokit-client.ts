@@ -346,6 +346,12 @@ export class OctokitClient implements GitHubClient {
     await ok.rest.pulls.update({ owner, repo: repoName, pull_number: Number(pr), state: 'closed' });
   }
 
+  async updatePRBody(repo: string, pr: string | number, body: string): Promise<void> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    await ok.rest.pulls.update({ owner, repo: repoName, pull_number: Number(pr), body });
+  }
+
   async getPRStatus(repo: string, branch: string): Promise<{ state: string; url: string } | null> {
     const ok = await this.octokit();
     const { owner, repo: repoName } = splitRepo(repo);

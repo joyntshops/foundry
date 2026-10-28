@@ -22,7 +22,7 @@ Every command reads `.joynt-foundry.yml` from the current directory or a parent.
 
 ### `foundry init`
 
-Scaffold `.joynt-foundry.yml`, create the labels, and create the `integration` branch.
+Scaffold `.joynt-foundry.yml`, create the labels, and create the configured integration branch if it is missing.
 
 ```bash
 foundry init [--skip-labels] [--clean-labels]
@@ -36,7 +36,7 @@ foundry init [--skip-labels] [--clean-labels]
 - Detects the repo from the git remote
 - Detects the project type and fills in `verify`, `integration_rebuild`, `version_sources`
 - Creates the `state:*` and `mode:*` labels (list in [Onboarding](onboarding.md)), plus `agent:*` labels when `agent_label_map` has two or more entries
-- Creates and pushes `integration` if missing; makes an initial commit first on an empty repo
+- On a fresh scaffold, writes the file and stops: set `branches.integration` to the branch the repo already integrates on, then run `init` again. On that second run (or any run with an existing config) it creates and pushes the configured branch if it does not exist, making an initial commit first on an empty repo. This order exists because the scaffold defaults to `integration`, and a repo that integrates on `test` must say so before a branch is pushed in its name.
 
 ### `foundry setup-bot`
 
@@ -46,7 +46,7 @@ Create a GitHub App and install it, so Foundry acts under the App's name instead
 foundry setup-bot
 ```
 
-Opens the browser to GitHub's App manifest page, then to the install page, and saves credentials to `~/.joynt-foundry/github-app-{org}.json` and `.pem`. Copy the App ID and the `.pem` contents into the `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets. Add **actions** and **deployments** write to the App's permissions afterwards and accept the update on the installation; the manifest does not include them.
+Opens the browser to GitHub's App manifest page, then to the install page, and saves credentials to `~/.joynt-foundry/github-app-{org}.json` and `.pem`. It ends by printing the two `gh secret set` commands for `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY`, the names the workflow template reads. (The `FOUNDRY_GITHUB_APP_*` environment variables are a different thing: a local override for CLI commands that applies to every org at once; see [GitHub Identity](github-backends.md).) Add **actions** and **deployments** write to the App's permissions afterwards and accept the update on the installation; the manifest does not include them.
 
 ---
 

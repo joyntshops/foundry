@@ -55,7 +55,26 @@ If `url_template` is **not** set, the command must print the URL to stdout as ei
 - A **plain URL** (`https://...`) -- the last line starting with `http://` or `https://` is used.
 - A **JSON object** with a `url` field -- `{ "url": "https://my-preview.vercel.app" }`.
 
-### Vercel example (URL from command output)
+### Vercel through its GitHub integration (no Vercel credential)
+
+When Vercel's GitHub integration already deploys the repo, nothing has to run a deploy. Vercel builds every push and records each deployment in GitHub's Deployments API, as environment `Preview – <project>` or `Production – <project>` with the URL in `environment_url`. An `up_command` only has to find the record for `$FOUNDRY_SHA` with the job's own token and wait for `success`:
+
+```yaml
+preview:
+  mode: provider
+  up_command: scripts/foundry/vercel-preview-url.sh   # polls gh api repos/$REPO/deployments?sha=$FOUNDRY_SHA
+  ready_timeout_seconds: 900                           # Vercel's build time, not Foundry's
+  pull_request_bases: [main]
+```
+
+The script in the first repo onboarded this way (`cognitive-harmony-technologies/unity`, `scripts/foundry/vercel-preview-url.sh`) is forty lines of `gh api` and a loop. Each commit has its own URL, so a relaunched task is never verified against a stale page, and no `down_command` is needed because Vercel expires previews itself. What the Vercel project needs:
+
+- **Ignored Build Step** that lets the feature-branch pattern build (`[[ "$VERCEL_GIT_COMMIT_REF" == feature/* ]]`) when the project otherwise builds production only.
+- **Deployment Protection off** on that project if stakeholders without a Vercel account are to open the preview from the issue, which is most of the point.
+- **A host override for host-keyed apps.** A preview answers on a generated hostname. An app that picks its tenant, site, or config from the `Host` header finds nothing. Add an env var on the Preview target naming the host the preview should behave as, and route every host-keyed lookup through one function that substitutes it only when `VERCEL_ENV` is `preview`.
+- **The promotion PR is the exception.** When the integration branch is the project's production branch, its commits get a *Production* deployment, where the override is off by design. The script prints the project's production alias for those instead of the generated hostname; the promotion PR's preview is then the integration site itself.
+
+### Vercel CLI (deploys from the runner; needs `VERCEL_TOKEN`)
 
 ```yaml
 preview:

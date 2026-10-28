@@ -66,11 +66,11 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 1. No verify-to-agent retry loop; a verification failure stops the task (the branch is pushed, so `@foundry go` resumes it by hand).
 2. Comments on PRs (commands or replies) resolve to the PR number, not the issue; the workflow template excludes them and `webhook.ts` ignores them.
-3. Not yet run live since the vocabulary change: `go` answering a question, `go` on a failed task, `restart`, `stop`, and the write-permission refusal. All are unit-tested on the same relaunch code the verified reply round-trip used.
+3. Not yet run live since the vocabulary change: `go` answering a question, `restart`, and the write-permission refusal. Run live on `cognitive-harmony-technologies/unity` (2026-10-26 to 28): `go` on a failed task, `go <feedback>` on an open PR (four rounds on one issue, PR updated in place), `stop` with no task, approval → rebase → merge → `state:done`, and the model switch by dispatching against a non-default branch.
 
 ## Testing a change for real
 
-`joyntshops/foundry-demo` is the dogfood repo (private, default branch `integration`). Its workflow uses `joyntshops/foundry@main`; point it at a branch to test unmerged work, then switch it back. Open an issue there, comment `@foundry go`, and watch Actions. Expected: claim comment, agent commit, PR into the configured integration branch, `state:ready-for-human-review`, preview comment with a GitHub Pages URL. Merge the PR to exercise `pull_request.closed` → `state:done` → preview down.
+`joyntshops/foundry-demo` is the dogfood repo (private, default branch `integration`). Its workflow uses `joyntshops/foundry@main`; point it at a branch to test unmerged work, then switch it back. `cognitive-harmony-technologies/unity` is the first production repo (integration branch `test`, Vercel previews through the Deployments API, Opus by default); its `docs/foundry.md` records the repo-specific wiring. Open an issue there, comment `@foundry go`, and watch Actions. Expected: claim comment, agent commit, PR into the configured integration branch, `state:ready-for-human-review`, preview comment with a GitHub Pages URL. Merge the PR to exercise `pull_request.closed` → `state:done` → preview down.
 
 ## Docs
 

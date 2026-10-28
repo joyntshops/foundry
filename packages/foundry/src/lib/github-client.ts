@@ -77,6 +77,8 @@ export interface GitHubClient {
   // Pull Requests
   createPR(repo: string, opts: CreatePROpts): Promise<string>;
   closePR(repo: string, pr: string | number): Promise<void>;
+  /** Replace a pull request's description. */
+  updatePRBody(repo: string, pr: string | number, body: string): Promise<void>;
   getPRStatus(repo: string, branch: string): Promise<{ state: string; url: string } | null>;
   getPRBranch(repo: string, pr: string | number): Promise<string>;
   mergePR(repo: string, pr: string | number, method?: 'merge' | 'rebase' | 'squash'): Promise<void>;

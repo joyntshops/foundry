@@ -87,6 +87,31 @@ claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_
 
 `AskUserQuestion` is disallowed because nobody is there to answer it; questions go in the report. `< /dev/null` stops the CLI waiting three seconds for stdin.
 
+### Choosing the model
+
+The preset passes no model. Claude Code then uses the default for the account behind `CLAUDE_CODE_OAUTH_TOKEN`, which on a subscription is Sonnet. Nobody chose it, and the first repo onboarded ran three rounds on Sonnet before anyone looked. Set the model on the backend's `env`; Claude Code reads `ANTHROPIC_MODEL`, and its aliases track the newest release:
+
+```yaml
+agent_backends:
+  claude-code:
+    type: command
+    preset: claude-code
+    env:
+      ANTHROPIC_MODEL: opus          # newest Opus; `sonnet`, `haiku`, or a pinned id such as claude-opus-5-5
+  claude-code-sonnet:
+    type: command
+    preset: claude-code
+    env:
+      ANTHROPIC_MODEL: sonnet
+
+agent_label_map:
+  "agent:sonnet": claude-code-sonnet # per-issue choice; the default backend is Opus
+```
+
+Which to default to: Opus for tasks whose state spans providers and screens, where Sonnet executed precise briefs well but resolved a conflict in the brief silently and wrote half of a symmetric rule, each costing a human review round. Sonnet, by label, for small fixes with an exact brief, where it was correct and cheap. The status comment on the issue shows each run's cost.
+
+Two things the alias depends on. Resolution happens in the Claude Code CLI, whose version `action.yml` pins (`claude-code-version`); an older pin resolves `opus` to an older Opus, so bump the pin when a new model matters. And the config is read from the branch the job checks out: comment-triggered runs read the default branch, so a model change takes effect there only after it is promoted, while a `workflow_dispatch` against another branch reads that branch's config.
+
 ### What the preset tells the agent
 
 Three environment variables shape every launch. `FOUNDRY_ISSUE_FILE` is a Markdown file holding the issue's title, URL, and body; the preset tells the agent to read it first, so the brief arrives even when the agent has no network (Claude Code's plan mode blocks `gh`, `curl`, and web fetches; the first real plan-mode run planned from the title alone). `FOUNDRY_AGENT_BRIEF` is appended to the system prompt: the standing instruction a stakeholder gives a developer (read the whole issue, decide small things yourself and list them as assumptions, ask only material questions with options, change only what is needed, commit as you go, never push or open PRs, run the verify commands, report truthfully). `FOUNDRY_RESUME_CONTEXT` is empty on a first launch and, on a relaunch after a human reply, says what the agent asked, what the human answered, and that the branch already holds its earlier commits. A custom command can use both the same way.

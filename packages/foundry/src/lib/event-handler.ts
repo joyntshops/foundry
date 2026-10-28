@@ -804,12 +804,24 @@ export class EventHandler {
 
       if (task.pr_url) {
         log.success(`PR already exists for #${task.issue}: ${task.pr_url}`);
+        // The description is the reviewer's summary of what the branch now
+        // holds; after a resumed run it must describe this run, not the first.
+        const prNumber = task.pr_number ?? github.extractPRNumber(task.pr_url);
+        if (prNumber) {
+          try {
+            await github.updatePRBody(config.repo, prNumber, buildPRBody(task, outcome));
+          } catch (err: any) {
+            log.warn(`Could not update the PR description for #${task.issue}: ${err.message}`);
+          }
+        }
         state.updateTaskStatus(config.repo, task.issue, 'pr-open');
         await this.finishReadyForReview(task, 'Verification passed. PR updated with new changes.', 'Verification passed, PR updated');
       } else {
         try {
           const prUrl = await github.createPR(config.repo, {
-            title: `#${task.issue}: ${task.title}`,
+            // Issues and PRs share one number sequence, so a leading "#<issue>:"
+            // reads as the PR's own number, off by one. Reference the issue at the end.
+            title: `${task.title} (issue #${task.issue})`,
             body: buildPRBody(task, outcome),
             head: task.branch,
             base: integrationBranch(config),

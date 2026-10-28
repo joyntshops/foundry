@@ -85,6 +85,8 @@ agent_backends:
   claude-code:
     type: command
     preset: claude-code      # Foundry's maintained Claude Code command; see Agent Backends
+    env:
+      ANTHROPIC_MODEL: opus  # which model; omit and the account's default runs (see Agent Backends)
 
   command:
     type: command
@@ -94,6 +96,7 @@ agent_backends:
 
 agent_label_map:
   "agent:claude": "claude-code"
+  # "agent:sonnet": "claude-code-sonnet"   # e.g. a second claude-code backend with ANTHROPIC_MODEL: sonnet
   # "agent:aider": "aider"          # any backend defined above
 
 # ── Preview Environments (optional) ─────────────────────────────────

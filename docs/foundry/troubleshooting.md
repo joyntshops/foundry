@@ -48,6 +48,28 @@ gh secret list --repo OWNER/REPO                                                
 
 The token is tied to the Claude subscription of whoever ran `claude setup-token`, and it expires; regenerate and update the secret.
 
+`The agent run failed: Failed to authenticate. API Error: 401 Invalid bearer token` with the secret present means the value is wrong, most often whitespace: a token pasted with a trailing newline. Set it trimmed: `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo OWNER/REPO --body "$(pbpaste | tr -d '[:space:]')"`. (Older Foundry versions printed this as "failed (success)", the CLI's own subtype for that case.)
+
+## `gh secret set` hangs
+
+It is waiting for the value on an interactive prompt that some terminals (the Claude desktop app's, for one) never deliver. Pass `--body` or redirect a file: `gh secret set FOUNDRY_APP_PRIVATE_KEY --repo OWNER/REPO < ~/.joynt-foundry/github-app-ORG.pem`.
+
+## The PR shows "1 workflow awaiting approval"
+
+The PR was opened with the job's built-in token, so GitHub holds `pull_request` runs for it, including this workflow's own. Install the App (`foundry setup-bot`, then the two secrets); PRs it opens trigger normally. The PR that is already stuck can be finished by approving it: the review event is yours, and Foundry merges in that job.
+
+## I changed `.joynt-foundry.yml` and nothing changed
+
+Comment-triggered runs read the config from the default branch. Until the change is promoted there, run the issue by dispatch against the branch that has it: `gh workflow run foundry.yml --ref <branch> -f issue=<n> -f command=go`. The same applies to the workflow file and to the model.
+
+## The preview check failed on the promotion PR only
+
+The PR's head is the integration branch, which on Vercel is often the test project's *production* branch, so its commit has a Production deployment on which a preview-only host override is off. Host-keyed endpoints return nothing on the generated hostname. Have the preview script print the project's production alias for Production deployments; see [Preview Environments](preview-environments.md#vercel-through-its-github-integration-no-vercel-credential).
+
+## `gh api orgs/.../installations` returns 403
+
+It needs org-owner rights. Without them, prove the App with a no-op dispatch (`-f command=stop` on an issue with no task) and read the token-mint step in the run.
+
 ## `The agent finished without submitting a report`
 
 Foundry decides what happens next from a typed report, never from the agent's prose, and fails closed without one. A custom backend `command` written before v0.1.36 lacks it. Either switch to `preset: claude-code`, or add `--json-schema "$FOUNDRY_REPORT_SCHEMA"` to a Claude Code command, or have another agent run `foundry report` before exiting. See [The agent report](agent-backends.md#the-agent-report).

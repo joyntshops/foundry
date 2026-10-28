@@ -66,6 +66,9 @@ agent_backends:
   claude-code:
     type: command
     preset: claude-code      # Foundry's maintained Claude Code command; see Agent Backends
+    env:
+      ANTHROPIC_MODEL: opus  # Claude Code alias for the newest Opus. Without this the
+                             # preset runs whatever model the account defaults to.
     # To customise, replace `preset` with your own `command`. It must end the run
     # with a report: pass --json-schema "$FOUNDRY_REPORT_SCHEMA" (Claude Code) or
     # have the agent run `foundry report`. Take the issue title from
@@ -81,6 +84,7 @@ agent_backends:
 # Route issues to a backend by label. Foundry creates these labels when 2+ are listed.
 agent_label_map:
   "agent:claude": "claude-code"
+  # "agent:sonnet": "claude-code-sonnet"   # a second claude-code backend with ANTHROPIC_MODEL: sonnet
   # "agent:aider": "aider"
 
 # ── Preview environments (optional) ───────────────────────────────────
