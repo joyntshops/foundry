@@ -74,6 +74,10 @@ Exactly that: the report said `done` and git disagrees. Usually the agent edited
 
 Foundry labels the task `state:failed` and posts each command's result and the failing output on the issue. The branch is pushed. Fix the cause (often the verify command itself, or a dependency the runner image lacks) and `@foundry go`, or check the branch out locally and run the commands by hand. A verify-to-agent retry loop is planned; today a failure stops the task.
 
+## Verification failed on the install step instantly, with no output
+
+`yarn install` failing in under a second means the wrong Yarn ran: the repo pins Yarn 2+ through `packageManager` in `package.json` and expects corepack, which the runner has disabled. Foundry enables corepack for such repos since v0.1.49; on an older pin, commit the Yarn release instead (`yarn set version <v>` writes `.yarn/releases/` and `yarnPath`). Empty output on a failed step was a Foundry bug fixed in the same release (stderr was dropped); upgrade to see the real error.
+
 ## A PR went stale after another one merged
 
 Foundry handles this: after any merge into `integration`, it checks the other open Foundry PRs and, for each that now conflicts, posts a note on the issue and dispatches the agent with a rebase instruction. If the note says Foundry *could not* start the agent, the workflow is missing the `workflow_dispatch` trigger or `actions: write`; add them from the template, then reply with the quoted instruction. Requesting changes on the conflicting PR does nothing, because GitHub runs no workflow for a PR with conflicts.

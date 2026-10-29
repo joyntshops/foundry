@@ -79,6 +79,19 @@ runs:
       shell: bash
       run: npm install -g "@anthropic-ai/claude-code@${{ inputs.claude-code-version }}"
 
+    # A repo that pins its package manager through package.json `packageManager`
+    # (Yarn 2+, pnpm) expects corepack to supply it. The runner ships Yarn 1 and
+    # corepack disabled, so without this the agent and every verify command get
+    # the wrong Yarn and fail on the lockfile at once.
+    - name: Enable corepack when the repo pins a package manager
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        if [ -f package.json ] && node -e "process.exit(require('./package.json').packageManager ? 0 : 1)"; then
+          corepack enable
+          echo "corepack enabled for $(node -p "require('./package.json').packageManager")"
+        fi
+
     - name: Configure git identity
       shell: bash
       run: |

@@ -743,21 +743,16 @@ export class EventHandler {
     log.info(`Running verification for #${task.issue}...`);
     state.updateTaskStatus(config.repo, task.issue, 'verifying');
 
+    // The check run is created after the branch is pushed, never before: GitHub
+    // refuses a check run for a commit it has not seen ("No commit found for SHA").
     const headSha = git.headSha(task.worktree);
-    let checkRunId: number | undefined;
-    try {
-      checkRunId = await github.createCheckRun(config.repo, {
-        name: 'Foundry Verification',
-        head_sha: headSha,
-        status: 'in_progress',
-        output: {
-          title: 'Verification in progress',
-          summary: `Running verification for #${task.issue}...`,
-        },
-      });
-    } catch (err: any) {
-      log.warn(`Failed to create check run for #${task.issue}: ${err.message}`);
-    }
+    const reportCheck = async (conclusion: 'success' | 'failure', output: { title: string; summary: string; annotations?: any[] }) => {
+      try {
+        await github.createCheckRun(config.repo, { name: 'Foundry Verification', head_sha: headSha, status: 'completed', conclusion, output });
+      } catch (err: any) {
+        log.warn(`Failed to create check run for #${task.issue}: ${err.message}`);
+      }
+    };
 
     const result = verify.runVerifyPipeline(config, task.worktree);
 
@@ -768,27 +763,13 @@ export class EventHandler {
     if (result.passed) {
       log.success(`Verification passed for #${task.issue}.`);
 
-      if (checkRunId) {
-        try {
-          await github.updateCheckRun(config.repo, checkRunId, {
-            status: 'completed',
-            conclusion: 'success',
-            output: {
-              title: 'Verification passed',
-              summary: stepSummary,
-            },
-          });
-        } catch (err: any) {
-          log.warn(`Failed to update check run for #${task.issue}: ${err.message}`);
-        }
-      }
-
       try {
         // --force-with-lease: a relaunched agent may have rebased. The lease is
         // the remote-tracking ref this job fetched, so a push by anyone else
         // since then is still refused.
         git.push(task.branch, task.worktree, true);
         log.success(`Pushed ${task.branch}`);
+        await reportCheck('success', { title: 'Verification passed', summary: stepSummary });
       } catch (err: any) {
         log.error(`Push failed for #${task.issue}: ${err.message}`);
         state.updateTaskStatus(config.repo, task.issue, 'failed');
@@ -854,25 +835,16 @@ export class EventHandler {
         }
       }
 
-      if (checkRunId) {
-        try {
-          const annotations = verify.parseAnnotations(result.results);
-          await github.updateCheckRun(config.repo, checkRunId, {
-            status: 'completed',
-            conclusion: 'failure',
-            output: {
-              title: 'Verification failed',
-              summary: stepSummary,
-              annotations: annotations.length > 0 ? annotations : undefined,
-            },
-          });
-        } catch (err: any) {
-          log.warn(`Failed to update check run for #${task.issue}: ${err.message}`);
-        }
-      }
-
       // The branch is pushed so `@foundry go` can send the agent back to it.
       const preserved = preserveWork(this.config, task, this.repoDir, 'verification failed');
+      if (preserved) {
+        const annotations = verify.parseAnnotations(result.results);
+        await reportCheck('failure', {
+          title: 'Verification failed',
+          summary: stepSummary,
+          annotations: annotations.length > 0 ? annotations : undefined,
+        });
+      }
 
       state.updateTaskStatus(config.repo, task.issue, 'failed');
       await claim.markFailed(config, task.issue);
