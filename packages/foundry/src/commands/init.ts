@@ -135,8 +135,19 @@ const DEFAULT_CONFIG = {
   github_backend: 'octokit' as const,
 };
 
+const CONFIG_HEADER = `# Foundry configuration. Reference:
+# https://github.com/joyntshops/foundry/blob/main/docs/foundry/config-reference.md
+#
+# branches: name the branches this repo ALREADY uses. Feature work is cut from and
+#   merged into \`integration\`; nothing is renamed. Run \`foundry init\` again after
+#   editing it and the branch is created only if it does not exist.
+# agent model: the claude-code preset runs whatever model the Claude Code account
+#   defaults to. Set env.ANTHROPIC_MODEL (opus | sonnet) on the backend to choose.
+`;
+
 export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolean }): Promise<void> {
   const configPath = path.join(process.cwd(), CONFIG_FILENAME);
+  let scaffolded = false;
 
   if (fs.existsSync(configPath)) {
     log.warn(`${CONFIG_FILENAME} already exists. Skipping scaffold.`);
@@ -153,7 +164,8 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     const { detected: _, ...defaults } = projectDefaults;
     const config = { ...DEFAULT_CONFIG, ...defaults, repo };
     const yaml = toYaml(config, { lineWidth: 120 });
-    fs.writeFileSync(configPath, yaml, 'utf-8');
+    fs.writeFileSync(configPath, CONFIG_HEADER + yaml, 'utf-8');
+    scaffolded = true;
     log.success(`Created ${CONFIG_FILENAME}`);
   }
 
@@ -166,9 +178,15 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
     log.success('Created initial commit with .joynt-foundry.yml');
   }
 
-  // Create the integration branch if it doesn't exist
+  // Create the integration branch if it doesn't exist. Not on a fresh scaffold:
+  // the file just written names `integration` by default, and a repo that already
+  // integrates on another branch (test, develop) must say so before a branch is
+  // pushed in its name.
   const integration = loadConfigSafe()?.branches?.integration ?? 'integration';
-  if (!git.remoteBranchExists(integration) && !git.branchExists(integration)) {
+  if (scaffolded) {
+    log.info(`Set branches.integration in ${CONFIG_FILENAME} to the branch feature work is merged into,`);
+    log.info(`then run \`foundry init\` again; the branch is created only if it does not exist.`);
+  } else if (!git.remoteBranchExists(integration) && !git.branchExists(integration)) {
     log.info(`Creating ${integration} branch...`);
     try {
       const prev = git.currentBranch();

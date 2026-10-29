@@ -9,7 +9,9 @@ cd your-repo
 npx @joyntshops/foundry init
 ```
 
-This creates `.joynt-foundry.yml`, creates the GitHub labels, and creates and pushes the `integration` branch. It detects the project type (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`) and fills in `verify`, `integration_rebuild`, and `version_sources`. If the repo has no commits yet, it makes an initial one so the branch can exist. `--clean-labels` also removes labels that are not Foundry's.
+This creates `.joynt-foundry.yml` and the GitHub labels. It detects the project type (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`) and fills in `verify`, `integration_rebuild`, and `version_sources`. `--clean-labels` also removes labels that are not Foundry's.
+
+It does **not** create a branch on that first run. The scaffold names `integration` as the integration branch; if the repo already integrates on another branch (`test`, `develop`), set `branches` first (step 2), then run `init` again. On that run it creates and pushes the configured branch only if it does not exist, making an initial commit first on an empty repo. The first repo onboarded with an existing `test` branch would otherwise have had an unwanted `integration` branch pushed in its name.
 
 If you would rather not run the CLI, create these labels by hand and copy [example.joynt-foundry.yml](../../example.joynt-foundry.yml) to `.joynt-foundry.yml`:
 
@@ -55,6 +57,8 @@ agent_backends:
   claude-code:
     type: command
     preset: claude-code      # Foundry's maintained Claude Code command; see Agent Backends
+    env:
+      ANTHROPIC_MODEL: opus  # without this, the account's default model runs (Sonnet on a subscription)
 
 # Preview environments (optional): a command or workflow you own
 preview:
@@ -66,11 +70,18 @@ preview:
 
 See [Configuration Reference](config-reference.md) for every key.
 
-## 3. Add the workflow and the secret
+## 3. Add the workflow and the secrets
 
-Add `.github/workflows/foundry.yml` from the template in [GitHub Action](github-action.md) and commit it to the default branch; issue events only fire from there. Add the repository secret `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`.
+Add `.github/workflows/foundry.yml` from the template in [GitHub Action](github-action.md). Two facts about branches decide where it has to be:
 
-Optionally run `foundry setup-bot` to create a GitHub App and add its ID and private key as secrets. With them, Foundry's comments and PRs carry the App's name and its pushes trigger your other workflows. Without them, the job's built-in token is used and everything still works.
+- **Comment-triggered runs come from the default branch.** GitHub starts `issue_comment`, `schedule`, and `workflow_dispatch` workflows from the default branch's copy of the file, and the job checks that branch out, so `.joynt-foundry.yml` is read from there too. On a repo that promotes `test` to `main`, Foundry is inert until the workflow and config reach `main`; merging them to `test` early loses nothing.
+- **Any branch can be exercised by dispatch.** `gh workflow run foundry.yml --ref <branch> -f issue=<n> -f command=go` runs that branch's workflow and reads that branch's config. This is how to test the setup, or a config change such as the model, before promotion.
+
+Add the repository secret `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`. Set it so that no whitespace travels with it: `gh secret set NAME --repo OWNER/REPO --body "$(pbpaste | tr -d '[:space:]')"`, or redirect a file. A token pasted with a trailing newline fails every run with `401 Invalid bearer token`, and `gh secret set` waiting on an interactive prompt can hang in some terminals.
+
+Run `foundry setup-bot` and add the two secrets it prints, `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY`. Treat the App as part of setup, not an option: a PR opened with the job's built-in token leaves this workflow's own `pull_request` run stuck at "awaiting approval", and the repo's other CI never runs on agent PRs. With the App, Foundry's comments and PRs carry its name and everything triggers normally.
+
+Before spending agent time, prove the wiring with a no-op: `gh workflow run foundry.yml --ref <branch> -f issue=<any issue number> -f command=stop`. The run should mint the App token and log `has no task to stop`; nothing else happens.
 
 Nothing runs anywhere until someone comments `@foundry go` on an issue.
 

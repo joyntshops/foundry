@@ -101,6 +101,10 @@ export class MockGitHubClient implements GitHubClient {
     this.record('closePR', [repo, pr]);
   }
 
+  async updatePRBody(repo: string, pr: string | number, body: string): Promise<void> {
+    this.record('updatePRBody', [repo, pr, body]);
+  }
+
   async getPRStatus(repo: string, branch: string): Promise<{ state: string; url: string } | null> {
     this.record('getPRStatus', [repo, branch]);
     return this.prStatus;

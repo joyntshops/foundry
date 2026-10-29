@@ -31,7 +31,7 @@ inputs:
       Claude Code CLI version to install. Pinned so a CLI release cannot change
       Foundry's behaviour under you; pass `latest` to opt out.
     required: false
-    default: '2.1.251'
+    default: '2.1.312'
   node-version:
     description: 'Node.js version for Foundry itself.'
     required: false

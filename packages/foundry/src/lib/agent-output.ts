@@ -175,7 +175,10 @@ export function determineOutcome(
   // 1. The run itself failed.
   if (result && resultIsError(result)) {
     const detail = typeof result.result === 'string' && result.result ? `: ${result.result}` : '';
-    return fail(`The agent run failed (${result.subtype ?? 'error'})${detail}`);
+    // The CLI reports some failures (e.g. authentication) with subtype "success"
+    // and is_error set; naming that subtype reads as a contradiction.
+    const subtype = result.subtype && result.subtype !== 'success' ? ` (${result.subtype})` : '';
+    return fail(`The agent run failed${subtype}${detail}`);
   }
 
   // 2. The agent's report: structured output first, then the report file.

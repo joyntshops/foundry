@@ -18,6 +18,7 @@ vi.mock('./github.js', () => ({
   getIssue: vi.fn(),
   transitionLabels: vi.fn(),
   createPR: vi.fn(),
+  updatePRBody: vi.fn(),
   closeIssue: vi.fn(),
   commentOnPR: vi.fn(),
   getComments: vi.fn().mockResolvedValue([]),
@@ -427,6 +428,32 @@ describe('EventHandler', () => {
 
       expect(verify.runVerifyPipeline).toHaveBeenCalled();
       expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'verifying');
+    });
+
+    it('titles the PR with the issue number at the end, not as a leading "#N:"', async () => {
+      vi.mocked(verify.runVerifyPipeline).mockReturnValue({ passed: true, results: [] });
+      vi.mocked(github.createPR).mockResolvedValue('https://github.com/owner/repo/pull/43');
+      vi.mocked(github.extractPRNumber).mockReturnValue(43);
+      await handler.handleEvent({ type: 'agent_completed', task: makeTask(), outcome: {
+        type: 'completed', session_id: 's', final_message: 'Done', ask_user_questions: null,
+        report: { status: 'done', summary: 'Fixed it.' },
+      } });
+      expect(github.createPR).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ title: 'Fix bug (issue #42)' }));
+    });
+
+    it('rewrites the PR description from the latest report when the PR already exists', async () => {
+      vi.mocked(verify.runVerifyPipeline).mockReturnValue({ passed: true, results: [] });
+      await handler.handleEvent({ type: 'agent_completed', task: makeTask({ pr_url: 'https://github.com/owner/repo/pull/5', pr_number: 5 }), outcome: {
+        type: 'completed', session_id: 's', final_message: 'Done', ask_user_questions: null,
+        report: { status: 'done', summary: 'Second round: fixed the throttle.', assumptions: ['Kept the 30 s window for page opens.'] },
+      } });
+      expect(github.createPR).not.toHaveBeenCalled();
+      const [repo, pr, body] = vi.mocked(github.updatePRBody).mock.calls[0];
+      expect(repo).toBe('owner/repo');
+      expect(pr).toBe(5);
+      expect(body).toContain('Closes #42');
+      expect(body).toContain('Second round: fixed the throttle.');
+      expect(body).toContain('- Kept the 30 s window for page opens.');
     });
   });
 

@@ -123,6 +123,10 @@ export class GhCliClient implements GitHubClient {
     gh(['pr', 'close', String(pr), '--repo', repo]);
   }
 
+  async updatePRBody(repo: string, pr: string | number, body: string): Promise<void> {
+    gh(['pr', 'edit', String(pr), '--repo', repo, '--body', body]);
+  }
+
   async getPRStatus(repo: string, branch: string): Promise<{ state: string; url: string } | null> {
     try {
       const raw = gh([

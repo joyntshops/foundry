@@ -29,6 +29,8 @@ The manifest grants **issues, pull_requests, contents, checks: write** and **met
 gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="YOUR_APP") | .permissions'
 ```
 
+That query needs org-owner rights; for anyone else it returns 403, and the only check left is a run. A `workflow_dispatch` of a no-op command (`-f command=stop` on an issue with no task) exercises the token mint and Foundry's own calls without starting an agent.
+
 ### For the CLI: resolution order
 
 CLI commands (`reset`, `preview`, `review`, `release`, `init`) run on your machine and resolve credentials in this order:
@@ -39,6 +41,8 @@ CLI commands (`reset`, `preview`, `review`, `release`, `init`) run on your machi
 4. `gh auth token`
 
 With 3 or 4, actions appear as you.
+
+Two name families, two purposes. `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` are **repository secrets** read by the workflow template; `setup-bot` prints the `gh secret set` lines for them. `FOUNDRY_GITHUB_APP_ID`, `FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH`, and `FOUNDRY_GITHUB_APP_INSTALLATION_ID` are a **local override for the CLI** and apply to every org at once, so with several onboarded orgs do not export them; the per-org files from `setup-bot` are the mechanism that keeps them apart.
 
 ## API client
 

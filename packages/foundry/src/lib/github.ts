@@ -106,6 +106,10 @@ export function closePR(repo: string, pr: string | number): Promise<void> {
   return _client.closePR(repo, pr);
 }
 
+export function updatePRBody(repo: string, pr: string | number, body: string): Promise<void> {
+  return _client.updatePRBody(repo, pr, body);
+}
+
 export function createPR(repo: string, opts: CreatePROpts): Promise<string> {
   return _client.createPR(repo, opts);
 }

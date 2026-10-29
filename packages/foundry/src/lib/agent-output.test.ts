@@ -114,6 +114,16 @@ describe('determineOutcome', () => {
     expect(o.reason).toMatch(/error_max_turns/);
   });
 
+  it('a failed run whose subtype is "success" (e.g. an auth error) does not name the subtype', () => {
+    commit();
+    writeLog([init, { type: 'result', subtype: 'success', is_error: true, parent_tool_use_id: null,
+      result: 'Failed to authenticate. API Error: 401 Invalid bearer token' }]);
+    const o = determineOutcome(log, repo, 'base');
+    expect(o.type).toBe('errored');
+    expect(o.reason).toBe('The agent run failed: Failed to authenticate. API Error: 401 Invalid bearer token');
+    expect(o.reason).not.toMatch(/\(success\)/);
+  });
+
   it('no report → errored, with instructions', () => {
     commit();
     writeLog([init, say('Finished!'), result({})]);
