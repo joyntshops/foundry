@@ -17,7 +17,7 @@
              |        the code forge          |
              |                                |
              |                                |
-             |    :ready            → claim   |
+             |    @foundry go       → claim   |
              |    worktree          → agent   |
              |    lint · build      → test    |
              |    verify            → PR      |
@@ -32,18 +32,20 @@
        issue ──▶ agent ──▶ verify ──▶ integration
 ```
 
-GitHub Issues are the task control plane. Comment `@foundry go` on an issue and Foundry claims it, runs a coding agent in an isolated git worktree, verifies the result, opens a PR into a moving integration branch (yours, by name; nothing is renamed), and stands up a preview environment. Humans review on GitHub. Three comments are the whole control surface: `@foundry go`, `@foundry restart`, `@foundry stop`. Every other comment is context the agent reads; labels show status.
+Foundry turns a GitHub Issue into a verified pull request. Comment `@foundry go` on an issue and Foundry claims it, runs a coding agent in an isolated git worktree, runs your verify commands, opens a PR into your integration branch, and stands up a preview if you have one. Humans review on GitHub. Three comments are the whole control surface: `@foundry go`, `@foundry restart`, `@foundry stop`. Every other comment is context the agent reads; labels show status.
 
-Foundry is a **GitHub Action**. There is no server to run and no machine to keep awake. Every GitHub event that matters starts a job, the job performs one transition of the task's state machine, and state lives on GitHub: in labels, a structured claim comment, the PR, and the preview comment.
+Foundry is a **GitHub Action**. There is no server to run and no machine to keep awake. Each GitHub event that matters starts a job, the job performs one transition of the task's state machine, and state lives on GitHub: in labels, a structured claim comment, the PR, and the preview comment.
 
 Foundry is the orchestration layer, not the agent. It runs Claude Code, aider, or any CLI you configure, and bills your own Claude subscription through `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ## Quick start
 
-1. **Labels and config.** From a clone, run `npx @joyntshops/foundry init` (see [Installation](docs/foundry/installation.md) for registry auth). It creates the `state:*` and `mode:*` labels, a `.joynt-foundry.yml`, and the `integration` branch. Or do those by hand from [Onboarding](docs/foundry/onboarding.md).
-2. **Workflow.** Add `.github/workflows/foundry.yml` from the template in [GitHub Action](docs/foundry/github-action.md) and commit it to the default branch.
-3. **Secret.** Add `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Optionally add a GitHub App so Foundry's comments carry a bot name.
+1. **Scaffold.** From a clone, run `npx @joyntshops/foundry init` ([registry auth](docs/foundry/installation.md)). It writes `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, and an issue template, and creates the `state:*` and `mode:*` labels. Set `branches:` to the branches you already deploy from; nothing is renamed.
+2. **Secrets.** Add `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`. Run `foundry setup-bot` and add the two App secrets it prints; without the App, PRs the agent opens get no CI.
+3. **Push** to the default branch. Foundry listens from there.
 4. **Go.** Open an issue, comment `@foundry go`, watch Actions → Foundry.
+
+The full walkthrough is in [Onboarding](docs/foundry/onboarding.md).
 
 ## The loop
 
@@ -52,48 +54,33 @@ human comments @foundry go on an issue
   → claim (state:in-progress + claim comment)
   → worktree from origin/<integration branch>
   → agent runs; transcript is the job log
-  → outcome classified: completed · needs input · plan ready · errored
+  → the agent's typed report: done · needs input · plan ready · blocked
   → verify (lint, typecheck, build, test); no PR until green
   → PR into integration · state:ready-for-human-review · preview up
-human reviews, comments @foundry go <feedback>, or requests changes → agent resumes from the branch
-PR merged → state:done · issue closed · preview down
+human reviews; @foundry go <feedback> or "request changes" sends the agent back to the branch
+approve → Foundry rebases, waits for checks, merges → state:done · preview down
 ```
-
-## CLI
-
-The CLI sets a repo up and operates on tasks from any checkout. It is not a daemon.
-
-| Command | Description |
-|---------|-------------|
-| `foundry init` | Scaffold config, create labels, create `integration` branch |
-| `foundry setup-bot` | Create a GitHub App so Foundry acts under its own name (optional) |
-| `foundry action` | Run the state machine for one GitHub event; the Action's entry point |
-| `foundry reset <issue>` | Remove a task's branch, PR, and preview; `@foundry go` starts it again |
-| `foundry preview up/down/status <issue>` | Manage a task's preview environment by hand |
-| `foundry review <pr>` | Rebase a PR onto `integration`, merge it, run the integration rebuild |
-| `foundry release <type>` | Unified version bump across `version_sources` |
-| `foundry sync-integration` | Merge `main` into `integration` after a hotfix |
-
-See [CLI Reference](docs/foundry/cli-reference.md).
 
 ## Documentation
 
-- [Overview](docs/foundry/overview.md)
-- [GitHub Action](docs/foundry/github-action.md)
-- [Installation](docs/foundry/installation.md)
-- [Onboarding](docs/foundry/onboarding.md)
-- [Workflows](docs/foundry/workflows.md)
-- [Integration Strategy](docs/foundry/integration-strategy.md)
-- [Preview Environments](docs/foundry/preview-environments.md)
-- [Agent Backends](docs/foundry/agent-backends.md)
-- [GitHub Identity](docs/foundry/github-backends.md)
-- [CLI Reference](docs/foundry/cli-reference.md)
-- [Configuration Reference](docs/foundry/config-reference.md)
+Start here:
+
+- [Overview](docs/foundry/overview.md): what Foundry does, what it does not, and the security model
+- [Onboarding](docs/foundry/onboarding.md): get a repo running
+- [Writing a task](docs/foundry/writing-a-task.md): what the agent sees and how to brief it
+- [Workflows](docs/foundry/workflows.md): the three commands and how to steer a task
+
+Reference:
+
+- [Configuration](docs/foundry/config-reference.md) · [CLI](docs/foundry/cli-reference.md) · [GitHub Action](docs/foundry/github-action.md)
+- [Agent backends](docs/foundry/agent-backends.md) · [Preview environments](docs/foundry/preview-environments.md) · [GitHub identity](docs/foundry/github-backends.md) · [Integration branch](docs/foundry/integration-strategy.md)
 - [Troubleshooting](docs/foundry/troubleshooting.md)
+
+About the project: [Open source](docs/foundry/open-source.md), including how Foundry relates to `claude-code-action` · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 ## Package
 
-Published to GitHub Packages as `@joyntshops/foundry`. Merging to `main` publishes automatically. See [Installation](docs/foundry/installation.md) for registry authentication.
+Published to GitHub Packages as `@joyntshops/foundry`; merging to `main` publishes. The CLI is only needed for setup and for operating on a task from a checkout. See [Installation](docs/foundry/installation.md).
 
 ## License
 

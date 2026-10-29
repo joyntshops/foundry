@@ -8,12 +8,12 @@ How Foundry authenticates to GitHub, and which API client it uses. Two separate 
 
 A GitHub Actions job already has an identity. `${{ github.token }}` is scoped to the repo, carries the permissions the workflow grants, and dies with the job. The workflow template passes it to the Action, and that is enough for every call Foundry makes: labels, comments, PRs, pushes, `gh workflow run` for previews, deployment records.
 
-A GitHub App is optional and adds two things:
+The built-in token has one limit that matters: events it causes do not start other workflows. A GitHub App removes it and adds a name:
 
 - **A named bot.** Comments, labels, and PRs appear as `<YourApp>[bot]` instead of `github-actions[bot]`.
-- **Triggering other workflows.** Pushes and PRs made with the built-in token do not start `push` or `pull_request` workflows, so a repo's CI would silently skip agent PRs. Pushes made as an App do.
+- **Triggering other workflows.** Pushes and PRs made with the built-in token do not start `push` or `pull_request` workflows, so a repo's CI skips agent PRs and required checks can never pass; on some repos the run is created but held at "awaiting approval". Pushes and PRs made as an App trigger normally. This is why the App is part of setup rather than an option.
 
-The template mints an App token when `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets exist and falls back to the built-in token otherwise. See [GitHub Action](github-action.md#secrets).
+The workflow mints an App token when the `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets exist and falls back to the built-in token otherwise, so a repo can be wired before the App exists.
 
 ### Creating the App: `foundry setup-bot`
 

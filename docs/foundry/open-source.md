@@ -18,7 +18,7 @@ Foundry runs the same way and bills the same way, and its `claude-code` preset i
 |---|---|---|
 | Unit of work | one mention, one job, one reply | a task with a lifecycle that spans many jobs: claimed, running, waiting, PR open, done |
 | What starts it | any `@claude` mention | three commands, authorized against repo permission; every other comment is context |
-| Before a PR exists | nothing; the agent's push is the result | verification (lint, typecheck, build, tests) must pass; a failed run is posted on the issue |
+| Before a PR exists | whatever the agent chose to run; its push is the result | your verify commands must pass, enforced by Foundry; a failed run is posted on the issue and no PR opens |
 | Previews | none | per-branch preview up on PR, redeploy on push, down on merge; `verify_preview` runs against it |
 | Review | the agent can review | approve → rebase onto the integration branch → wait for checks → merge; siblings that now conflict get their agent back |
 | Branch model | whatever the agent does | feature → integration → production, named per repo |
@@ -30,11 +30,8 @@ Use `claude-code-action` when a mention-and-reply is the whole job: answer a que
 
 ## Still open before a wider audience
 
-Not done, still right:
+- The package is published to GitHub Packages, which requires a token to install even a public package. Publishing to npmjs would remove the one setup step that has nothing to do with Foundry.
+- Demo repository and screenshots an outside reader can open; the current dogfood repo is private.
+- A verify-to-agent retry loop ([known limitations](github-action.md#known-limitations)).
 
-- `CONTRIBUTING.md` that sets expectations (maintained for Joynt's needs; how to add a backend, run tests, submit a PR), `SECURITY.md` with a disclosure path, `CODE_OF_CONDUCT.md`.
-- An external-audience README: the problem, the 30-second demo flow, a quick start that works on a fresh repo.
-- A security section: the agent runs user-configured commands in a worktree (the same trust boundary as CI), issue text reaches a shell through `FOUNDRY_ISSUE_*` only, and the commenter must hold write access.
-- Audit for Joynt-internal references and private-repo examples before pointing anyone at it.
-
-Done since the memo, and no longer open: license, CI on pull requests, npm publishing on merge, pinned Claude Code version, typed agent report in place of regex classification, commenter authorization, the `if: cancelled()` cleanup step.
+Done: license, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, a [security model](overview.md#security-model), CI on pull requests, npm publishing on merge, pinned Claude Code version, typed agent report in place of regex classification, commenter authorization, the `if: cancelled()` cleanup step, `init` writing the workflow, and a sweep of the docs for private-repo references.

@@ -31,6 +31,8 @@ packages/foundry/src/
   lib/worktree.ts            preserveWork (commit+push before a job ends waiting) and ensureWorktree (recreate on resume)
   lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/
   backends/                  agent backends; `command` is the only type, fully generic
+  lib/templates.ts           reads packages/foundry/templates/ (shipped with the package; `init` writes them into a repo)
+packages/foundry/templates/  foundry.yml (the workflow, single source; docs link it) and vercel-preview-url.sh
 docs/foundry/                user docs; github-action.md carries the load-bearing decisions
 ```
 
@@ -74,4 +76,4 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 ## Docs
 
-The audience for `docs/` is the next session, not just a human operator. When a run teaches something non-obvious, write it into `docs/foundry/github-action.md` (decisions) or `docs/foundry/troubleshooting.md` (symptoms) so it is not rediscovered.
+The audience for `docs/` is the next session and outside users. When a run teaches something non-obvious, write it into `docs/foundry/github-action.md` (decisions) or `docs/foundry/troubleshooting.md` (symptoms) so it is not rediscovered. Keep each fact in one place and link to it: the workflow lives in `packages/foundry/templates/foundry.yml`, the config schema in `example.joynt-foundry.yml`, the release flow in `integration-strategy.md`. No private-repo names in user docs; `CLAUDE.md` may name them.

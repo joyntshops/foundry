@@ -89,7 +89,7 @@ claude {permission_mode} -p "You are working on issue #{issue_number}: $FOUNDRY_
 
 ### Choosing the model
 
-The preset passes no model. Claude Code then uses the default for the account behind `CLAUDE_CODE_OAUTH_TOKEN`, which on a subscription is Sonnet. Nobody chose it, and the first repo onboarded ran three rounds on Sonnet before anyone looked. Set the model on the backend's `env`; Claude Code reads `ANTHROPIC_MODEL`, and its aliases track the newest release:
+The preset passes no model. Claude Code then uses the default for the account behind `CLAUDE_CODE_OAUTH_TOKEN`, which on a subscription is Sonnet. Set the model on the backend's `env`; Claude Code reads `ANTHROPIC_MODEL`, and its aliases track the newest release:
 
 ```yaml
 agent_backends:
@@ -108,13 +108,13 @@ agent_label_map:
   "agent:sonnet": claude-code-sonnet # per-issue choice; the default backend is Opus
 ```
 
-Which to default to: Opus for tasks whose state spans providers and screens, where Sonnet executed precise briefs well but resolved a conflict in the brief silently and wrote half of a symmetric rule, each costing a human review round. Sonnet, by label, for small fixes with an exact brief, where it was correct and cheap. The status comment on the issue shows each run's cost.
+Which to default to: in our runs, Opus for tasks whose state spans several parts of the system, where Sonnet executed precise briefs well but resolved a conflict in the brief silently and missed the symmetric case of a rule it wrote, each costing a human review round; Sonnet, by label, for small fixes with an exact brief, where it was correct and several times cheaper. The status comment on the issue shows each run's cost, so the choice can be revisited with numbers.
 
 Two things the alias depends on. Resolution happens in the Claude Code CLI, whose version `action.yml` pins (`claude-code-version`); an older pin resolves `opus` to an older Opus, so bump the pin when a new model matters. And the config is read from the branch the job checks out: comment-triggered runs read the default branch, so a model change takes effect there only after it is promoted, while a `workflow_dispatch` against another branch reads that branch's config.
 
 ### What the preset tells the agent
 
-Three environment variables shape every launch. `FOUNDRY_ISSUE_FILE` is a Markdown file holding the issue's title, URL, and body; the preset tells the agent to read it first, so the brief arrives even when the agent has no network (Claude Code's plan mode blocks `gh`, `curl`, and web fetches; the first real plan-mode run planned from the title alone). `FOUNDRY_AGENT_BRIEF` is appended to the system prompt: the standing instruction a stakeholder gives a developer (read the whole issue, decide small things yourself and list them as assumptions, ask only material questions with options, change only what is needed, commit as you go, never push or open PRs, run the verify commands, report truthfully). `FOUNDRY_RESUME_CONTEXT` is empty on a first launch and, on a relaunch after a human reply, says what the agent asked, what the human answered, and that the branch already holds its earlier commits. A custom command can use both the same way.
+What the agent sees, and how to write an issue for it, is in [Writing a task](writing-a-task.md). The mechanics: three environment variables shape every launch. `FOUNDRY_ISSUE_FILE` is a Markdown file holding the issue's title, URL, and body; the preset tells the agent to read it first, so the brief arrives even when the agent has no network (Claude Code's plan mode blocks `gh`, `curl`, and web fetches; the first real plan-mode run planned from the title alone). `FOUNDRY_AGENT_BRIEF` is appended to the system prompt: the standing instruction a stakeholder gives a developer (read the whole issue, decide small things yourself and list them as assumptions, ask only material questions with options, change only what is needed, commit as you go, never push or open PRs, run the verify commands, report truthfully). `FOUNDRY_RESUME_CONTEXT` is empty on a first launch and, on a relaunch after a human reply, says what the agent asked, what the human answered, and that the branch already holds its earlier commits. A custom command can use both the same way.
 
 ### Untrusted text in commands
 
@@ -142,7 +142,7 @@ agent_backends:
       aider --yes --message "Implement issue #{issue_number}: $FOUNDRY_ISSUE_TITLE. See {issue_url}. When you stop, run foundry report."
       2>&1 | tee {log_dir}/agent.log
     env:
-      AIDER_MODEL: claude-3-5-sonnet-20241022
+      AIDER_MODEL: claude-sonnet-5-5
 
   custom:
     type: command
@@ -178,34 +178,10 @@ agent_backends:
 
 Env values also support template variable interpolation.
 
-## Adding a New Backend
-
-To add support for a new coding agent:
-
-1. Add a new entry under `agent_backends` in `.joynt-foundry.yml`
-2. Set `type: command`
-3. Set `command` to the CLI invocation with template variables
-4. Optionally add `env` for environment variables
-5. Optionally map a label in `agent_label_map`
-
-No code changes to Foundry are needed. The command backend is fully generic.
-
-### When a human replies
+## When a human replies
 
 When a human answers an agent question, approves a plan, or requests changes on the PR, the agent is **relaunched** with the message as `{body}` and the issue as context. There is no session resume: the session store lived in the job that asked, and that job is gone. Write the backend command so the agent re-reads the branch and the issue thread on every launch; Claude Code does this by default when pointed at `{issue_url}`.
 
-## Logging
+## Logging and authentication
 
-All backends should tee output to `{log_dir}/agent.log`. Foundry creates the log directory, parses this file to classify the outcome (Claude Code's stream-json format is understood natively), streams it to the job log, and the workflow template uploads it as an artifact.
-
-## Authentication
-
-The job passes `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` from its inputs into the agent's environment. Claude Code reads either directly. Other agents need their own credentials passed the same way; use `env:` on the backend with a secret exposed to the job.
-
-## Lifecycle
-
-1. **Launch**: the command starts in the worktree as a subprocess of the job
-2. **Running**: the agent works autonomously; watch the job log
-3. **Exit**: the agent process exits; the job was waiting on it
-4. **Classification**: `agent.log` is parsed for completion, needs-input, plan, or error
-5. **Verification**: Foundry runs the configured verify pipeline
+Every backend should tee its output to `{log_dir}/agent.log`. Foundry streams it to the job log, parses it for the outcome (Claude Code's stream-json format is understood natively), and the workflow template uploads it as an artifact. The job passes `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` into the agent's environment; other agents get their credentials the same way, through `env:` on the backend and a secret exposed to the job.

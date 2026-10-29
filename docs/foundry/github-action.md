@@ -35,80 +35,7 @@ A human then acts on GitHub. Each action is another event, another job:
 
 ## Workflow template
 
-```yaml
-name: Foundry
-on:
-  issue_comment:       { types: [created] }
-  pull_request:        { types: [opened, synchronize, reopened, closed] }
-  pull_request_review: { types: [submitted] }
-  workflow_dispatch:                       # Foundry dispatches itself; see gotchas
-    inputs:
-      issue:   { required: true,  type: string }
-      command: { required: true,  type: string }
-      message: { required: false, type: string, default: "" }
-  schedule:
-    - cron: '*/30 * * * *'                 # reconcile: catch runs that died without cleanup
-
-
-# The job's built-in token does all of Foundry's GitHub writes.
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  actions: write        # gh workflow run for preview up/down
-  deployments: write    # GitHub Deployment records for previews
-
-jobs:
-  foundry:
-    # Comments: only `@foundry` commands, only on issues (not PRs), only from
-    # people associated with the repo. The job re-checks the commenter's
-    # permission (write or admin) before acting.
-    if: >-
-      (github.event_name == 'issue_comment' &&
-        !endsWith(github.event.comment.user.login, '[bot]') &&
-        !github.event.issue.pull_request &&
-        startsWith(github.event.comment.body, '@foundry') &&
-        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'pull_request' &&
-        (github.event.pull_request.merged == true ||
-         github.event.pull_request.base.ref == 'main')) ||   # the branch in preview.pull_request_bases
-      (github.event_name == 'pull_request_review' &&
-        (github.event.review.state == 'changes_requested' || github.event.review.state == 'approved')) ||
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    concurrency:                                       # job-level, see gotchas
-      group: foundry-${{ github.event.inputs.issue || github.event.issue.number || github.event.pull_request.number || github.event_name }}
-      # `@foundry stop` cancels the running job for that issue; everything else queues.
-      cancel-in-progress: ${{ github.event_name == 'issue_comment' && contains(github.event.comment.body, '@foundry stop') }}
-    env:
-      FOUNDRY_APP_ID: ${{ secrets.FOUNDRY_APP_ID }}   # secrets aren't readable in step `if:`
-    steps:
-      - id: app                                        # skipped when no App is configured
-        if: env.FOUNDRY_APP_ID != ''
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.FOUNDRY_APP_ID }}
-          private-key: ${{ secrets.FOUNDRY_APP_PRIVATE_KEY }}
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ steps.app.outputs.token || github.token }}
-          fetch-depth: 0
-      - id: foundry
-        uses: joyntshops/foundry@main
-        with:
-          github-token: ${{ steps.app.outputs.token || github.token }}
-          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      - if: always() && steps.foundry.outputs.log-dir != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: foundry-issue-${{ steps.foundry.outputs.issue }}-run-${{ github.run_id }}
-          path: ${{ steps.foundry.outputs.log-dir }}
-          if-no-files-found: ignore
-```
-
-`.joynt-foundry.yml` in the target repo configures everything; see [Configuration Reference](config-reference.md).
+`foundry init` writes `.github/workflows/foundry.yml` from [`packages/foundry/templates/foundry.yml`](../../packages/foundry/templates/foundry.yml), with the repo's production branch in the PR filter. That file is the single source; the decisions below explain its shape (the `if:` filter, job-level concurrency, the App token step, the schedule). `.joynt-foundry.yml` in the target repo configures everything else; see [Configuration](config-reference.md).
 
 ## Secrets
 
@@ -154,7 +81,7 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **Stopping a run.** `@foundry stop` works: the template sets `cancel-in-progress` for that comment, so GitHub cancels the issue's running job, the action's `if: cancelled()` step marks the task failed, and the stop command's own job tears the preview down. Cancel from the Actions UI has the same effect through the same cleanup step. Either way the issue never stays at `state:in-progress` with nothing running.
 
-**Runs that die silently are reconciled.** A runner failure or the six-hour limit can end a job with no cleanup. The `schedule` trigger runs `foundry reconcile`: any `state:in-progress` issue whose status comment is older than `reconcile_stale_minutes` (default 120) is marked failed with a note. Set the threshold above your job `timeout-minutes`.
+**Runs that die silently are reconciled.** A runner failure or the six-hour limit can end a job with no cleanup. The `schedule` trigger (the template's default is every six hours) runs `foundry reconcile`: any `state:in-progress` issue whose status comment is older than `reconcile_stale_minutes` (default 120) is marked failed with a note. Set the threshold above your job `timeout-minutes`.
 
 **Cost is visible per issue.** The status comment's `Last run` row shows the cost, turns, and duration the agent CLI reported. `agent_max_turns` (default 150) caps a runaway session; the preset passes it as `--max-turns`.
 
@@ -166,13 +93,13 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **Stacked PRs only retarget if the base branch is deleted.** Learned the hard way: a PR stacked on a feature branch merged into that branch instead of `main` because the feature branch was kept at merge time. Merge with "Delete branch" or expect to open a follow-up PR.
 
-Symptoms and fixes from real runs are collected in [Troubleshooting](troubleshooting.md#github-action).
+Symptoms and fixes from real runs are collected in [Troubleshooting](troubleshooting.md).
 
 ## Known limitations
 
 - `@foundry` commands left as **PR comments** are not yet resolved to their issue and are ignored. Comment on the issue.
 - No verify-to-agent retry loop yet: a verification failure posts the output, pushes the branch, and marks the task failed; `@foundry go` sends the agent back to it.
-- `deployment_id` is not recovered, so preview-down under the action cannot mark a GitHub Deployment inactive; the target repo's teardown workflow should do that itself (the demo's does).
+- `deployment_id` is not recovered between jobs, so preview-down under the Action cannot mark the GitHub Deployment record inactive; have the teardown workflow do it (the demo repo's does).
 
 ## Outputs
 
