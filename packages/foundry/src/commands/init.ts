@@ -8,6 +8,7 @@ import { CONFIG_FILENAME, loadConfig, loadConfigSafe } from '../config.js';
 import * as github from '../lib/github.js';
 import * as log from '../lib/log.js';
 import * as git from '../lib/git.js';
+import { readTemplate, renderWorkflow } from '../lib/templates.js';
 
 const LABEL_DEFS: Array<{ name: string; color: string; description: string }> = [
   { name: 'state:in-progress', color: 'fbca04', description: 'Foundry is working on this issue' },
@@ -170,6 +171,7 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
   }
 
   writeIssueTemplate();
+  writeWorkflow(loadConfigSafe()?.branches?.production ?? 'main');
 
   // Auto-commit on empty repo so we have a HEAD for branch creation
   if (!git.hasCommits()) {
@@ -243,11 +245,13 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
 
   log.info('');
   log.info('Next steps:');
-  log.info('  1. Review and edit .joynt-foundry.yml');
-  log.info('  2. Configure version_sources and agent_backends');
-  log.info('  3. Run `foundry run` to start the runner loop');
+  log.info(`  1. Review ${CONFIG_FILENAME}: branches, verify commands, the model`);
+  log.info('  2. Add the secrets: CLAUDE_CODE_OAUTH_TOKEN (claude setup-token), then');
+  log.info('     `foundry setup-bot` for FOUNDRY_APP_ID and FOUNDRY_APP_PRIVATE_KEY');
+  log.info('  3. Commit and push; the workflow listens once it is on the default branch');
+  log.info('  4. Open an issue and comment `@foundry go`');
   log.info('');
-  log.info('Docs: docs/foundry/overview.md');
+  log.info('Docs: https://github.com/joyntshops/foundry/blob/main/docs/foundry/onboarding.md');
 }
 
 const ISSUE_TEMPLATE = `---
@@ -287,4 +291,21 @@ function writeIssueTemplate(): void {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, ISSUE_TEMPLATE, 'utf-8');
   log.success('Created .github/ISSUE_TEMPLATE/foundry-task.md');
+}
+
+/**
+ * Write .github/workflows/foundry.yml from the shipped template, with the
+ * configured production branch in the PR filter. Never overwrites: a repo that
+ * has tuned its workflow keeps it.
+ */
+function writeWorkflow(production: string): void {
+  const dir = path.join(process.cwd(), '.github', 'workflows');
+  const file = path.join(dir, 'foundry.yml');
+  if (fs.existsSync(file)) {
+    log.info('.github/workflows/foundry.yml already exists; left as is.');
+    return;
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, renderWorkflow(readTemplate('foundry.yml'), { production }), 'utf-8');
+  log.success('Created .github/workflows/foundry.yml');
 }

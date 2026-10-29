@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Everything below was hit on real runs. Fixes are in the version noted where relevant.
+Everything below was hit on real runs.
 
 ## Nothing happened after I commented `@foundry go`
 
@@ -15,10 +15,6 @@ Everything below was hit on real runs. Fixes are in the version noted where rele
 
 Labels are status, not commands. Only Foundry sets `state:*`. Comment `@foundry go`.
 
-## `Some specified paths were not resolved, unable to cache dependencies`
-
-The `setup-node` step in the composite action tried to cache npm using a path under `_actions/`, outside the workspace. Fixed in v0.1.34. If you pin an older ref, move to `@main`.
-
 ## `Resource not accessible by integration`
 
 The token lacks a permission for that call. See the [permissions table](github-backends.md#permissions-reference). With the built-in token, grant it in the workflow's `permissions:` block. With a GitHub App, add it on the App **and accept the permission update on the installation**; installations keep the old set until an org owner accepts. Check what jobs actually get:
@@ -31,11 +27,7 @@ gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="Y
 
 ## Two Foundry runs show as cancelled
 
-Foundry's own comments trigger `issue_comment` events. The job `if:` filters them, but a **workflow-level** `concurrency` group admits every run before the filter, and GitHub keeps only one pending run per group, so they cancel each other. A pending human `@foundry` command could be the one cancelled. Declare `concurrency` on the **job**, as the template does.
-
-## The preview comment shows an Actions run URL
-
-Before v0.1.34, a provider `up_command` whose stdout looked like a URL (`gh workflow run` prints one) was taken as the preview URL even when `url_template` was set. Now the template always wins. Upgrade.
+The workflow declares `concurrency` at the workflow level instead of on the job, so Foundry's own comments enter the group before the `if:` filters them and cancel each other. Declare it on the job, as the template does; the reason is under [Decisions](github-action.md#decisions-and-gotchas).
 
 ## The agent exited immediately, outcome `errored`
 
@@ -64,7 +56,7 @@ Comment-triggered runs read the config from the default branch. Until the change
 
 ## The preview check failed on the promotion PR only
 
-The PR's head is the integration branch, which on Vercel is often the test project's *production* branch, so its commit has a Production deployment on which a preview-only host override is off. Host-keyed endpoints return nothing on the generated hostname. Have the preview script print the project's production alias for Production deployments; see [Preview Environments](preview-environments.md#vercel-through-its-github-integration-no-vercel-credential).
+The PR's head is the integration branch, which on Vercel is often the test project's *production* branch, so its commit has a Production deployment on which a preview-only host override is off. Host-keyed endpoints return nothing on the generated hostname. Have the preview script print the project's production alias for Production deployments; see [Preview Environments](preview-environments.md#vercel-through-its-github-integration).
 
 ## `gh api orgs/.../installations` returns 403
 
@@ -96,7 +88,7 @@ The workflow must set `cancel-in-progress` for stop comments (template: `cancel-
 
 ## An issue is stuck at `state:in-progress` with no run
 
-The job died without cleanup (runner failure, `timeout-minutes`, or an older template without the cancel step). The `schedule` trigger runs `foundry reconcile` every 30 minutes and marks such issues failed once the status comment is older than `reconcile_stale_minutes`. To do it now from a checkout: `foundry reconcile`. Then `@foundry go` to continue from the branch, or `@foundry restart` to start over.
+The job died without cleanup (runner failure, `timeout-minutes`, or an older template without the cancel step). The `schedule` trigger runs `foundry reconcile` and marks such issues failed once the status comment is older than `reconcile_stale_minutes`. To do it now from a checkout: `foundry reconcile`. Then `@foundry go` to continue from the branch, or `@foundry restart` to start over.
 
 ## I answered the agent's question and nothing happened
 

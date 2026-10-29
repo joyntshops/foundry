@@ -2,128 +2,7 @@
 
 Foundry is configured via `.joynt-foundry.yml` at the repo root of the repository the Action runs in.
 
-## Full Schema
-
-```yaml
-# ── Required ─────────────────────────────────────────────────────────
-
-repo: "org/repo"                        # GitHub owner/repo
-
-# ── Labels ───────────────────────────────────────────────────────────
-
-labels:                                 # Foundry's status display; only Foundry sets these
-  in_progress: "state:in-progress"      # Agent running
-  done: "state:done"                    # Task completed
-  ready_for_review: "state:ready-for-human-review"  # Awaiting human review
-  waiting_for_input: "state:waiting-for-input"  # Agent needs human input
-  failed: "state:failed"                # Task failed
-  plan_review: "state:plan-review"       # Agent produced a plan, awaiting approval
-
-# ── Mode Labels (optional) ──────────────────────────────────────────
-
-mode_labels:
-  plan: "mode:plan"                     # Issue runs agent in plan mode
-  auto: "mode:auto"                     # Issue runs agent in auto mode (default)
-  default: "mode:default"               # Issue runs agent in default permission mode
-
-# ── Branching & Worktrees ────────────────────────────────────────────
-
-branches:
-  integration: "integration"            # Feature branches are cut from and merged into this
-  production: "main"                    # What the integration branch is promoted to
-branch_template: "feature/{issue}-{slug}"   # {issue} = number, {slug} = slugified title
-worktree_base: "./wts"                      # Relative to repo root; add to .gitignore
-
-# ── Limits ───────────────────────────────────────────────────────────
-
-max_input_rounds: 3                     # Max human-input rounds before giving up
-agent_max_turns: 150                    # --max-turns for the agent; a runaway session fails
-reconcile_stale_minutes: 120            # in-progress with no update this long → failed (schedule trigger)
-
-# ── Verification ─────────────────────────────────────────────────────
-
-verify:                                 # Commands run before PR creation
-  - "npm run lint"
-  - "npm run typecheck"
-  - "npm run build"
-  - "npm test"
-
-integration_rebuild: "npm run build"    # Command run after integration merge
-
-# Run against the live preview before the task is marked ready for review.
-# FOUNDRY_PREVIEW_URL is set; also FOUNDRY_BRANCH, FOUNDRY_PR_NUMBER, FOUNDRY_ISSUE.
-verify_preview:
-  - "npx playwright test --base-url \"$FOUNDRY_PREVIEW_URL\""
-
-# ── Comment Triggers ─────────────────────────────────────────────────
-
-comment_triggers:                       # the only comments that start or stop work
-  go: "@foundry go"                     # start, or proceed from the branch with the thread
-  restart: "@foundry restart"           # discard the branch, start over
-  stop: "@foundry stop"                 # stop the agent, keep the branch
-
-# ── Versioning ───────────────────────────────────────────────────────
-
-version_sources:                        # Ordered list of version file paths
-  - "package.json"                      # First = primary (version read from here)
-  - "packages/api/package.json"         # Supported: package.json, Cargo.toml, pyproject.toml
-  - "packages/web/package.json"
-
-tag_prefix: "v"                         # Release tag prefix (e.g. v1.2.3)
-
-# ── GitHub Backend ──────────────────────────────────────────────────
-
-github_backend: "octokit"              # "octokit" (default) or "gh-cli"
-                                        # Override with FOUNDRY_GITHUB_BACKEND env var
-                                        # or --github-backend CLI flag
-
-# ── Agent Backends ───────────────────────────────────────────────────
-
-default_agent_backend: "claude-code"    # Backend used when no label match
-
-agent_backends:
-  claude-code:
-    type: command
-    preset: claude-code      # Foundry's maintained Claude Code command; see Agent Backends
-    env:
-      ANTHROPIC_MODEL: opus  # which model; omit and the account's default runs (see Agent Backends)
-
-  command:
-    type: command
-    command: "echo 'Configure your agent command'"
-
-# ── Label → Backend Mapping (optional) ───────────────────────────────
-
-agent_label_map:
-  "agent:claude": "claude-code"
-  # "agent:sonnet": "claude-code-sonnet"   # e.g. a second claude-code backend with ANTHROPIC_MODEL: sonnet
-  # "agent:aider": "aider"          # any backend defined above
-
-# ── Preview Environments (optional) ─────────────────────────────────
-
-preview:
-  mode: "template"                        # "template" = URL only, no command; "provider" = run up/down commands
-  url_template: "https://pr-{issue}.preview.example.com"   # when set, always the URL (both modes)
-  # up_command: "deploy.sh up {issue} {branch}"   # mode:provider — deploy command
-  # down_command: "deploy.sh down {issue} {branch}"  # mode:provider — teardown command
-  comment: true                           # Post/update PR comment (default true)
-  # pull_request_bases: [main]            # also preview non-task PRs into these branches
-  # ready_timeout_seconds: 300            # how long verify_preview waits for the URL to answer
-  # ready_match: "{sha}"                  # body text that must appear before the preview counts as up
-
-# ── Review (optional) ────────────────────────────────────────────────
-review:
-  merge_on_approval: true                 # approve → rebase, checks, merge (rebase method)
-  checks_timeout_seconds: 900             # how long to wait for the PR's checks after the rebase
-
-# ── GitHub Deployments (optional) ───────────────────────────────────
-
-github_deployments:
-  enabled: false                          # Default false
-  environment: "preview"                  # GitHub environment name
-  production: false                       # Whether this is a production environment
-  auto_inactive: true                     # Mark deployment inactive on teardown
-```
+Every key with its default, annotated, is in [example.joynt-foundry.yml](../../example.joynt-foundry.yml); `foundry init` writes the same file with project-specific defaults filled in. This page explains each key.
 
 ## Field Reference
 
@@ -134,7 +13,7 @@ GitHub repository in `owner/repo` format.
 Label names Foundry uses to show task state. Customize if your repo uses different label conventions. Only Foundry adds or removes them; a human adding one changes nothing.
 
 ### `mode_labels`
-Label names that control agent permission mode. Apply one of these labels to an issue to override the default auto mode. `plan` makes the agent produce a plan for approval before implementing. `default` uses Claude Code's default permission mode (asks before tool use).
+Label names that control agent permission mode, applied by a human before `@foundry go`. `plan` makes the agent produce a plan for approval before implementing. `auto` (the default when no label is present) gives the agent full permissions. `default` is the agent's own step-by-step mode, which asks before tool use; under the Action nobody is there to answer, so it is only useful with a backend that does not prompt.
 
 ### `branches`
 The repo's long-lived branches, by name. `integration` is the moving branch feature branches are cut from and merged into; `production` is what it is promoted to (`foundry sync-integration` merges it back). Defaults `integration` and `main`. Set them to whatever the repo already deploys from: Foundry never asks a repo to rename a branch that its hosting, protection rules, or deploy workflows key on. The integration branch must exist on the remote; a `@foundry go` on a repo whose configured branch is missing is refused with the reason on the issue, never silently based on production.
@@ -205,7 +84,7 @@ Configuration for creating GitHub Deployment objects alongside preview environme
 - `enabled` — Whether to create GitHub Deployments. Default `false`.
 - `environment` — GitHub environment name used for the deployment (e.g. `"preview"`, `"staging"`). Default `"preview"`.
 - `production` — Whether the environment is a production environment. Default `false`.
-- `auto_inactive` — Whether to automatically mark the deployment as `inactive` when the preview is torn down. Default `true`.
+- `auto_inactive` — Whether to mark the deployment `inactive` when the preview is torn down. Default `true`. Under the Action the deployment id is not carried between jobs, so this only takes effect for `foundry preview down` run from the job that created it; have the teardown workflow mark its own deployment inactive.
 
 ### `review`
 - `merge_on_approval` — An approving review on a task PR, or a promotion PR into a `preview.pull_request_bases` branch, rebases the branch onto its base, waits for checks, merges with the rebase method, and runs `integration_rebuild`. Default `true`. See [GitHub Action](github-action.md#decisions-and-gotchas).

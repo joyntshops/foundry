@@ -4,9 +4,9 @@
 
 There is nothing to install on any machine. The workflow references `joyntshops/foundry@main` and the Action builds itself inside the job. The runner image has Node, git, and `gh`; the Action installs the Claude Code CLI.
 
-You need the Foundry labels on the repo and a `.joynt-foundry.yml` at its root. `foundry init` creates both, which is the one reason to run the CLI once. Otherwise create the labels from the list in [Onboarding](onboarding.md) and copy [example.joynt-foundry.yml](../../example.joynt-foundry.yml).
+You need the Foundry labels on the repo, a `.joynt-foundry.yml` at its root, and the workflow file. `foundry init` creates all three, which is the one reason to run the CLI once. Otherwise create the labels from the list in [Workflows](workflows.md#labels-are-status-and-settings-never-commands), copy [example.joynt-foundry.yml](../../example.joynt-foundry.yml), and copy [the workflow template](../../packages/foundry/templates/foundry.yml) to `.github/workflows/foundry.yml`.
 
-Then continue with [GitHub Action](github-action.md).
+Then continue with [Onboarding](onboarding.md).
 
 ## The CLI
 

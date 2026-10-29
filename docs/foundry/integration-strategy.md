@@ -1,8 +1,6 @@
-# Integration Strategy
+# Integration branch
 
-## Moving Integration Branch
-
-Foundry uses a **moving integration branch** as the merge target for all feature PRs. This branch is the staging area for all in-progress work. Its name, and the production branch's, come from `branches:` in `.joynt-foundry.yml` (defaults `integration` and `main`); a repo keeps whatever names its deploy tooling already uses. On this page `integration` and `main` mean those configured branches.
+Foundry merges every feature PR into one moving **integration branch**, and a human promotes that branch to **production** by PR. Both are named in `.joynt-foundry.yml` under `branches:` (defaults `integration` and `main`); a repo keeps whatever names its hosting, protection rules, and deploy workflows already key on. On this page `integration` and `main` mean those configured branches.
 
 ```
 feature/42-add-login ──┐
@@ -10,81 +8,40 @@ feature/57-fix-nav  ───┤──► integration ──► main
 feature/63-add-api  ───┘
 ```
 
-### Branch Hierarchy
-
-| Branch | Purpose | Who merges |
+| Branch | Purpose | How it moves |
 |--------|---------|------------|
-| `feature/*` | Individual task branches | Foundry (via PR) |
-| `integration` | Collects all features | A human approves the PR; Foundry rebases it onto integration, waits for checks, and merges (`review.merge_on_approval`). `foundry review <pr>` does the same from a checkout. |
-| `main` | Production | Manual PR from integration. With `preview.pull_request_bases: [main]` the promotion PR gets its own preview and the same approve-to-merge flow. |
+| `feature/*` | One task each, cut from `integration` | Foundry opens the PR; a human approves; Foundry rebases, waits for checks, merges |
+| `integration` | Collects finished tasks; typically deploys a test environment | Promoted to `main` by a PR a human opens. With `preview.pull_request_bases: [main]` that PR gets its own preview and the same approve-to-merge flow. |
+| `main` | Production | Receives promotions, and hotfixes |
 
-Some repos keep a staging branch between the two (core-stack's `test`, for example). Foundry does not manage it; it is a manual PR from integration like `main` is.
+A repo whose feature branches already merge into `test` or `develop` names that branch as `integration`; Foundry does not add a branch between them. The integration branch must exist on the remote: a `@foundry go` on a repo whose configured branch is missing is refused with the reason on the issue, never silently based on production.
 
-### Setup
+## Promotion
 
-`foundry init` creates the integration branch if it is missing. To use an existing branch instead, name it in config and skip this:
+Open a PR from `integration` into `main` and merge it with the merge button or by approval. There is no Foundry command for this step, by design: what goes to production is a human decision.
 
-```bash
-git checkout -b integration
-git push -u origin integration
-```
+## Versioning and release tags
 
-Feature PRs always target `integration`, never `main` directly.
-
-## Unified Monorepo Versioning
-
-Joynt monorepos share **one unified version** across all packages. Foundry enforces this through `version_sources`.
-
-### Configuration
+Optional. Repos that keep one version across several packages list the files under `version_sources`; the first entry is the primary.
 
 ```yaml
 version_sources:
-  - package.json                    # root — primary version source
+  - package.json                    # primary
   - packages/api/package.json
-  - packages/web/package.json
-  - packages/shared/package.json
 ```
-
-**Rules:**
-- The first entry is the **primary** version source (used to compute the release tag)
-- ALL listed files are bumped to the same version simultaneously
-- Foundry does NOT auto-discover package.json files — you must list them explicitly
-- Order matters: primary first
-
-### Release Tagging
-
-Releases are recorded via annotated tags on `main`:
-
-```
-v1.0.0
-v1.1.0
-v1.2.0
-```
-
-The tag prefix is configurable (default: `v`).
-
-### Release Command
 
 ```bash
-# On integration branch:
-foundry release patch   # v1.2.0 → v1.2.1
-foundry release minor   # v1.2.0 → v1.3.0
-foundry release major   # v1.2.0 → v2.0.0
+foundry release patch | minor | major   # on the integration branch
 ```
 
-This:
-1. Reads the current version from the primary version source
-2. Bumps ALL version_sources to the same next semver
-3. Commits the changes on `integration`
-4. Pushes `integration`
-5. Prints instructions for tagging `main` after merge
+This reads the version from the primary source, bumps every listed file to the same next version, commits on `integration`, pushes, and prints the tag to apply to `main` after promotion (`tag_prefix`, default `v`). Repos that version some other way leave `version_sources` empty.
 
-### Hotfix + Sync
+## Hotfixes
 
-After a hotfix release merges to `main`:
+Fix on a branch from `main`, merge it to `main`, then bring the fix back:
 
 ```bash
-foundry sync-integration
+foundry sync-integration    # merges main into integration; run on the integration branch
 ```
 
-This merges `main` into `integration` so that integration stays current with production fixes.
+Without this, the next promotion PR would carry the hotfix's conflict.

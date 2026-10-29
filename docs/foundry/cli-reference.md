@@ -22,7 +22,7 @@ Every command reads `.joynt-foundry.yml` from the current directory or a parent.
 
 ### `foundry init`
 
-Scaffold `.joynt-foundry.yml`, create the labels, and create the configured integration branch if it is missing.
+Scaffold `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, and the issue template; create the labels; create the configured integration branch if it is missing.
 
 ```bash
 foundry init [--skip-labels] [--clean-labels]
@@ -35,12 +35,13 @@ foundry init [--skip-labels] [--clean-labels]
 
 - Detects the repo from the git remote
 - Detects the project type and fills in `verify`, `integration_rebuild`, `version_sources`
+- Writes the workflow from [the shipped template](../../packages/foundry/templates/foundry.yml) with `branches.production` in its PR filter, and the `Foundry task` issue template. Neither is overwritten if present.
 - Creates the `state:*` and `mode:*` labels (list in [Onboarding](onboarding.md)), plus `agent:*` labels when `agent_label_map` has two or more entries
 - On a fresh scaffold, writes the file and stops: set `branches.integration` to the branch the repo already integrates on, then run `init` again. On that second run (or any run with an existing config) it creates and pushes the configured branch if it does not exist, making an initial commit first on an empty repo. This order exists because the scaffold defaults to `integration`, and a repo that integrates on `test` must say so before a branch is pushed in its name.
 
 ### `foundry setup-bot`
 
-Create a GitHub App and install it, so Foundry acts under the App's name instead of `github-actions[bot]`. Optional under the Action; the job's built-in token works without it.
+Create a GitHub App and install it, so Foundry acts under the App's name and the PRs it opens trigger the repo's other workflows. Treat it as part of setup; see [GitHub Identity](github-backends.md) for what the built-in token cannot do.
 
 ```bash
 foundry setup-bot
