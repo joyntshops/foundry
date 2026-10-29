@@ -592,6 +592,17 @@ describe('EventHandler', () => {
       report: { status: 'done', summary: 'done' },
     } });
 
+    it('reports the verification check run only after the branch is pushed', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(false);
+      vi.mocked(git.push).mockClear();
+      vi.mocked(github.createCheckRun).mockClear();
+      await completed(makeTask());
+      expect(git.push).toHaveBeenCalled();
+      expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ head_sha: 'abc123', status: 'completed', conclusion: 'success' }));
+      // GitHub rejects a check run for a commit it has not seen, so the push must come first.
+      expect(vi.mocked(git.push).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(github.createCheckRun).mock.invocationCallOrder[0]);
+    });
+
     it('when not configured, ready-for-review follows preview up with no verification', async () => {
       vi.mocked(previewVerify.isConfigured).mockReturnValue(false);
       await completed(makeTask({ pr_url: 'https://github.com/owner/repo/pull/5', pr_number: 5 }));

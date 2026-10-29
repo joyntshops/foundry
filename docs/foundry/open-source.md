@@ -30,7 +30,7 @@ Use `claude-code-action` when a mention-and-reply is the whole job: answer a que
 
 ## Still open before a wider audience
 
-- The package is published to GitHub Packages, which requires a token to install even a public package. Publishing to npmjs would remove the one setup step that has nothing to do with Foundry.
+- The CLI is published to GitHub Packages, which requires a token to install even a public package, so the README's `npx @joyntshops/foundry init` needs registry login first. The Action itself installs nothing and is unaffected. Publishing to npmjs would remove that step.
 - Demo repository and screenshots an outside reader can open; the current dogfood repo is private.
 - A verify-to-agent retry loop ([known limitations](github-action.md#known-limitations)).
 

@@ -31,7 +31,7 @@ export function runVerifyStep(command: string, cwd: string, extraEnv: Record<str
     return {
       command,
       success: false,
-      output: (err.stdout ?? '' + '\n' + (err.stderr ?? '')).slice(-5000),
+      output: ((err.stdout ?? '') + '\n' + (err.stderr ?? '')).trim().slice(-5000),
       duration_ms: Date.now() - start,
     };
   }

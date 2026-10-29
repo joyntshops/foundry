@@ -83,6 +83,10 @@ The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` conte
 
 **Runs that die silently are reconciled.** A runner failure or the six-hour limit can end a job with no cleanup. The `schedule` trigger (the template's default is every six hours) runs `foundry reconcile`: any `state:in-progress` issue whose status comment is older than `reconcile_stale_minutes` (default 120) is marked failed with a note. Set the threshold above your job `timeout-minutes`.
 
+**Package managers pinned through corepack are enabled.** A repo with `packageManager` in `package.json` (Yarn 2+, pnpm) expects corepack to supply that version, and the runner image ships Yarn 1 with corepack disabled. The action runs `corepack enable` when the field is present, before the agent starts, so both the agent and the verify commands get the pinned manager. A repo that commits its Yarn release (`yarnPath` in `.yarnrc.yml`) never needed this. The first repo that relied on corepack failed every verify on `yarn install` in 150 ms with no output.
+
+**The verification check run is created after the push.** GitHub rejects a check run for a commit it has not seen, so Foundry pushes the branch first and then records one completed check run, success or failure, with the step summary. There is no in-progress check run while verification runs.
+
 **Cost is visible per issue.** The status comment's `Last run` row shows the cost, turns, and duration the agent CLI reported. `agent_max_turns` (default 150) caps a runaway session; the preset passes it as `--max-turns`.
 
 **The Claude Code version is pinned** in `action.yml` (`claude-code-version`). Four CLI behaviours surprised us on the first day; a release should not change Foundry under you. Bump deliberately, or pass `latest`.
