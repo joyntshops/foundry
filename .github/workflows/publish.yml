@@ -29,34 +29,51 @@ jobs:
         run: npm run build
         working-directory: packages/foundry
 
-      - name: Check if version already published
-        id: version-check
+      # This job never commits to main. The branch ruleset on main requires a
+      # pull request, and GitHub Actions cannot be a bypass actor on a
+      # repository ruleset, so a "release: vX" commit pushed from here would be
+      # refused. The version is derived from the registry instead: the next
+      # patch after the latest published version, unless package.json on main
+      # is already ahead (a deliberate minor or major bump merged by PR). The
+      # working-tree package.json is updated for the publish only; the tag is
+      # the record. package.json on main therefore lags the registry, and
+      # `foundry --version` from a checkout prints the last version set by PR.
+      - name: Resolve version
+        id: version
         working-directory: packages/foundry
         run: |
           LOCAL=$(node -p "require('./package.json').version")
-          if npm view "@joyntshops/foundry@$LOCAL" version 2>/dev/null; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
-          fi
+          PUBLISHED=$(npm view "@joyntshops/foundry" version 2>/dev/null || echo "0.0.0")
+          NEXT=$(node -e '
+            const cmp = (a, b) => {
+              const x = a.split(".").map(Number), y = b.split(".").map(Number);
+              for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
+              return 0;
+            };
+            const [local, published] = process.argv.slice(1);
+            if (cmp(local, published) > 0) { console.log(local); process.exit(0); }
+            const p = published.split(".").map(Number);
+            p[2] += 1;
+            console.log(p.join("."));
+          ' "$LOCAL" "$PUBLISHED")
+          echo "package.json=$LOCAL published=$PUBLISHED next=$NEXT"
+          npm version "$NEXT" --no-git-tag-version
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Bump patch version, commit, and tag
-        if: steps.version-check.outputs.published == 'true'
-        working-directory: packages/foundry
-        run: |
-          npm version patch --no-git-tag-version
-          VERSION=$(node -p "require('./package.json').version")
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "release: v$VERSION"
-          git tag "v$VERSION"
-          git push origin main --tags
 
       - name: Publish
         run: npm publish
         working-directory: packages/foundry
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag after the publish succeeded, so a failed publish leaves no tag. A
+      # published version whose tag push failed is harmless: the next run
+      # derives the following version from the registry, not from the tags.
+      - name: Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "release: v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
