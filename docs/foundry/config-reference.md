@@ -87,7 +87,7 @@ Configuration for creating GitHub Deployment objects alongside preview environme
 - `auto_inactive` — Whether to mark the deployment `inactive` when the preview is torn down. Default `true`. Under the Action the deployment id is not carried between jobs, so this only takes effect for `foundry preview down` run from the job that created it; have the teardown workflow mark its own deployment inactive.
 
 ### `review`
-- `merge_on_approval` — An approving review on a task PR, or a promotion PR into a `preview.pull_request_bases` branch, rebases the branch onto its base, waits for checks, merges with the rebase method, and runs `integration_rebuild`. Default `true`. See [GitHub Action](github-action.md#decisions-and-gotchas).
+- `merge_on_approval` — An approving review on a task PR, or a promotion PR into a `preview.pull_request_bases` branch, rebases the branch onto its base, re-runs `verify` on the rebased head and publishes a fresh `Foundry Verification` check run for it, waits for checks, merges with the rebase method, and runs `integration_rebuild`. Default `true`. See [GitHub Action](github-action.md#decisions-and-gotchas).
 - `checks_timeout_seconds` — How long to wait for the PR's checks after the rebase. Default `900`.
 
 ### `github_backend`

@@ -92,6 +92,7 @@ vi.mock('./thread.js', () => ({
 }));
 
 vi.mock('./verify.js', () => ({
+  VERIFY_CHECK_NAME: 'Foundry Verification',
   runVerifyPipeline: vi.fn().mockReturnValue({ passed: true, results: [] }),
   parseAnnotations: vi.fn().mockReturnValue([]),
 }));
@@ -598,7 +599,7 @@ describe('EventHandler', () => {
       vi.mocked(github.createCheckRun).mockClear();
       await completed(makeTask());
       expect(git.push).toHaveBeenCalled();
-      expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ head_sha: 'abc123', status: 'completed', conclusion: 'success' }));
+      expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ name: 'Foundry Verification', head_sha: 'abc123', status: 'completed', conclusion: 'success' }));
       // GitHub rejects a check run for a commit it has not seen, so the push must come first.
       expect(vi.mocked(git.push).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(github.createCheckRun).mock.invocationCallOrder[0]);
     });

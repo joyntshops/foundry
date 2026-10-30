@@ -4,6 +4,9 @@
 import { execSync } from 'node:child_process';
 import type { FoundryConfig } from '../types.js';
 
+/** Name of the check run that carries a verify result; the one a branch rule requires. */
+export const VERIFY_CHECK_NAME = 'Foundry Verification';
+
 export interface VerifyResult {
   command: string;
   success: boolean;
