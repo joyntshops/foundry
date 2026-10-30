@@ -6,9 +6,13 @@
  *   1. Make sure the PR merges cleanly. GitHub computes that lazily, so wait.
  *   2. Rebase the branch onto its base so history stays linear, and push
  *      with --force-with-lease (the lease is the ref we just fetched).
- *   3. Wait for the PR's checks on the rebased head. A red check stops here.
- *   4. Merge with the rebase method.
- *   5. Run `integration_rebuild` on the merged base, when configured.
+ *   3. When the rebase changed the head, run `verify` on it and publish the
+ *      result as a fresh "Foundry Verification" check run. The agent's run
+ *      is on the old head; a branch rule that requires the check needs one
+ *      on the commit being merged. A failure stops here.
+ *   4. Wait for the PR's checks on the rebased head. A red check stops here.
+ *   5. Merge with the rebase method.
+ *   6. Run `integration_rebuild` on the merged base, when configured.
  *
  * Every step reports on the PR. Used by `foundry review` from a checkout and
  * by the pr_approved event under the Action; they must not diverge.
@@ -35,7 +39,7 @@ export interface ReviewTarget {
 
 export type ReviewOutcome =
   | { merged: true; sha: string; rebased: boolean; rebuild?: verifyLib.VerifyResult | null }
-  | { merged: false; reason: 'conflicting' | 'rebase_failed' | 'checks_failed' | 'checks_timeout' | 'merge_failed'; detail: string };
+  | { merged: false; reason: 'conflicting' | 'rebase_failed' | 'verify_failed' | 'checks_failed' | 'checks_timeout' | 'merge_failed'; detail: string };
 
 export interface ChecksResult {
   state: 'success' | 'failure' | 'pending';
@@ -85,8 +89,13 @@ async function postReviewComment(repo: string, pr: number, body: string): Promis
   }
 }
 
-/** Rebase `branch` onto `origin/<base>` in a throwaway worktree and push. Returns the new head, or null when nothing changed. */
-function rebaseAndPush(config: FoundryConfig, repoDir: string, branch: string, base: string, pr: number): { sha: string; changed: boolean } {
+/**
+ * Rebase `branch` onto `origin/<base>` in a worktree and push. Returns the new
+ * head and the worktree, which the caller removes once it is done with it
+ * (verification runs there when the head changed). On error the worktree is
+ * removed here.
+ */
+function rebaseAndPush(config: FoundryConfig, repoDir: string, branch: string, base: string, pr: number): { sha: string; changed: boolean; worktree: string } {
   const wt = path.resolve(repoDir, config.worktree_base, `review-${pr}`);
   git.fetchAll(repoDir);
   git.pruneWorktrees(repoDir);
@@ -97,10 +106,42 @@ function rebaseAndPush(config: FoundryConfig, repoDir: string, branch: string, b
     git.rebase(`origin/${base}`, wt);
     const after = git.headSha(wt);
     if (after !== before) git.push(branch, wt, true);
-    return { sha: after, changed: after !== before };
-  } finally {
+    return { sha: after, changed: after !== before, worktree: wt };
+  } catch (err) {
     try { git.removeWorktree(wt, repoDir); } catch {}
+    throw err;
   }
+}
+
+/**
+ * Run `verify` on the rebased head and publish a check run for it. The check
+ * run is created after the push (GitHub refuses one for a commit it has not
+ * seen) and is best-effort: a failure to create it is logged, not fatal, as
+ * in the agent path. Returns whether it passed and, when not, the failing
+ * steps' tails for the PR comment.
+ */
+async function verifyRebasedHead(config: FoundryConfig, worktree: string, sha: string): Promise<{ passed: boolean; detail: string }> {
+  const result = verifyLib.runVerifyPipeline(config, worktree);
+  const stepSummary = result.results.map(r => `- \`${r.command}\`: ${r.success ? 'passed' : 'FAILED'} (${r.duration_ms}ms)`).join('\n');
+  const failed = result.results.filter(r => !r.success);
+  const annotations = verifyLib.parseAnnotations(result.results);
+  try {
+    await github.createCheckRun(config.repo, {
+      name: verifyLib.VERIFY_CHECK_NAME,
+      head_sha: sha,
+      status: 'completed',
+      conclusion: result.passed ? 'success' : 'failure',
+      output: {
+        title: result.passed ? 'Verification passed (rebased head)' : 'Verification failed (rebased head)',
+        summary: stepSummary,
+        annotations: annotations.length > 0 ? annotations : undefined,
+      },
+    });
+  } catch (err: any) {
+    log.warn(`Failed to create check run for ${sha.slice(0, 7)}: ${err.message}`);
+  }
+  const detail = failed.map(r => `\`${r.command}\`\n\`\`\`\n${r.output.slice(-800)}\n\`\`\``).join('\n');
+  return { passed: result.passed, detail };
 }
 
 export async function reviewAndMerge(config: FoundryConfig, repoDir: string, target: ReviewTarget): Promise<ReviewOutcome> {
@@ -120,9 +161,10 @@ export async function reviewAndMerge(config: FoundryConfig, repoDir: string, tar
   // 2. Rebase for linear history.
   let sha: string;
   let rebased = false;
+  let worktree: string;
   try {
     const r = rebaseAndPush(config, repoDir, branch, base, pr);
-    sha = r.sha; rebased = r.changed;
+    sha = r.sha; rebased = r.changed; worktree = r.worktree;
     lines.push(rebased ? `- Rebased onto \`${base}\` and pushed (${sha.slice(0, 7)}).` : `- Already up to date with \`${base}\` (${sha.slice(0, 7)}).`);
   } catch (err: any) {
     const detail = (err.stderr ?? err.message ?? String(err)).toString().slice(-800);
@@ -130,9 +172,28 @@ export async function reviewAndMerge(config: FoundryConfig, repoDir: string, tar
     await postReviewComment(repo, pr, lines.join('\n'));
     return { merged: false, reason: 'rebase_failed', detail };
   }
+
+  // 3. The rebased head is a set of commits nobody has verified: the agent's
+  //    check run is on the old head. Verify this one and publish the result,
+  //    so a branch rule that requires "Foundry Verification" sees it on the
+  //    commit being merged. An unchanged head keeps the agent's run.
+  try {
+    if (rebased && config.verify.length > 0) {
+      await postReviewComment(repo, pr, [...lines, '- Verifying the rebased head…'].join('\n'));
+      const v = await verifyRebasedHead(config, worktree, sha);
+      if (!v.passed) {
+        lines.push(`- Not merged: verification failed on the rebased head.\n${v.detail}`);
+        await postReviewComment(repo, pr, lines.join('\n'));
+        return { merged: false, reason: 'verify_failed', detail: v.detail };
+      }
+      lines.push('- Verification passed on the rebased head.');
+    }
+  } finally {
+    try { git.removeWorktree(worktree, repoDir); } catch {}
+  }
   await postReviewComment(repo, pr, [...lines, '- Waiting for checks…'].join('\n'));
 
-  // 3. Checks on the (possibly new) head.
+  // 4. Checks on the (possibly new) head.
   const timeoutMs = (config.review?.checks_timeout_seconds ?? DEFAULT_CHECKS_TIMEOUT_S) * 1000;
   const checks = await awaitChecks(repo, sha, { timeoutMs, ignore: [process.env.GITHUB_JOB ?? ''] });
   if (checks.state === 'failure') {
@@ -147,7 +208,7 @@ export async function reviewAndMerge(config: FoundryConfig, repoDir: string, tar
   }
   lines.push('- Checks passed.');
 
-  // 4. Merge. If the rebase changed the head, GitHub recomputes mergeability; wait for it.
+  // 5. Merge. If the rebase changed the head, GitHub recomputes mergeability; wait for it.
   if (rebased) await awaitMergeability(repo, pr);
   try {
     await github.mergePR(repo, pr, 'rebase');
@@ -159,7 +220,7 @@ export async function reviewAndMerge(config: FoundryConfig, repoDir: string, tar
     return { merged: false, reason: 'merge_failed', detail };
   }
 
-  // 5. Integration rebuild on the merged base.
+  // 6. Integration rebuild on the merged base.
   let rebuild: verifyLib.VerifyResult | null = null;
   if (config.integration_rebuild) {
     const wt = path.resolve(repoDir, config.worktree_base, `rebuild-${pr}`);

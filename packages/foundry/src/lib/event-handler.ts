@@ -230,6 +230,16 @@ export class EventHandler {
           : `PR #${event.pr_number} was approved but conflicts with \`${event.base}\`. Comment \`@foundry go\` with:\n\n> ${instruction}`;
         try { await github.addComment(config.repo, event.task.issue, note); } catch {}
       }
+      // So is a verify failure on the rebased head: the branch was pushed
+      // rebased, and the check run on the PR says what broke.
+      if (outcome.reason === 'verify_failed' && event.task) {
+        const instruction = `The branch was rebased onto \`${event.base}\` and verification fails on it; see the Foundry Verification check on PR #${event.pr_number}. Fix the failure on the branch (do not start over) and push.`;
+        const dispatched = stalePRs.dispatchCommand(event.task.issue, 'go', instruction);
+        const note = dispatched
+          ? `PR #${event.pr_number} was approved, but verification failed after the rebase onto \`${event.base}\`. Foundry has sent the agent to fix it; approve again once the PR is green.`
+          : `PR #${event.pr_number} was approved, but verification failed after the rebase onto \`${event.base}\`. Comment \`@foundry go\` with:\n\n> ${instruction}`;
+        try { await github.addComment(config.repo, event.task.issue, note); } catch {}
+      }
       return;
     }
 
@@ -748,7 +758,7 @@ export class EventHandler {
     const headSha = git.headSha(task.worktree);
     const reportCheck = async (conclusion: 'success' | 'failure', output: { title: string; summary: string; annotations?: any[] }) => {
       try {
-        await github.createCheckRun(config.repo, { name: 'Foundry Verification', head_sha: headSha, status: 'completed', conclusion, output });
+        await github.createCheckRun(config.repo, { name: verify.VERIFY_CHECK_NAME, head_sha: headSha, status: 'completed', conclusion, output });
       } catch (err: any) {
         log.warn(`Failed to create check run for #${task.issue}: ${err.message}`);
       }

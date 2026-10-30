@@ -94,6 +94,45 @@ describe('reviewAndMerge', () => {
     expect(out).toMatchObject({ merged: false, reason: 'checks_timeout' });
   });
 
+  it('verifies the rebased head, publishes a check run on it, then merges', async () => {
+    mock.checkRuns = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
+    const out = await reviewAndMerge({ ...config(), verify: ['test -f c.txt'] }, repo, { pr_number: 9, branch: 'feature/7-x', base: 'integration' });
+    expect(out).toMatchObject({ merged: true, rebased: true });
+    if (!out.merged) return;
+    const runs = mock.getCalls('createCheckRun');
+    expect(runs).toHaveLength(1);
+    expect(runs[0].args[1]).toMatchObject({ name: 'Foundry Verification', head_sha: out.sha, status: 'completed', conclusion: 'success' });
+    const comment = mock.getCalls('commentOnPR').at(-1)!.args[2];
+    expect(comment).toContain('Verification passed on the rebased head');
+    expect(comment).toContain('Merged into `integration`');
+    expect(fs.existsSync(path.join(repo, 'wts', 'review-9'))).toBe(false);
+  });
+
+  it('stops when verification fails on the rebased head, leaving the branch rebased', async () => {
+    mock.checkRuns = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
+    const before = sh(repo, 'rev-parse', 'origin/feature/7-x');
+    const out = await reviewAndMerge({ ...config(), verify: ['test -f c.txt', 'echo broken; exit 1'] }, repo, { pr_number: 9, branch: 'feature/7-x', base: 'integration' });
+    expect(out).toMatchObject({ merged: false, reason: 'verify_failed' });
+    expect(mock.getCalls('mergePR')).toHaveLength(0);
+    const runs = mock.getCalls('createCheckRun');
+    expect(runs).toHaveLength(1);
+    expect(runs[0].args[1]).toMatchObject({ name: 'Foundry Verification', conclusion: 'failure' });
+    expect(runs[0].args[1].head_sha).toBe(sh(repo, 'rev-parse', 'origin/feature/7-x'));
+    expect(sh(repo, 'rev-parse', 'origin/feature/7-x')).not.toBe(before);
+    const comment = mock.getCalls('commentOnPR').at(-1)!.args[2];
+    expect(comment).toContain('verification failed on the rebased head');
+    expect(comment).toContain('broken');
+    expect(fs.existsSync(path.join(repo, 'wts', 'review-9'))).toBe(false);
+  });
+
+  it('does not re-verify when the head did not change', async () => {
+    sh(repo, 'checkout', '-q', 'feature/7-x'); sh(repo, 'rebase', '-q', 'origin/integration'); sh(repo, 'push', '-q', '--force', 'origin', 'feature/7-x'); sh(repo, 'checkout', '-q', 'integration');
+    mock.checkRuns = [];
+    const out = await reviewAndMerge({ ...config(), verify: ['exit 1'] }, repo, { pr_number: 9, branch: 'feature/7-x', base: 'integration' });
+    expect(out).toMatchObject({ merged: true, rebased: false });
+    expect(mock.getCalls('createCheckRun')).toHaveLength(0);
+  });
+
   it('does not push when already up to date', async () => {
     sh(repo, 'checkout', '-q', 'feature/7-x'); sh(repo, 'rebase', '-q', 'origin/integration'); sh(repo, 'push', '-q', '--force', 'origin', 'feature/7-x'); sh(repo, 'checkout', '-q', 'integration');
     mock.checkRuns = [];
