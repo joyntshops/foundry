@@ -46,7 +46,7 @@ npm --workspace packages/foundry test
 
 Those three lines are exactly what CI runs. Tests use vitest with `root: src`; unit tests sit next to the code as `*.test.ts`. `MockGitHubClient` in `lib/__tests__/` is the shared GitHub mock.
 
-**Merging to `main` publishes.** `publish.yml` bumps the patch version, tags, and publishes `@joyntshops/foundry` to GitHub Packages on every push to `main` that touches `packages/foundry/`. Never hand-edit `version` in `package.json`.
+**Merging to `main` publishes.** `publish.yml` publishes `@joyntshops/foundry` to npmjs.com (trusted publishing, no token) as the next patch after the registry's latest, then pushes `vX.Y.Z` and moves `vX`, on every push to `main` that touches `packages/foundry/`. It never commits to `main`, so `package.json` lags the registry; a minor or major is a PR that sets `version`. `docs/foundry/releasing.md` has the whole process including rollback.
 
 **PR hygiene learned the hard way.** A PR stacked on a feature branch only retargets to `main` if that base branch is deleted at merge time; otherwise it merges into the base branch and never reaches `main`. Before telling anyone a PR is ready, confirm the head SHA on GitHub matches what you pushed; a push after the merge is silently orphaned.
 
@@ -72,7 +72,7 @@ Those three lines are exactly what CI runs. Tests use vitest with `root: src`; u
 
 ## Testing a change for real
 
-`joyntshops/foundry-demo` is the dogfood repo (private, default branch `integration`). Its workflow uses `joyntshops/foundry@main`; point it at a branch to test unmerged work, then switch it back. `cognitive-harmony-technologies/unity` is the first production repo (integration branch `test`, Vercel previews through the Deployments API, Opus by default); its `docs/foundry.md` records the repo-specific wiring. Open an issue there, comment `@foundry go`, and watch Actions. Expected: claim comment, agent commit, PR into the configured integration branch, `state:ready-for-human-review`, preview comment with a GitHub Pages URL. Merge the PR to exercise `pull_request.closed` → `state:done` → preview down.
+`joyntshops/foundry-demo` is the dogfood repo (private, default branch `integration`). Its workflow uses `joyntshops/foundry@v0`, the moving major tag that every release updates; point it at a branch to test unmerged work, then switch it back. `cognitive-harmony-technologies/unity` is the first production repo (integration branch `test`, Vercel previews through the Deployments API, Opus by default); its `docs/foundry.md` records the repo-specific wiring. Open an issue there, comment `@foundry go`, and watch Actions. Expected: claim comment, agent commit, PR into the configured integration branch, `state:ready-for-human-review`, preview comment with a GitHub Pages URL. Merge the PR to exercise `pull_request.closed` → `state:done` → preview down.
 
 ## Docs
 

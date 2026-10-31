@@ -40,7 +40,7 @@ Foundry is the orchestration layer, not the agent. It runs Claude Code, aider, o
 
 ## Quick start
 
-1. **Scaffold.** From a clone, run `npx @joyntshops/foundry init` ([registry auth](docs/foundry/installation.md)). It writes `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, and an issue template, and creates the `state:*` and `mode:*` labels. Set `branches:` to the branches you already deploy from; nothing is renamed.
+1. **Scaffold.** From a clone, run `npx @joyntshops/foundry init`. It writes `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, and an issue template, and creates the `state:*` and `mode:*` labels. Set `branches:` to the branches you already deploy from; nothing is renamed.
 2. **Secrets.** Add `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`. Run `foundry setup-bot` and add the two App secrets it prints; without the App, PRs the agent opens get no CI.
 3. **Push** to the default branch. Foundry listens from there.
 4. **Go.** Open an issue, comment `@foundry go`, watch Actions → Foundry.
@@ -80,7 +80,7 @@ About the project: [Open source](docs/foundry/open-source.md), including how Fou
 
 ## Package
 
-Published to GitHub Packages as `@joyntshops/foundry`; merging to `main` publishes. The CLI is only needed for setup and for operating on a task from a checkout. See [Installation](docs/foundry/installation.md).
+Published to npmjs.com as [`@joyntshops/foundry`](https://www.npmjs.com/package/@joyntshops/foundry); merging to `main` publishes and tags a release ([Releasing](docs/foundry/releasing.md)). The CLI is only needed for setup and for operating on a task from a checkout. See [Installation](docs/foundry/installation.md).
 
 ## License
 
