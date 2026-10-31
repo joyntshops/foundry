@@ -61,6 +61,10 @@ Trusted publishing can only be configured on a package that already exists, so t
 - **The CLI** is `npx @joyntshops/foundry` or `npm install -g @joyntshops/foundry`; see [Installation](installation.md).
 - The Action and the CLI do not have to match. The Action builds itself from the ref the workflow names; the CLI is only used for setup and for operating on a task from a checkout.
 
+## The demo repository
+
+[`joyntshops/foundry-demo`](https://github.com/joyntshops/foundry-demo) is where a release is tried before anyone else gets it. It is a one-page static site whose only purpose is to be changed by the agent: open an issue, comment `@foundry go`, and a complete run (claim, agent commit, verify, PR, GitHub Pages preview, approval, merge) takes a few minutes and costs nothing but agent time. Its workflow pins `@v0` like any consumer; to try an unmerged change, point it at the branch, run an issue, and switch it back. It is public so outside readers can see real output, which means its history is part of the project's face: keep its README accurate and do not use it to test anything you would not want read.
+
 ## Checking a release
 
 After a merge, the **Publish to npm** run on `main` should be green, and:

@@ -30,7 +30,7 @@ Use `claude-code-action` when a mention-and-reply is the whole job: answer a que
 
 ## Still open before a wider audience
 
-- Demo repository and screenshots an outside reader can open; the current dogfood repo is private.
+- Screenshots an outside reader can open.
 - A verify-to-agent retry loop ([known limitations](github-action.md#known-limitations)).
 
-Done: license, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, a [security model](overview.md#security-model), CI on pull requests, public npm publishing on merge with provenance and release tags ([Releasing](releasing.md)), pinned Claude Code version, typed agent report in place of regex classification, commenter authorization, the `if: cancelled()` cleanup step, `init` writing the workflow, and a sweep of the docs for private-repo references.
+Done: a public [demo repository](https://github.com/joyntshops/foundry-demo) whose issues, agent PRs, runs and previews can be read end to end, license, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, a [security model](overview.md#security-model), CI on pull requests, public npm publishing on merge with provenance and release tags ([Releasing](releasing.md)), pinned Claude Code version, typed agent report in place of regex classification, commenter authorization, the `if: cancelled()` cleanup step, `init` writing the workflow, and a sweep of the docs for private-repo references.

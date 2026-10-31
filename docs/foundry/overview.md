@@ -1,5 +1,7 @@
 # Overview
 
+To see Foundry's output before reading further, the [demo repository](https://github.com/joyntshops/foundry-demo) is public: every pull request there was written by the agent from an issue a person wrote, with the runs and previews still attached.
+
 Foundry turns GitHub Issues into verified pull requests. It is the **orchestration layer** around a coding agent: it decides when an agent runs, where it runs, what happens to its output, and how a human steers it, all through comments and labels on the issue itself.
 
 Foundry is a GitHub Action. It is not a coding agent, and it is not a server.
