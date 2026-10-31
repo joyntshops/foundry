@@ -110,7 +110,7 @@ It should not: when a job ends with the agent waiting, Foundry commits anything 
 
 ## How do I test a Foundry change before merging it?
 
-Point the workflow at a branch: `uses: joyntshops/foundry@your-branch`. Composite actions are built from whatever ref you name. Switch back to `@main` after merging.
+Point the workflow at a branch: `uses: joyntshops/foundry@your-branch`. Composite actions are built from whatever ref you name. Switch back to `@v0` after merging; the moving major tag reaches the merged change at the next release, a few minutes after the merge ([Releasing](releasing.md)).
 
 ## A task is in a bad state and I want to start over
 
