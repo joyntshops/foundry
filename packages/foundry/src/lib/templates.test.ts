@@ -17,7 +17,7 @@ describe('shipped templates', () => {
     expect(wf.on.workflow_dispatch.inputs).toHaveProperty('command');
     expect(wf.permissions).toMatchObject({ contents: 'write', issues: 'write', 'pull-requests': 'write', checks: 'write', actions: 'write' });
     expect(wf.jobs.foundry.concurrency.group).toContain('foundry-');
-    expect(wf.jobs.foundry.steps.map((s: any) => s.uses ?? s.name)).toContain('joyntshops/foundry@main');
+    expect(wf.jobs.foundry.steps.map((s: any) => s.uses ?? s.name)).toContain('joyntshops/foundry@v0');
   });
 
   it('renders the production branch into the PR filter and leaves no placeholder', () => {
