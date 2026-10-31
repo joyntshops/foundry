@@ -46,7 +46,7 @@ npm --workspace packages/foundry test
 
 Those three lines are exactly what CI runs. Tests use vitest with `root: src`; unit tests sit next to the code as `*.test.ts`. `MockGitHubClient` in `lib/__tests__/` is the shared GitHub mock.
 
-**Merging to `main` publishes.** `publish.yml` bumps the patch version, tags, and publishes `@joyntshops/foundry` to GitHub Packages on every push to `main` that touches `packages/foundry/`. Never hand-edit `version` in `package.json`.
+**Merging to `main` publishes.** `publish.yml` publishes `@joyntshops/foundry` to npmjs.com (trusted publishing, no token) as the next patch after the registry's latest, then pushes `vX.Y.Z` and moves `vX`, on every push to `main` that touches `packages/foundry/`. It never commits to `main`, so `package.json` lags the registry; a minor or major is a PR that sets `version`. `docs/foundry/releasing.md` has the whole process including rollback.
 
 **PR hygiene learned the hard way.** A PR stacked on a feature branch only retargets to `main` if that base branch is deleted at merge time; otherwise it merges into the base branch and never reaches `main`. Before telling anyone a PR is ready, confirm the head SHA on GitHub matches what you pushed; a push after the merge is silently orphaned.
 

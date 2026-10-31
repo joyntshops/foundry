@@ -6,7 +6,7 @@ Get a repository running on Foundry. Four steps; the agent runs nothing until th
 
 ```bash
 cd your-repo
-npx @joyntshops/foundry init       # see Installation for registry auth
+npx @joyntshops/foundry init
 ```
 
 This writes three files and creates the labels:

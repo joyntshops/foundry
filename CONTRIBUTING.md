@@ -12,7 +12,7 @@ npm --workspace packages/foundry test
 
 Those three lines are what CI runs on every pull request. Tests are vitest, next to the code as `*.test.ts`; `lib/__tests__/mock-github-client.ts` is the shared GitHub mock.
 
-Merging to `main` publishes `@joyntshops/foundry` and bumps the patch version automatically. Do not edit `version` in `package.json` by hand.
+Merging to `main` publishes `@joyntshops/foundry` to npmjs.com as the next patch version and tags the release. Do not edit `version` in `package.json` for a patch; a deliberate minor or major is a pull request that sets it. See [Releasing](docs/foundry/releasing.md).
 
 ## What a good change looks like
 
