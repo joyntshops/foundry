@@ -1,4 +1,4 @@
-name: Publish to GitHub Packages
+name: Publish to npm
 
 on:
   push:
@@ -7,19 +7,31 @@ on:
       - "packages/foundry/**"
       - ".github/workflows/publish.yml"
 
+# One publish at a time, in order. Two merges in quick succession would both
+# read the same latest version from the registry and the second `npm publish`
+# would fail with a 409 on a version that already exists.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      packages: write
+      contents: write   # push the release tags
+      id-token: write   # OIDC token that npm trusted publishing exchanges for publish rights
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://npm.pkg.github.com
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC, no long-lived token) needs npm >= 11.5.1,
+      # newer than the npm bundled with Node 22.
+      - name: Update npm
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm install
@@ -29,34 +41,65 @@ jobs:
         run: npm run build
         working-directory: packages/foundry
 
-      - name: Check if version already published
-        id: version-check
+      # This job never commits to main. The branch ruleset on main requires a
+      # pull request, and GitHub Actions cannot be a bypass actor on a
+      # repository ruleset, so a "release: vX" commit pushed from here would be
+      # refused. The version is derived from the registry instead: the next
+      # patch after the latest published version, unless package.json on main
+      # is already ahead (a deliberate minor or major bump merged by PR). The
+      # working-tree package.json is updated for the publish only; the tag is
+      # the record. package.json on main therefore lags the registry, and
+      # `foundry --version` from a checkout prints the last version set by PR.
+      # The registry is public, so this read needs no token.
+      - name: Resolve version
+        id: version
         working-directory: packages/foundry
         run: |
           LOCAL=$(node -p "require('./package.json').version")
-          if npm view "@joyntshops/foundry@$LOCAL" version 2>/dev/null; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISHED=$(npm view "@joyntshops/foundry" version 2>/dev/null || echo "0.0.0")
+          NEXT=$(node -e '
+            const cmp = (a, b) => {
+              const x = a.split(".").map(Number), y = b.split(".").map(Number);
+              for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
+              return 0;
+            };
+            const [local, published] = process.argv.slice(1);
+            if (cmp(local, published) > 0) { console.log(local); process.exit(0); }
+            const p = published.split(".").map(Number);
+            p[2] += 1;
+            console.log(p.join("."));
+          ' "$LOCAL" "$PUBLISHED")
+          echo "package.json=$LOCAL published=$PUBLISHED next=$NEXT"
+          npm version "$NEXT" --no-git-tag-version
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "major=${NEXT%%.*}" >> "$GITHUB_OUTPUT"
 
-      - name: Bump patch version, commit, and tag
-        if: steps.version-check.outputs.published == 'true'
-        working-directory: packages/foundry
-        run: |
-          npm version patch --no-git-tag-version
-          VERSION=$(node -p "require('./package.json').version")
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "release: v$VERSION"
-          git tag "v$VERSION"
-          git push origin main --tags
-
+      # Authenticates through the job's OIDC token: npmjs.com holds a trusted
+      # publisher entry for this repository and this workflow file, and there
+      # is no NODE_AUTH_TOKEN anywhere. Provenance is attached automatically
+      # for a public package published this way from a public repository.
+      # `access: public` comes from publishConfig in package.json.
       - name: Publish
         run: npm publish
         working-directory: packages/foundry
+
+      # Tag after the publish succeeded, so a failed publish leaves no tag. A
+      # published version whose tag push failed is harmless: the next run
+      # derives the following version from the registry, not from the tags.
+      #
+      # Two tags per release. `vX.Y.Z` is the exact, immutable record, and
+      # `vX` (the major) moves to the same commit so a workflow can pin
+      # `uses: joyntshops/foundry@v0` and receive every release until the
+      # next major. Nothing protects refs/tags on this repository, which is
+      # what lets this job move `vX`; a tag ruleset here would break releases.
+      - name: Tag
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          MAJOR: ${{ steps.version.outputs.major }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "release: v$VERSION"
+          git push origin "v$VERSION"
+          git tag -fa "v$MAJOR" -m "release: v$VERSION"
+          git push --force origin "v$MAJOR"
