@@ -76,7 +76,7 @@ Reference:
 - [Agent backends](docs/foundry/agent-backends.md) · [Preview environments](docs/foundry/preview-environments.md) · [GitHub identity](docs/foundry/github-backends.md) · [Integration branch](docs/foundry/integration-strategy.md)
 - [Troubleshooting](docs/foundry/troubleshooting.md)
 
-About the project: [Open source](docs/foundry/open-source.md), including how Foundry relates to `claude-code-action` · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+About the project: [Demo repository](https://github.com/joyntshops/foundry-demo) (real issues, agent PRs, runs and previews) · [Open source](docs/foundry/open-source.md), including how Foundry relates to `claude-code-action` · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 ## Package
 
