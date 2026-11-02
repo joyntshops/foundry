@@ -56,7 +56,7 @@ jobs:
         working-directory: packages/foundry
         run: |
           LOCAL=$(node -p "require('./package.json').version")
-          PUBLISHED=$(npm view "@joyntshops/foundry" version 2>/dev/null || echo "0.0.0")
+          PUBLISHED=$(npm view "@joynt/foundry" version 2>/dev/null || echo "0.0.0")
           NEXT=$(node -e '
             const cmp = (a, b) => {
               const x = a.split(".").map(Number), y = b.split(".").map(Number);

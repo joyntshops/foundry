@@ -1,5 +1,5 @@
 {
-  "name": "@joyntshops/foundry",
+  "name": "@joynt/foundry",
   "version": "0.1.50",
   "description": "Developer automation: GitHub Issues \u2192 agent sessions \u2192 validated PRs",
   "license": "MIT",

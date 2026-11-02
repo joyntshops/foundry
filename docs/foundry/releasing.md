@@ -8,7 +8,7 @@ The workflow is [`.github/workflows/publish.yml`](../../.github/workflows/publis
 
 A merge to `main` produces, in this order:
 
-1. **A version on npmjs.com**: `@joyntshops/foundry@X.Y.Z`, public, with [provenance](https://docs.npmjs.com/generating-provenance-statements) linking it to the workflow run and commit.
+1. **A version on npmjs.com**: `@joynt/foundry@X.Y.Z`, public, with [provenance](https://docs.npmjs.com/generating-provenance-statements) linking it to the workflow run and commit.
 2. **An annotated tag `vX.Y.Z`** on the published commit. This is the immutable record of what was released; nothing moves it.
 3. **The moving major tag `vX`** (today `v0`), force-updated to the same commit. Workflows that pin `uses: joyntshops/foundry@v0` receive every release until the next major.
 4. Nothing on `main` itself. The job never commits; the branch ruleset requires a pull request and GitHub Actions cannot bypass it.
@@ -35,30 +35,30 @@ Two merges in quick succession publish in order: the workflow has `concurrency: 
 
 ## Registry and authentication
 
-Releases go to **npmjs.com only**, under the `@joyntshops` scope, which is the [`joyntshops` npm organization](https://www.npmjs.com/org/joyntshops). The job authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers): npmjs.com holds an entry saying "the workflow file `publish.yml` in `joyntshops/foundry` may publish this package", GitHub issues the job an OIDC token (`permissions: id-token: write`), and npm exchanges it for a short-lived publish credential. There is no `NPM_TOKEN` secret anywhere, nothing to rotate, and nothing to leak. Provenance is generated automatically because the repository and the package are both public.
+Releases go to **npmjs.com only**, under the `@joynt` scope, which is the [`joynt` npm organization](https://www.npmjs.com/org/joynt) (the npm scope and the GitHub organization, `joyntshops`, are different names; the repository URL in `package.json` is what ties the package to the repo). The job authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers): npmjs.com holds an entry saying "the workflow file `publish.yml` in the GitHub repository `joyntshops/foundry` may publish this package", GitHub issues the job an OIDC token (`permissions: id-token: write`), and npm exchanges it for a short-lived publish credential. There is no `NPM_TOKEN` secret anywhere, nothing to rotate, and nothing to leak. Provenance is generated automatically because the repository and the package are both public.
 
 Trusted publishing needs npm ≥ 11.5.1, so the job installs `npm@latest` before publishing.
 
-Versions up to 0.1.51 went to GitHub Packages, which requires a token to install even a public package and so blocked `npx @joyntshops/foundry init` for anyone outside the organization. That copy is frozen; see [Installation](installation.md#if-you-installed-from-github-packages-before-november-2026) for the client-side change.
+Versions up to 0.1.51 went to GitHub Packages as `@joyntshops/foundry` (that registry requires the scope to match the GitHub organization), which requires a token to install even a public package and so blocked `npx @joynt/foundry init` for anyone outside the organization. That copy is frozen; see [Installation](installation.md#if-you-installed-from-github-packages-before-november-2026) for the client-side change.
 
 ### One-time setup (done once per package; recorded so it can be redone)
 
 Trusted publishing can only be configured on a package that already exists, so the first version must be published by hand:
 
-1. Create the `joyntshops` organization on npmjs.com (free for public packages).
+1. Create the `joynt` organization on npmjs.com (free for public packages); the scope is the organization name.
 2. From a checkout of the commit to release, with `npm login` done as a member of the organization:
    ```bash
    cd packages/foundry && npm ci && npm run build
    npm publish --access public --registry https://registry.npmjs.org
    ```
-   The `--registry` flag matters on a machine whose `~/.npmrc` still maps `@joyntshops` to GitHub Packages. This first version has no provenance; every later one does.
-3. On npmjs.com, package settings → **Trusted Publisher** → GitHub Actions: organization `joyntshops`, repository `foundry`, workflow filename `publish.yml`, no environment. The first workflow publish must succeed within two days or the entry expires and has to be recreated.
+   This first version has no provenance; every later one does.
+3. On npmjs.com, package settings → **Trusted Publisher** → GitHub Actions: organization or user `joyntshops` (the GitHub owner, not the npm org), repository `foundry`, workflow filename `publish.yml`, no environment. The first workflow publish must succeed within two days or the entry expires and has to be recreated.
 4. Package settings → **Publishing access**: "Require two-factor authentication and disallow tokens". Trusted publishing is unaffected by this; it blocks token-based publishes, which nothing legitimate uses.
 
 ## Consuming a release
 
 - **Workflows** pin the Action by tag: `uses: joyntshops/foundry@v0` to follow releases, or `uses: joyntshops/foundry@v0.1.52` to freeze. `@main` works but picks up every merge, released or not. The template `foundry init` writes, and the docs, use the moving major tag.
-- **The CLI** is `npx @joyntshops/foundry` or `npm install -g @joyntshops/foundry`; see [Installation](installation.md).
+- **The CLI** is `npx @joynt/foundry` or `npm install -g @joynt/foundry`; see [Installation](installation.md).
 - The Action and the CLI do not have to match. The Action builds itself from the ref the workflow names; the CLI is only used for setup and for operating on a task from a checkout.
 
 ## Checking a release
@@ -66,7 +66,7 @@ Trusted publishing can only be configured on a package that already exists, so t
 After a merge, the **Publish to npm** run on `main` should be green, and:
 
 ```bash
-npm view @joyntshops/foundry version          # the new version
+npm view @joynt/foundry version          # the new version
 git ls-remote --tags origin 'v*' | tail -3    # vX.Y.Z and the moved vX
 ```
 
@@ -77,7 +77,7 @@ The version page on npmjs.com shows a "Provenance" panel naming the commit and t
 **A bad package version.** Do not unpublish: npm only allows it for 72 hours and it breaks every install that resolved the version in the meantime. Deprecate it so installs warn and `npm view` still works for the version derivation:
 
 ```bash
-npm deprecate @joyntshops/foundry@0.1.57 "Broken: <what>. Use 0.1.58."
+npm deprecate @joynt/foundry@0.1.57 "Broken: <what>. Use 0.1.58."
 ```
 
 Then merge the fix; it publishes 0.1.58. Deprecation needs a maintainer login with 2FA; it is a hand operation by design.
