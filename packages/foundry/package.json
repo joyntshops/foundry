@@ -1,10 +1,10 @@
 {
-  "name": "@joyntshops/foundry",
+  "name": "@joynt/foundry",
   "version": "0.1.50",
   "description": "Developer automation: GitHub Issues → agent sessions → validated PRs",
   "license": "MIT",
   "bin": {
-    "foundry": "./dist/cli.js"
+    "foundry": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,7 +20,8 @@
     "dev": "tsc --watch"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
   },
   "repository": {
     "type": "git",
