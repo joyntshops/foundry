@@ -106,7 +106,7 @@ jobs:
 
       - name: Foundry
         id: foundry
-        uses: joyntshops/foundry@main
+        uses: joyntshops/foundry@v0
         with:
           github-token: ${{ steps.app.outputs.token || github.token }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

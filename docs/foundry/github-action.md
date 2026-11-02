@@ -35,7 +35,7 @@ A human then acts on GitHub. Each action is another event, another job:
 
 ## Workflow template
 
-`foundry init` writes `.github/workflows/foundry.yml` from [`packages/foundry/templates/foundry.yml`](../../packages/foundry/templates/foundry.yml), with the repo's production branch in the PR filter. That file is the single source; the decisions below explain its shape (the `if:` filter, job-level concurrency, the App token step, the schedule). `.joynt-foundry.yml` in the target repo configures everything else; see [Configuration](config-reference.md).
+`foundry init` writes `.github/workflows/foundry.yml` from [`packages/foundry/templates/foundry.yml`](../../packages/foundry/templates/foundry.yml), with the repo's production branch in the PR filter. That file is the single source. It pins `uses: joyntshops/foundry@v0`: the moving major tag, updated by every release, so a repo follows releases rather than every merge to `main`; pin an exact `@vX.Y.Z` to freeze, or a branch to test unmerged work ([Releasing](releasing.md#consuming-a-release)); the decisions below explain its shape (the `if:` filter, job-level concurrency, the App token step, the schedule). `.joynt-foundry.yml` in the target repo configures everything else; see [Configuration](config-reference.md).
 
 ## Secrets
 
