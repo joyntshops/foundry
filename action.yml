@@ -13,9 +13,33 @@ inputs:
       dispatch). Defaults to the job's built-in token, which is enough for the
       full issue → agent → PR → preview flow. Pass a GitHub App installation
       token instead when you want Foundry's pushes and PRs to trigger other
-      workflows (CI on agent PRs) or a named bot identity.
+      workflows (CI on agent PRs) or a named bot identity. When this is left at
+      its default and `broker-url` is set, the Action obtains one itself from
+      the Foundry broker (see `broker-url`).
     required: false
     default: ${{ github.token }}
+  broker-url:
+    description: >-
+      Token broker of the public Foundry GitHub App. When `github-token` is the
+      job's built-in token, the Action exchanges the job's OIDC token here for
+      an installation token scoped to this repository, which needs
+      `permissions: id-token: write`. Defaults to the joyntshops broker. Empty
+      disables the exchange. The workflow template does this exchange before
+      checkout instead, through `joyntshops/foundry/broker-token`.
+    required: false
+    default: ''
+  broker-required:
+    description: >-
+      `true` fails the job when the broker exchange fails. Default: warn and
+      continue with the built-in token.
+    required: false
+    default: 'false'
+  app-slug:
+    description: >-
+      Slug of the GitHub App whose token `github-token` is. Foundry's commits
+      are then attributed to `<slug>[bot]`. The template passes it from the App
+      token step; the broker exchange sets it on its own.
+    required: false
   claude-code-oauth-token:
     description: 'Claude subscription token from `claude setup-token` (Pro/Max/Team/Enterprise). Bills your plan, not the API.'
     required: false
@@ -92,18 +116,62 @@ runs:
           echo "corepack enabled for $(node -p "require('./package.json').packageManager")"
         fi
 
+    # Only when the workflow handed us the built-in token: a workflow that used
+    # the template already exchanged before checkout and passes that token.
+    - name: Token from the Foundry broker
+      id: broker
+      if: inputs.broker-url != '' && inputs.github-token == github.token
+      shell: bash
+      env:
+        BROKER_URL: ${{ inputs.broker-url }}
+        BROKER_REQUIRED: ${{ inputs.broker-required }}
+      run: bash "${{ github.action_path }}/broker-token/exchange.sh"
+
+    # actions/checkout persisted the built-in token for git; pushes must use
+    # the App token instead or they run as github-actions and trigger nothing.
+    - name: Use the broker token for git
+      if: steps.broker.outputs.token != ''
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        TOKEN: ${{ steps.broker.outputs.token }}
+      run: |
+        header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+        echo "::add-mask::${header#AUTHORIZATION: basic }"
+        git config --local --unset-all http.https://github.com/.extraheader || true
+        git config --local http.https://github.com/.extraheader "$header"
+
+    # Commits are attributed to the App's bot user (the `<id>+<slug>[bot]`
+    # noreply address GitHub links to it), else to github-actions[bot].
     - name: Configure git identity
       shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GH_TOKEN: ${{ steps.broker.outputs.token || inputs.github-token }}
+        APP_SLUG: ${{ steps.broker.outputs.app-slug || inputs.app-slug }}
       run: |
-        git config user.name  >/dev/null 2>&1 || git config user.name  "foundry[bot]"
-        git config user.email >/dev/null 2>&1 || git config user.email "foundry[bot]@users.noreply.github.com"
+        if git config user.name >/dev/null 2>&1 && git config user.email >/dev/null 2>&1; then
+          exit 0
+        fi
+        if [ -n "$APP_SLUG" ]; then
+          id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq .id 2>/dev/null || true)
+          if [ -n "$id" ]; then
+            git config user.name  "${APP_SLUG}[bot]"
+            git config user.email "${id}+${APP_SLUG}[bot]@users.noreply.github.com"
+            echo "git identity: ${APP_SLUG}[bot]"
+            exit 0
+          fi
+          echo "::warning::Could not look up the bot user for App '${APP_SLUG}'; commits will be attributed to github-actions[bot]."
+        fi
+        git config user.name  "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
     - name: Run Foundry
       id: run
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ steps.broker.outputs.token || inputs.github-token }}
+        GH_TOKEN: ${{ steps.broker.outputs.token || inputs.github-token }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         FOUNDRY_GITHUB_BACKEND: octokit
@@ -116,7 +184,7 @@ runs:
       if: cancelled()
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
-        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ steps.broker.outputs.token || inputs.github-token }}
+        GH_TOKEN: ${{ steps.broker.outputs.token || inputs.github-token }}
         FOUNDRY_GITHUB_BACKEND: octokit
       run: node "$GITHUB_ACTION_PATH/packages/foundry/dist/cli.js" cancelled

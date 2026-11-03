@@ -139,3 +139,13 @@ foundry --verbose reset 42
 ```
 
 In a workflow, set `ACTIONS_STEP_DEBUG=true` as a repository variable for verbose runner logs.
+
+## The broker
+
+**"The job has no OIDC token" warning, PRs open as github-actions.** The workflow lacks `id-token: write` in its `permissions:` block. The shipped template has it; a hand-written workflow needs the line. Every job then continues on the built-in token, so agent PRs get no CI.
+
+**"The Foundry App is not installed on this repository" warning.** The public App is not installed here, or was installed on only some repositories of the organization. Install it from the App's page, or set `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` for a self-owned App. The run continued on the built-in token.
+
+**"The broker answered HTTP 429" or "503 disabled".** The broker is throttled or switched off. Runs fall back to the built-in token until it returns; a repository that must not run without the App sets `required: true` on the `broker-token` step.
+
+**Commits show as github-actions[bot] although the App token was used.** The `app-slug` input did not reach the Action (the template passes it from both token steps) or the bot user lookup failed; the run log's "Configure git identity" step says which.
