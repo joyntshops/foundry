@@ -68,6 +68,9 @@ export function fakeGitHub(installations: Record<string, number> = { 'acme/widge
       const id = gh.installations.get(repository.toLowerCase());
       return id === undefined ? null : { id };
     },
+    async appSlug() {
+      return 'joynt-foundry';
+    },
     async mintToken(installationId, repositoryName, permissions): Promise<MintedToken> {
       if (gh.failMint) throw gh.failMint;
       gh.mints.push({ installationId, repositoryName, permissions });

@@ -102,6 +102,14 @@ describe('createGitHubApp', () => {
     await expect(gh.mintToken(777, 'widgets')).rejects.toMatchObject({ status: 422, operation: 'token mint' });
   });
 
+  it('reads the App slug once and caches it', async () => {
+    const calls: Call[] = [];
+    const gh = createGitHubApp({ appId: '1', privateKeyPem: pkcs1Pem, fetch: fakeFetch({ 'GET /app': () => Response.json({ id: 1, slug: 'joynt-foundry' }) }, calls) });
+    expect(await gh.appSlug()).toBe('joynt-foundry');
+    expect(await gh.appSlug()).toBe('joynt-foundry');
+    expect(calls).toHaveLength(1);
+  });
+
   it('reuses the App JWT across calls inside its lifetime', async () => {
     const calls: Call[] = [];
     let t = 1_700_000_000_000;

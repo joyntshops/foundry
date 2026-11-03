@@ -18,7 +18,7 @@ POST /token          {"oidc_token": "<jwt>"}   or   Authorization: Bearer <jwt>
 
 | Answer | Meaning |
 |---|---|
-| `200 {token, expires_at, repository, installation_id}` | allowed |
+| `200 {token, expires_at, repository, installation_id, app_slug}` | allowed; `app_slug` lets the job attribute commits to `<slug>[bot]` |
 | `400 missing_token` / `missing_claims` | no token sent, or no usable repository claim |
 | `401 invalid_jwt` | signature, issuer, audience, expiry or algorithm failed |
 | `403 deny_list` / `workflow_ref` / `not_installed` | refused by policy, or the App is not installed there |

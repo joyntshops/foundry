@@ -39,6 +39,8 @@ export interface GitHubApp {
   findInstallation(repository: string): Promise<Installation | null>;
   /** Mint a token for one installation, restricted to one repository. */
   mintToken(installationId: number, repositoryName: string, permissions?: Record<string, string>): Promise<MintedToken>;
+  /** The App's slug (its `[bot]` login is `<slug>[bot]`), so the job can attribute commits. Cached. */
+  appSlug(): Promise<string>;
 }
 
 export interface BrokerDeps {
@@ -190,8 +192,10 @@ export async function exchange(oidcToken: string, cfg: BrokerConfig, deps: Broke
   }
 
   let minted: MintedToken;
+  let appSlug: string;
   try {
     minted = await deps.github.mintToken(installation.id, claims.repository.split('/')[1], cfg.tokenPermissions);
+    appSlug = await deps.github.appSlug();
   } catch (err) {
     return deny(deps.log, 502, 'github_error', 'GitHub did not mint a token.', { ...claims }, String(err));
   }
@@ -212,6 +216,7 @@ export async function exchange(oidcToken: string, cfg: BrokerConfig, deps: Broke
       expires_at: minted.expires_at,
       repository: claims.repository,
       installation_id: installation.id,
+      app_slug: appSlug,
       ...(minted.permissions ? { permissions: minted.permissions } : {}),
     },
   };

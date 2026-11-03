@@ -14,7 +14,7 @@ describe('exchange', () => {
     const res = await exchange(await issuer.sign(), baseConfig(), deps(issuer, gh, log));
 
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ token: 'ghs_minted_777_widgets', expires_at: '2026-11-03T12:00:00Z', repository: 'acme/widgets', installation_id: 777 });
+    expect(res.body).toMatchObject({ token: 'ghs_minted_777_widgets', expires_at: '2026-11-03T12:00:00Z', repository: 'acme/widgets', installation_id: 777, app_slug: 'joynt-foundry' });
     expect(gh.mints).toEqual([{ installationId: 777, repositoryName: 'widgets', permissions: undefined }]);
     expect(log).toEqual([
       expect.objectContaining({

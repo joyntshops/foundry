@@ -68,7 +68,19 @@ export function createGitHubApp(opts: GitHubAppOptions): GitHubApp {
     });
   }
 
+  let slug: string | null = null;
+
   return {
+    async appSlug(): Promise<string> {
+      if (slug) return slug;
+      const res = await call('GET', '/app');
+      if (!res.ok) throw new GitHubError(res.status, 'app lookup', await safeText(res));
+      const data = (await res.json()) as { slug?: string };
+      if (!data.slug) throw new GitHubError(res.status, 'app lookup', 'response has no slug');
+      slug = data.slug;
+      return slug;
+    },
+
     async findInstallation(repository: string): Promise<Installation | null> {
       const res = await call('GET', `/repos/${repository}/installation`);
       if (res.status === 404) return null;

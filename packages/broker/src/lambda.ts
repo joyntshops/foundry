@@ -104,7 +104,7 @@ export async function handler(event: FunctionUrlEvent): Promise<FunctionUrlResul
     };
     const deps: BrokerDeps = {
       getKey: jwks,
-      github: { findInstallation: async () => null, mintToken: async () => { throw new Error('disabled'); } },
+      github: { findInstallation: async () => null, mintToken: async () => { throw new Error('disabled'); }, appSlug: async () => '' },
       log: logEntry,
     };
     return toFunctionUrlResult(await handleRequest(req, cfg, deps));
