@@ -7,6 +7,12 @@
  *   3. Opens browser to install the App on repos
  *   4. Polls for installation, saves credentials
  *   5. Verifies API access
+ *
+ * `--public` creates the one public Foundry App instead (the joyntshops
+ * owner runs this once): same manifest flow with `public: true`, no
+ * installation step, and it prints the owner steps GitHub has no API for
+ * (logo upload, confirming it is public) plus the broker commands that take
+ * the App ID and the private key. See docs/foundry/decisions/.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -29,9 +35,31 @@ interface AppManifest {
 }
 
 /**
+ * Every permission Foundry's jobs use. `workflows` is what lets a push add or
+ * edit a file under .github/workflows (issue 30); `actions` dispatches
+ * previews; `deployments` writes deployment records; `checks` posts the
+ * verification check run. docs/foundry/github-backends.md has the table.
+ */
+export const REQUIRED_PERMISSIONS: Record<string, 'read' | 'write'> = {
+  issues: 'write',
+  pull_requests: 'write',
+  contents: 'write',
+  checks: 'write',
+  actions: 'write',
+  deployments: 'write',
+  workflows: 'write',
+  metadata: 'read',
+};
+
+export interface ManifestOptions {
+  /** A public App can be installed by anyone from its App page. */
+  public?: boolean;
+}
+
+/**
  * Build the GitHub App manifest JSON.
  */
-export function buildManifest(name: string, redirectUrl: string, serverUrl?: string): AppManifest {
+export function buildManifest(name: string, redirectUrl: string, serverUrl?: string, opts: ManifestOptions = {}): AppManifest {
   return {
     name,
     url: 'https://github.com/joyntshops/foundry',
@@ -40,16 +68,58 @@ export function buildManifest(name: string, redirectUrl: string, serverUrl?: str
       active: false,
     },
     redirect_url: redirectUrl,
-    public: false,
-    default_permissions: {
-      issues: 'write',
-      pull_requests: 'write',
-      contents: 'write',
-      metadata: 'read',
-      checks: 'write',
-    },
+    public: opts.public ?? false,
+    default_permissions: { ...REQUIRED_PERMISSIONS },
     default_events: ['issues', 'pull_request', 'pull_request_review', 'issue_comment'],
   };
+}
+
+/**
+ * Which required permissions an App lacks, given what GitHub reports it has.
+ * `write` satisfies a `read` requirement; anything else does not.
+ */
+export function missingPermissions(granted: Record<string, string> | undefined): string[] {
+  const have = granted ?? {};
+  return Object.entries(REQUIRED_PERMISSIONS)
+    .filter(([key, need]) => {
+      const got = have[key];
+      if (!got) return true;
+      if (need === 'read') return got !== 'read' && got !== 'write';
+      return got !== 'write';
+    })
+    .map(([key, need]) => `${key}: ${need}`);
+}
+
+/** The App's settings page on GitHub, which differs for organizations and users. */
+export function appSettingsUrl(org: string, isOrg: boolean, slug: string): string {
+  return isOrg
+    ? `https://github.com/organizations/${org}/settings/apps/${slug}`
+    : `https://github.com/settings/apps/${slug}`;
+}
+
+/**
+ * What the owner of the public App does after `setup-bot --public`, in order.
+ * GitHub has no API for the logo or for the public toggle, so these are URLs
+ * and the commands that take the App ID and key to the broker.
+ */
+export function publicAppNextSteps(p: { org: string; isOrg: boolean; slug: string; appId: number; pemPath: string }): string[] {
+  const settings = appSettingsUrl(p.org, p.isOrg, p.slug);
+  return [
+    `App created: ${p.slug} (ID: ${p.appId}). Private key saved to ${p.pemPath} (mode 0600).`,
+    '',
+    'Owner steps GitHub has no API for:',
+    `  1. Logo: ${settings} → Display information → upload packages/foundry/assets/foundry-bot.png`,
+    `  2. Confirm it is public: ${settings}/advanced → "Make public" is already done when the button reads "Make private"`,
+    `  3. Permissions: ${settings}/permissions should show every row of REQUIRED_PERMISSIONS as granted (checked above)`,
+    '',
+    'Broker (packages/broker/README.md), with the Foundry AWS account active:',
+    `  aws secretsmanager create-secret --name foundry-broker/github-app-private-key --secret-string "file://${p.pemPath}"`,
+    `  FOUNDRY_APP_ID=${p.appId} PRIVATE_KEY_SECRET_ARN=<arn from the line above> ARTIFACT_BUCKET=<bucket> ./scripts/deploy.sh`,
+    `  rm ${p.pemPath}`,
+    '',
+    'Then put the broker URL into the broker-url defaults of action.yml and broker-token/action.yml,',
+    `and the install link into the docs: https://github.com/apps/${p.slug}/installations/new`,
+  ];
 }
 
 /**
@@ -199,6 +269,39 @@ async function pollForInstallation(
 }
 
 /**
+ * What GitHub says the App is: slug and granted permissions, read with an App JWT.
+ */
+async function fetchApp(appId: number, privateKey: string): Promise<{ slug: string; permissions: Record<string, string> } | null> {
+  const { createAppAuth } = await import('@octokit/auth-app');
+  const { Octokit } = await import('@octokit/rest');
+  const octokit = new Octokit({ authStrategy: createAppAuth, auth: { appId: String(appId), privateKey } });
+  try {
+    const { data } = await (octokit as any).rest.apps.getAuthenticated();
+    return { slug: data.slug, permissions: data.permissions ?? {} };
+  } catch {
+    return null;
+  }
+}
+
+/** Print the permission check; returns true when nothing is missing. */
+async function reportPermissions(appId: number, privateKey: string, settingsUrl: string): Promise<boolean> {
+  const app = await fetchApp(appId, privateKey);
+  if (!app) {
+    log.warn('Could not read the App back from GitHub to check its permissions.');
+    return false;
+  }
+  const missing = missingPermissions(app.permissions);
+  if (missing.length === 0) {
+    log.success('Permissions: every one Foundry needs is granted.');
+    return true;
+  }
+  log.warn(`Permissions missing on the App: ${missing.join(', ')}`);
+  log.info(`  Add them at ${settingsUrl}/permissions, then accept the update on each installation`);
+  log.info('  (Installed GitHub Apps → Configure); jobs keep the old set until an owner accepts.');
+  return false;
+}
+
+/**
  * Verify the App can make API calls by listing repos for the installation.
  */
 async function verifyAppAuth(appId: string, privateKey: string, installationId: string): Promise<boolean> {
@@ -246,6 +349,132 @@ export function repoSlugFromRemote(): string | null {
 
 interface SetupBotOptions {
   serverUrl?: string;
+  /** Create the one public Foundry App (owner use). */
+  public?: boolean;
+  /** App name; GitHub requires it to be globally unique. */
+  name?: string;
+  /** Owner of the App; defaults to the repo's owner. */
+  org?: string;
+}
+
+/** Is `owner` an organization (vs a user)? Falls back to true when GitHub cannot be asked. */
+async function isOrganization(owner: string): Promise<boolean> {
+  try {
+    const ghType = execFileSync('gh', ['api', `/users/${owner}`, '--jq', '.type'], {
+      encoding: 'utf-8',
+      timeout: 10_000,
+    }).trim();
+    return ghType === 'Organization';
+  } catch {
+    try {
+      const resp = await fetch(`https://api.github.com/users/${owner}`, {
+        headers: { 'User-Agent': 'joynt-foundry' },
+      });
+      if (resp.ok) {
+        const data = await resp.json() as { type: string };
+        return data.type === 'Organization';
+      }
+    } catch {
+      /* fall through */
+    }
+    return true;
+  }
+}
+
+/**
+ * Serve the manifest form, open the browser, and exchange the callback code.
+ */
+async function createAppViaManifest(org: string, isOrg: boolean, manifestFor: (redirectUrl: string) => AppManifest): Promise<Awaited<ReturnType<typeof exchangeCode>>> {
+  const port = await findFreePort();
+  const redirectUrl = `http://localhost:${port}/callback`;
+  const manifest = manifestFor(redirectUrl);
+
+  const manifestJsonForJs = JSON.stringify(JSON.stringify(manifest));
+  const settingsBase = isOrg
+    ? `https://github.com/organizations/${org}/settings/apps/new`
+    : 'https://github.com/settings/apps/new';
+
+  const formServer = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<!DOCTYPE html>
+<html>
+<head><title>Foundry Bot Setup</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 500px; margin: 80px auto; text-align: center;">
+  <h2>Create ${manifest.public ? 'the public Foundry App' : 'Foundry Bot'}</h2>
+  <p>Click below to create a GitHub App for <strong>${org}</strong>.</p>
+  <form id="f" method="post" action="${settingsBase}">
+    <input type="hidden" id="manifest" name="manifest">
+    <button type="submit" style="font-size: 16px; padding: 12px 24px; cursor: pointer; background: #2ea44f; color: white; border: none; border-radius: 6px;">
+      Create GitHub App
+    </button>
+  </form>
+  <script>
+    document.getElementById('manifest').value = ${manifestJsonForJs};
+  </script>
+</body>
+</html>`);
+  });
+
+  const formPort = await findFreePort();
+  await new Promise<void>((resolve) => {
+    formServer.listen(formPort, '127.0.0.1', resolve);
+  });
+
+  const codePromise = waitForCallback(port);
+
+  const formUrl = `http://localhost:${formPort}`;
+  log.info('Opening browser — click "Create GitHub App" to continue...');
+  log.info(`  ${formUrl}`);
+  openBrowser(formUrl);
+  log.info('');
+  log.info('Waiting for GitHub redirect... (press Ctrl+C to cancel)');
+
+  let code: string;
+  try {
+    code = await codePromise;
+  } finally {
+    formServer.close();
+  }
+
+  log.info('');
+  return exchangeCode(code);
+}
+
+/**
+ * `setup-bot --public`: create the public Foundry App for `org` and print the
+ * owner steps. No installation step; repositories install it from its page.
+ */
+async function runSetupPublicApp(org: string, name: string): Promise<void> {
+  const jsonPath = path.join(STATE_DIR, `public-app-${org}.json`);
+  const pemPath = path.join(STATE_DIR, `public-app-${org}.pem`);
+  const isOrg = await isOrganization(org);
+
+  let appId: number;
+  let slug: string;
+  let privateKey: string;
+
+  if (fs.existsSync(jsonPath) && fs.existsSync(pemPath)) {
+    const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    appId = meta.appId;
+    slug = meta.slug;
+    privateKey = fs.readFileSync(pemPath, 'utf-8');
+    log.info(`Public App already created for ${org}: ${slug} (ID: ${appId}). Re-checking and printing the steps again.`);
+  } else {
+    log.info(`Creating the public Foundry App "${name}" owned by ${org}...`);
+    log.info('');
+    const appData = await createAppViaManifest(org, isOrg, (redirectUrl) => buildManifest(name, redirectUrl, undefined, { public: true }));
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(pemPath, appData.pem, { mode: 0o600 });
+    appId = appData.id;
+    slug = appData.slug;
+    privateKey = appData.pem;
+    fs.writeFileSync(jsonPath, JSON.stringify({ appId, slug, public: true }, null, 2) + '\n');
+    log.success(`App created: ${slug} (ID: ${appId})`);
+  }
+
+  await reportPermissions(appId, privateKey, appSettingsUrl(org, isOrg, slug));
+  log.info('');
+  for (const line of publicAppNextSteps({ org, isOrg, slug, appId, pemPath })) log.info(line);
 }
 
 /**
@@ -254,13 +483,17 @@ interface SetupBotOptions {
 export async function runSetupBot(opts: SetupBotOptions = {}): Promise<void> {
   const config = loadConfigSafe();
   const repo = config?.repo || repoSlugFromRemote();
-  if (!repo) {
-    log.error('Could not determine repo. Run from a git repo with a GitHub remote, or run `foundry init` first.');
+  const org = opts.org ?? repo?.split('/')[0];
+  if (!org) {
+    log.error('Could not determine the owner. Run from a git repo with a GitHub remote, pass --org, or run `foundry init` first.');
     process.exitCode = 1;
     return;
   }
 
-  const org = repo.split('/')[0];
+  if (opts.public) {
+    await runSetupPublicApp(org, opts.name ?? 'Joynt Foundry');
+    return;
+  }
 
   const jsonPath = path.join(STATE_DIR, `github-app-${org}.json`);
   const pemPath = path.join(STATE_DIR, `github-app-${org}.pem`);
@@ -309,86 +542,9 @@ export async function runSetupBot(opts: SetupBotOptions = {}): Promise<void> {
     log.info(`Setting up Foundry Bot for ${org}...`);
     log.info('');
 
-    // Determine if the owner is a GitHub org or a personal account
-    let isOrg = false;
-    try {
-      const ghType = execFileSync('gh', ['api', `/users/${org}`, '--jq', '.type'], {
-        encoding: 'utf-8',
-        timeout: 10_000,
-      }).trim();
-      isOrg = ghType === 'Organization';
-    } catch {
-      try {
-        const resp = await fetch(`https://api.github.com/users/${org}`, {
-          headers: { 'User-Agent': 'joynt-foundry' },
-        });
-        if (resp.ok) {
-          const data = await resp.json() as { type: string };
-          isOrg = data.type === 'Organization';
-        }
-      } catch {
-        isOrg = true;
-      }
-    }
-
-    // Find a free port and start the callback server
-    const port = await findFreePort();
-    const redirectUrl = `http://localhost:${port}/callback`;
-
-    // Build manifest
-    const appName = `Foundry Bot ${org}`;
-    const manifest = buildManifest(appName, redirectUrl, opts.serverUrl);
-
-    // Serve the form page
-    const manifestJsonForJs = JSON.stringify(JSON.stringify(manifest));
-    const settingsBase = isOrg
-      ? `https://github.com/organizations/${org}/settings/apps/new`
-      : 'https://github.com/settings/apps/new';
-
-    const formServer = http.createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(`<!DOCTYPE html>
-<html>
-<head><title>Foundry Bot Setup</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 500px; margin: 80px auto; text-align: center;">
-  <h2>Create Foundry Bot</h2>
-  <p>Click below to create a GitHub App for <strong>${org}</strong>.</p>
-  <form id="f" method="post" action="${settingsBase}">
-    <input type="hidden" id="manifest" name="manifest">
-    <button type="submit" style="font-size: 16px; padding: 12px 24px; cursor: pointer; background: #2ea44f; color: white; border: none; border-radius: 6px;">
-      Create GitHub App
-    </button>
-  </form>
-  <script>
-    document.getElementById('manifest').value = ${manifestJsonForJs};
-  </script>
-</body>
-</html>`);
-    });
-
-    const formPort = await findFreePort();
-    await new Promise<void>((resolve) => {
-      formServer.listen(formPort, '127.0.0.1', resolve);
-    });
-
-    const codePromise = waitForCallback(port);
-
-    const formUrl = `http://localhost:${formPort}`;
-    log.info('Opening browser — click "Create GitHub App" to continue...');
-    log.info(`  ${formUrl}`);
-    openBrowser(formUrl);
-    log.info('');
-    log.info('Waiting for GitHub redirect... (press Ctrl+C to cancel)');
-
-    let code: string;
-    try {
-      code = await codePromise;
-    } finally {
-      formServer.close();
-    }
-
-    log.info('');
-    const appData = await exchangeCode(code);
+    const isOrg = await isOrganization(org);
+    const appName = opts.name ?? `Foundry Bot ${org}`;
+    const appData = await createAppViaManifest(org, isOrg, (redirectUrl) => buildManifest(appName, redirectUrl, opts.serverUrl));
 
     // Save credentials (without installationId for now)
     fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -448,6 +604,5 @@ export async function runSetupBot(opts: SetupBotOptions = {}): Promise<void> {
   log.info(`  gh secret set FOUNDRY_APP_ID --repo ${org}/<repo> --body ${appId}`);
   log.info(`  gh secret set FOUNDRY_APP_PRIVATE_KEY --repo ${org}/<repo> < ${pemPath}`);
   log.info('');
-  log.info('Then, in the App\'s settings, add Actions and Deployments (write) and accept the');
-  log.info('permission update on the installation; the manifest cannot request them.');
+  await reportPermissions(appId!, privateKey!, appSettingsUrl(org, await isOrganization(org), slug!));
 }
