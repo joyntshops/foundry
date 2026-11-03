@@ -4,7 +4,7 @@ To see Foundry's output before reading further, the [demo repository](https://gi
 
 Foundry turns GitHub Issues into verified pull requests. It is the **orchestration layer** around a coding agent: it decides when an agent runs, where it runs, what happens to its output, and how a human steers it, all through comments and labels on the issue itself.
 
-Foundry is a GitHub Action. It is not a coding agent, and it is not a server.
+Foundry is a GitHub Action. It is not a coding agent, and it is not a server. The one hosted piece is a token broker that lets every repository use the same public GitHub App ([decision](decisions/2026-11-03-public-app-token-broker.md)).
 
 ## Key concepts
 
@@ -32,7 +32,7 @@ Foundry is a GitHub Action. It is not a coding agent, and it is not a server.
 ## What Foundry does not do
 
 - **It does not write code.** The agent does. Foundry runs it, gates it, and routes its output.
-- **It does not host anything.** Previews are orchestrated by Foundry but deployed by a command or workflow you own.
+- **It does not host your code or previews.** Previews are orchestrated by Foundry but deployed by a command or workflow you own. The only thing joyntshops hosts is the token broker behind the public App, and a self-owned App works without it.
 - **It does not replace CI.** Verification is a pre-PR gate on the agent's branch. Your CI still runs on the PR, and approve-to-merge waits for it.
 - **It does not keep state anywhere but GitHub.** A job rebuilds the task from the issue every time. Delete the runner, nothing is lost.
 
@@ -63,7 +63,7 @@ Everything a later job needs to know is written to GitHub before the current one
 - **Who can start a run.** Only an `@foundry` comment from a user the workflow's `if:` admits (`OWNER`, `MEMBER`, `COLLABORATOR`) starts a job, and the job then checks that the commenter has write or admin permission on the repository before acting. Anyone else's comment is ignored and logged. Labels and plain comments start nothing.
 - **What the agent can do.** The agent runs inside your Actions job with the permissions the workflow grants and the secrets the job exposes. This is the same trust boundary as CI: anything your CI could do, the agent can do. Review the backend commands you configure as you would any CI step.
 - **Issue text is untrusted input.** Titles and bodies reach the agent's command line. Foundry passes them through environment variables (`FOUNDRY_ISSUE_*`) and a file the agent reads, never by re-evaluating them in a shell. If you write your own backend command, keep it that way.
-- **Secrets.** `CLAUDE_CODE_OAUTH_TOKEN` bills the Claude plan of whoever generated it. The GitHub App's private key lets jobs act as the App on the repos it is installed on. Store both as repository or organization secrets; Foundry never writes them anywhere.
+- **Secrets.** `CLAUDE_CODE_OAUTH_TOKEN` bills the Claude plan of whoever generated it; store it as a repository or organization secret. With the public Foundry App there is no key to store: the job proves its identity to the broker with a GitHub-signed OIDC token and receives a one-hour token for this repository only. With a self-owned App, its private key lets jobs act as the App on the repos it is installed on; store it as a secret. Foundry never writes either anywhere.
 - **Verification runs the repo's own commands** in the agent's worktree, so a change to a build script runs during verify. This is true of every CI system and is why merging stays a human action.
 
 Report a vulnerability through the process in [SECURITY.md](../../SECURITY.md).
@@ -74,3 +74,4 @@ Report a vulnerability through the process in [SECURITY.md](../../SECURITY.md).
 - [Writing a task](writing-a-task.md)
 - [Workflows](workflows.md): steering the agent from the issue
 - [GitHub Action](github-action.md): the decisions behind the design
+- [Decisions](decisions/README.md): the records that changed Foundry's shape

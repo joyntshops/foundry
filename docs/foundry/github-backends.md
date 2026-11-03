@@ -13,9 +13,14 @@ The built-in token has one limit that matters: events it causes do not start oth
 - **A named bot.** Comments, labels, and PRs appear as `<YourApp>[bot]` instead of `github-actions[bot]`.
 - **Triggering other workflows.** Pushes and PRs made with the built-in token do not start `push` or `pull_request` workflows, so a repo's CI skips agent PRs and required checks can never pass; on some repos the run is created but held at "awaiting approval". Pushes and PRs made as an App trigger normally. This is why the App is part of setup rather than an option.
 
-The workflow mints an App token when the `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets exist and falls back to the built-in token otherwise, so a repo can be wired before the App exists.
+There are two ways to have an App, decided on 2026-11-03 ([decision record](decisions/2026-11-03-public-app-token-broker.md)):
 
-### Creating the App: `foundry setup-bot`
+- **The public Foundry App (default).** One App, owned by joyntshops, installed from its GitHub App page. The workflow asks GitHub for an OIDC token (`permissions: id-token: write`) and exchanges it at a broker run by joyntshops for an installation token scoped to the calling repository; the private key never leaves the broker. No secrets beyond `CLAUDE_CODE_OAUTH_TOKEN`. *Status: ships with the broker and the Action's `broker-url` input, in progress.*
+- **A self-owned App (fallback).** Created by `foundry setup-bot` below. The workflow mints an App token when the `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets exist. Choose this when your organization must not depend on a joyntshops endpoint, or while the broker is unavailable.
+
+With neither, the workflow falls back to the built-in token, so a repo can be wired before the App exists.
+
+### Creating a self-owned App: `foundry setup-bot`
 
 ```bash
 foundry setup-bot
@@ -23,7 +28,7 @@ foundry setup-bot
 
 Two browser clicks: GitHub's App manifest page, then the install page. Credentials land in `~/.joynt-foundry/github-app-{org}.json` and `.pem`. Copy the App ID and the `.pem` contents into the two secrets.
 
-The manifest grants **issues, pull_requests, contents, checks: write** and **metadata: read**. Add **actions: write** (preview dispatch) and **deployments: write** (deployment records) in the App's settings afterwards, then **accept the permission update on the installation**. Changing the App only creates a request; installations keep the old set until an org owner accepts it. Check what jobs actually get:
+The manifest grants **issues, pull_requests, contents, checks: write** and **metadata: read**. Add **actions: write** (preview dispatch), **deployments: write** (deployment records) and **workflows: write** (without it a push that adds or edits a file under `.github/workflows/` is rejected and the task fails) in the App's settings afterwards, then **accept the permission update on the installation**. Changing the App only creates a request; installations keep the old set until an org owner accepts it. Check what jobs actually get:
 
 ```bash
 gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="YOUR_APP") | .permissions'
@@ -69,6 +74,7 @@ The Action sets `FOUNDRY_GITHUB_BACKEND=octokit`.
 | Labels, issue comments, close issue | `issues: write` |
 | Open PR, PR comments, close PR | `pull-requests: write` |
 | Push branches, delete branches | `contents: write` |
+| Push a change under `.github/workflows/` | `workflows: write` (App only; the built-in token cannot) |
 | `gh workflow run` for preview up/down | `actions: write` |
 | Deployment records for previews | `deployments: write` |
 | Check run with verification results | `checks: write` (non-fatal warning without it) |
@@ -82,7 +88,7 @@ With the built-in token, grant these in the workflow's `permissions:` block. Wit
 
 1. Org settings → Developer settings → GitHub Apps → **New GitHub App**. For a personal repo, https://github.com/settings/apps.
 2. Name it (globally unique), set any homepage URL, uncheck **Webhooks → Active**.
-3. Repository permissions: Issues, Pull requests, Contents, Checks, Actions, Deployments: Read & Write. Metadata: Read.
+3. Repository permissions: Issues, Pull requests, Contents, Checks, Actions, Deployments, Workflows: Read & Write. Metadata: Read.
 4. Create. Note the **App ID**. Under Private keys, **Generate a private key** and download the `.pem`.
 5. **Install App** → choose the org → **Only select repositories** → the repos Foundry manages. The installation ID is the last path segment of the resulting URL.
 6. Add `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` as secrets. For CLI use, save them locally:

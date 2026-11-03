@@ -42,7 +42,7 @@ A human then acts on GitHub. Each action is another event, another job:
 | Secret | Required | What it is |
 |---|---|---|
 | `CLAUDE_CODE_OAUTH_TOKEN` | yes | From `claude setup-token`. Runs bill the subscription of the person who generated it, not the API. Tied to that person; for an org-shared secret Anthropic recommends `ANTHROPIC_API_KEY` instead. |
-| `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY` | in practice, yes | A GitHub App installed on the repo. When present, the template mints an installation token and Foundry acts as the App. When absent, the job's built-in token is used, and PRs it opens leave `pull_request` runs, including this workflow's own, stuck at "awaiting approval". |
+| `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY` | only for a self-owned App | With the public Foundry App there are no App secrets: the job exchanges its OIDC token at the joyntshops broker ([decision](decisions/2026-11-03-public-app-token-broker.md)). With a self-owned App, the template mints an installation token from these. With neither, the job's built-in token is used, and PRs it opens leave `pull_request` runs, including this workflow's own, stuck at "awaiting approval". |
 
 No GitHub credentials are *needed*. Inside a job, GitHub has already established identity: `${{ github.token }}` is scoped to the repo, carries the permissions the workflow grants, and dies with the job.
 
@@ -51,7 +51,7 @@ No GitHub credentials are *needed*. Inside a job, GitHub has already established
 - **A named bot.** Comments, labels, and PRs appear as `<YourApp>[bot]` instead of `github-actions[bot]`.
 - **CI on the PRs Foundry opens.** Pushes and PRs made with the built-in token do not trigger `push` or `pull_request` workflows, so a repo's CI would silently skip agent PRs and required checks could never pass. On some repos the run is created but held at `action_required` ("1 workflow awaiting approval" on the PR), which includes this workflow's own `pull_request` trigger. With an App token they run normally; a PR already opened under the built-in token can be finished by approving it, since the review event is the human's.
 
-The App from `foundry setup-bot` works. It needs **issues, pull_requests, contents, checks, actions, deployments: write**. Older Apps lack `checks` (verification results are posted as a Check Run; without it you get a non-fatal warning), `actions` (preview dispatch), and `deployments`. Add them in the App's settings, then **accept the permission update on the installation**: changing the App definition only creates a request, and jobs keep minting tokens with the old set until an org owner accepts it.
+The public Foundry App carries every permission below. A self-owned App from `foundry setup-bot` works too. It needs **issues, pull_requests, contents, checks, actions, deployments, workflows: write**. Older Apps lack `checks` (verification results are posted as a Check Run; without it you get a non-fatal warning), `actions` (preview dispatch), and `deployments`. Add them in the App's settings, then **accept the permission update on the installation**: changing the App definition only creates a request, and jobs keep minting tokens with the old set until an org owner accepts it.
 
 The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` context is not available in a step's `if:`. Surfacing the App ID (not the key) into `env` makes the check possible; `steps.app.outputs.token || github.token` falls back when the step was skipped.
 
