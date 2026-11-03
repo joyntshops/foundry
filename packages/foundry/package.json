@@ -2,6 +2,30 @@
   "name": "@joynt/foundry",
   "version": "0.1.50",
   "description": "Developer automation: GitHub Issues → agent sessions → validated PRs",
+  "keywords": [
+    "github",
+    "github-actions",
+    "github-action",
+    "github-issues",
+    "pull-request",
+    "coding-agent",
+    "ai-agent",
+    "agent",
+    "claude",
+    "claude-code",
+    "automation",
+    "developer-tools",
+    "devops",
+    "workflow",
+    "code-review",
+    "preview-environment",
+    "orchestration"
+  ],
+  "homepage": "https://github.com/joyntshops/foundry#readme",
+  "bugs": {
+    "url": "https://github.com/joyntshops/foundry/issues"
+  },
+  "author": "Joynt Shops",
   "license": "MIT",
   "bin": {
     "foundry": "dist/cli.js"
@@ -10,7 +34,9 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "templates"
+    "templates",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
