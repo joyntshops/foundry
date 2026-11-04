@@ -13,7 +13,7 @@ inputs:
       deployment of packages/broker to use your own App. Empty disables the
       exchange and the outputs are empty.
     required: false
-    default: ''
+    default: 'https://tfmj7duxeutstzy3usrv6uch2q0rtwkg.lambda-url.us-west-2.on.aws/'
   audience:
     description: 'OIDC audience the broker expects.'
     required: false

@@ -27,7 +27,7 @@ inputs:
       disables the exchange. The workflow template does this exchange before
       checkout instead, through `joyntshops/foundry/broker-token`.
     required: false
-    default: ''
+    default: 'https://tfmj7duxeutstzy3usrv6uch2q0rtwkg.lambda-url.us-west-2.on.aws/'
   broker-required:
     description: >-
       `true` fails the job when the broker exchange fails. Default: warn and

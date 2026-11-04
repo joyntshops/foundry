@@ -100,6 +100,9 @@ Resources:
       TargetFunctionArn: !GetAtt Function.Arn
       AuthType: NONE
 
+  # A public function URL needs both statements: since October 2025 Lambda
+  # answers 403 Forbidden without the second one. The InvokedViaFunctionUrl
+  # condition keeps lambda:InvokeFunction limited to calls through the URL.
   FunctionUrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -107,6 +110,14 @@ Resources:
       Action: lambda:InvokeFunctionUrl
       Principal: '*'
       FunctionUrlAuthType: NONE
+
+  FunctionUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      InvokedViaFunctionUrl: true
 
   DenyMetricFilter:
     Type: AWS::Logs::MetricFilter

@@ -64,7 +64,7 @@ One browser click creates the App with `public: true` and every permission in th
 1. **Logo.** On the App's settings page under *Display information*, upload [`packages/foundry/assets/foundry-bot.png`](../../packages/foundry/assets/README.md).
 2. **Public.** The manifest asks for it; the *Advanced* tab confirms it (the button reads *Make private* when the App is public).
 3. **Broker.** The printed `aws secretsmanager create-secret` line stores the key, `scripts/deploy.sh` deploys with the App ID, then the local `.pem` is deleted. [`packages/broker/README.md`](../../packages/broker/README.md) is the runbook.
-4. **Links.** The broker URL becomes the `broker-url` default of `action.yml` and `broker-token/action.yml`; the install link `https://github.com/apps/<slug>/installations/new` goes into Onboarding.
+4. **Links.** The broker URL becomes the `broker-url` default of `action.yml` and `broker-token/action.yml`; the install link goes into Onboarding. For the joyntshops App (`joynt-foundry-bot-app`) these are `https://tfmj7duxeutstzy3usrv6uch2q0rtwkg.lambda-url.us-west-2.on.aws/` and `https://github.com/apps/joynt-foundry-bot-app/installations/new`.
 
 Running the command again prints the same steps for the saved App without creating another. A permission added later on the App is requested from every installation, and each installer accepts it under *Installed GitHub Apps → Configure*.
 
