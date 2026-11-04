@@ -1,0 +1,51 @@
+name: 'Foundry broker token'
+description: >-
+  Exchanges the job's GitHub Actions OIDC token for an installation token of the
+  public Foundry GitHub App, scoped to this repository. Needs
+  `permissions: id-token: write`. Used by the Foundry workflow template before
+  checkout so pushes and pull requests carry the App's identity.
+author: 'Joynt Shops'
+
+inputs:
+  broker-url:
+    description: >-
+      The broker. Defaults to the joyntshops broker; point it at your own
+      deployment of packages/broker to use your own App. Empty disables the
+      exchange and the outputs are empty.
+    required: false
+    default: ''
+  audience:
+    description: 'OIDC audience the broker expects.'
+    required: false
+    default: 'joynt-foundry-broker'
+  required:
+    description: >-
+      `true` fails the step when no token could be obtained. The default warns
+      and leaves the outputs empty so `|| github.token` fallbacks apply.
+    required: false
+    default: 'false'
+
+outputs:
+  token:
+    description: 'Installation token for this repository (masked), or empty.'
+    value: ${{ steps.exchange.outputs.token }}
+  expires-at:
+    description: 'When the token expires (ISO 8601).'
+    value: ${{ steps.exchange.outputs.expires-at }}
+  repository:
+    description: 'The repository the token is scoped to.'
+    value: ${{ steps.exchange.outputs.repository }}
+  app-slug:
+    description: "The App's slug; its commits are attributed to `<slug>[bot]`."
+    value: ${{ steps.exchange.outputs.app-slug }}
+
+runs:
+  using: composite
+  steps:
+    - id: exchange
+      shell: bash
+      env:
+        BROKER_URL: ${{ inputs.broker-url }}
+        BROKER_AUDIENCE: ${{ inputs.audience }}
+        BROKER_REQUIRED: ${{ inputs.required }}
+      run: bash "${{ github.action_path }}/exchange.sh"

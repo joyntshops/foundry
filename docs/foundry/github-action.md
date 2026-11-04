@@ -53,7 +53,24 @@ No GitHub credentials are *needed*. Inside a job, GitHub has already established
 
 The public Foundry App carries every permission below. A self-owned App from `foundry setup-bot` works too. It needs **issues, pull_requests, contents, checks, actions, deployments, workflows: write**. Older Apps lack `checks` (verification results are posted as a Check Run; without it you get a non-fatal warning), `actions` (preview dispatch), and `deployments`. Add them in the App's settings, then **accept the permission update on the installation**: changing the App definition only creates a request, and jobs keep minting tokens with the old set until an org owner accepts it.
 
-The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` context is not available in a step's `if:`. Surfacing the App ID (not the key) into `env` makes the check possible; `steps.app.outputs.token || github.token` falls back when the step was skipped.
+The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` context is not available in a step's `if:`. Surfacing the App ID (not the key) into `env` makes the check possible; `steps.app.outputs.token || steps.broker.outputs.token || github.token` falls back in that order when a step was skipped or came back empty.
+
+### Broker mode
+
+The public Foundry App has no key to store. The job proves who it is with the OIDC token GitHub issues to every job that has `permissions: id-token: write` (the template grants it), and a broker run by joyntshops turns that into an installation token for this one repository ([decision record](decisions/2026-11-03-public-app-token-broker.md)).
+
+The template runs the exchange **before checkout**, through `joyntshops/foundry/broker-token@v0`, because `actions/checkout` persists the token it is given for every later `git push`; a token minted after checkout would leave pushes running as `github-actions`. The step is skipped when `FOUNDRY_APP_ID` is set, so a self-owned App always wins. The Action itself also accepts `broker-url` and performs the exchange when it was handed the built-in token, rewriting git's credential afterwards; that path serves hand-written workflows and is slower by one step.
+
+What the exchange needs and what it yields:
+
+| | |
+|---|---|
+| Needs | `id-token: write`; the App installed on the repository; the broker reachable |
+| Yields | a token valid one hour, scoped to this repository, carrying the App's permissions; the App's slug for commit attribution |
+| On failure | a **warning** on the run and empty outputs, so the job continues with the built-in token (PRs then get no CI). `required: true` on the step, or `broker-required: true` on the Action, makes it fail instead |
+| Refusals | `not_installed` (install the App or set the self-owned secrets), `deny_list`, `workflow_ref`, `disabled` (the broker's kill switch) |
+
+A fork pull request never gets `id-token: write`, so a fork cannot obtain the upstream repository's token; the template does not run on fork PRs anyway. The broker URL is the default of the `broker-url` input on both actions; pass your own to use a broker you run against your own App (`packages/broker/README.md`).
 
 ## Decisions and gotchas
 

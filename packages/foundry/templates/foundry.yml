@@ -12,10 +12,14 @@
 #
 # Secrets (repository or organization level):
 #   CLAUDE_CODE_OAUTH_TOKEN                   required. From `claude setup-token`; bills that Claude plan.
-#   FOUNDRY_APP_ID, FOUNDRY_APP_PRIVATE_KEY   a GitHub App installed on this repo (`foundry setup-bot`).
-#                                             With it, Foundry's comments and PRs carry the App's name and
-#                                             its PRs trigger the repo's other workflows. Without it the
-#                                             job's built-in token is used and agent PRs get no CI.
+#   FOUNDRY_APP_ID, FOUNDRY_APP_PRIVATE_KEY   only for a self-owned GitHub App (`foundry setup-bot`).
+#
+# Identity: with the public Foundry App installed on this repo and no FOUNDRY_APP_*
+# secrets, the job exchanges its OIDC token (`id-token: write` below) at the
+# Foundry broker for a token scoped to this repo; comments, PRs and commits carry
+# the App's name and its PRs trigger the repo's other workflows. With the secrets,
+# the self-owned App is used instead. With neither, the job's built-in token is
+# used and agent PRs get no CI.
 name: Foundry
 
 on:
@@ -55,6 +59,7 @@ permissions:
   checks: write          # verification results as a check run on the PR
   actions: write         # workflow_dispatch to itself; preview up/down
   deployments: write     # GitHub Deployment records for previews
+  id-token: write        # OIDC token the Foundry broker exchanges for the public App's token
 
 jobs:
   foundry:
@@ -90,6 +95,7 @@ jobs:
       FOUNDRY_APP_ID: ${{ secrets.FOUNDRY_APP_ID }}   # secrets aren't readable in step `if:`
 
     steps:
+      # Self-owned App: mint from the secrets.
       - name: Mint GitHub App token
         id: app
         if: env.FOUNDRY_APP_ID != ''
@@ -98,17 +104,25 @@ jobs:
           app-id: ${{ secrets.FOUNDRY_APP_ID }}
           private-key: ${{ secrets.FOUNDRY_APP_PRIVATE_KEY }}
 
+      # Public Foundry App: exchange the job's OIDC token at the broker. Warns
+      # and leaves its outputs empty when the App is not installed here.
+      - name: Token from the Foundry broker
+        id: broker
+        if: env.FOUNDRY_APP_ID == ''
+        uses: joyntshops/foundry/broker-token@v0
+
       # Full history so the integration branch exists for worktrees and diffs.
       - uses: actions/checkout@v4
         with:
-          token: ${{ steps.app.outputs.token || github.token }}
+          token: ${{ steps.app.outputs.token || steps.broker.outputs.token || github.token }}
           fetch-depth: 0
 
       - name: Foundry
         id: foundry
         uses: joyntshops/foundry@v0
         with:
-          github-token: ${{ steps.app.outputs.token || github.token }}
+          github-token: ${{ steps.app.outputs.token || steps.broker.outputs.token || github.token }}
+          app-slug: ${{ steps.app.outputs.app-slug || steps.broker.outputs.app-slug }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
       - name: Keep the agent transcript

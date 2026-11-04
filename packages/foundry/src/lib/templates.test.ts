@@ -15,7 +15,7 @@ describe('shipped templates', () => {
     expect(Object.keys(wf.on)).toEqual(['issue_comment', 'pull_request', 'pull_request_review', 'workflow_dispatch', 'schedule']);
     expect(wf.on.workflow_dispatch.inputs).toHaveProperty('issue');
     expect(wf.on.workflow_dispatch.inputs).toHaveProperty('command');
-    expect(wf.permissions).toMatchObject({ contents: 'write', issues: 'write', 'pull-requests': 'write', checks: 'write', actions: 'write' });
+    expect(wf.permissions).toMatchObject({ contents: 'write', issues: 'write', 'pull-requests': 'write', checks: 'write', actions: 'write', 'id-token': 'write' });
     expect(wf.jobs.foundry.concurrency.group).toContain('foundry-');
     expect(wf.jobs.foundry.steps.map((s: any) => s.uses ?? s.name)).toContain('joyntshops/foundry@v0');
   });

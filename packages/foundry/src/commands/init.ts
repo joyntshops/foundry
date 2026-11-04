@@ -246,8 +246,8 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
   log.info('');
   log.info('Next steps:');
   log.info(`  1. Review ${CONFIG_FILENAME}: branches, verify commands, the model`);
-  log.info('  2. Add the secrets: CLAUDE_CODE_OAUTH_TOKEN (claude setup-token), then');
-  log.info('     `foundry setup-bot` for FOUNDRY_APP_ID and FOUNDRY_APP_PRIVATE_KEY');
+  log.info('  2. Add the secret CLAUDE_CODE_OAUTH_TOKEN (claude setup-token), then install the');
+  log.info('     public Foundry App on the repo, or run `foundry setup-bot` for a self-owned App');
   log.info('  3. Commit and push; the workflow listens once it is on the default branch');
   log.info('  4. Open an issue and comment `@foundry go`');
   log.info('');
