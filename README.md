@@ -34,7 +34,7 @@
 
 Foundry turns a GitHub Issue into a verified pull request. Comment `@foundry go` on an issue and Foundry claims it, runs a coding agent in an isolated git worktree, runs your verify commands, opens a PR into your integration branch, and stands up a preview if you have one. Humans review on GitHub. Three comments are the whole control surface: `@foundry go`, `@foundry restart`, `@foundry stop`. Every other comment is context the agent reads; labels show status.
 
-Foundry is a **GitHub Action**. There is no server to run and no machine to keep awake. Each GitHub event that matters starts a job, the job performs one transition of the task's state machine, and state lives on GitHub: in labels, a structured claim comment, the PR, and the preview comment.
+Foundry is a **GitHub Action**. There is no server to run and no machine to keep awake; the one hosted piece, a token broker that lets every repository use the same public GitHub App, is run by joyntshops and optional ([why](docs/foundry/decisions/2026-11-03-public-app-token-broker.md)). Each GitHub event that matters starts a job, the job performs one transition of the task's state machine, and state lives on GitHub: in labels, a structured claim comment, the PR, and the preview comment.
 
 Foundry is the orchestration layer, not the agent. It runs Claude Code, aider, or any CLI you configure, and bills your own Claude subscription through `CLAUDE_CODE_OAUTH_TOKEN`.
 
@@ -74,7 +74,7 @@ Reference:
 
 - [Configuration](docs/foundry/config-reference.md) · [CLI](docs/foundry/cli-reference.md) · [GitHub Action](docs/foundry/github-action.md)
 - [Agent backends](docs/foundry/agent-backends.md) · [Preview environments](docs/foundry/preview-environments.md) · [GitHub identity](docs/foundry/github-backends.md) · [Integration branch](docs/foundry/integration-strategy.md)
-- [Troubleshooting](docs/foundry/troubleshooting.md)
+- [Troubleshooting](docs/foundry/troubleshooting.md) · [Decisions](docs/foundry/decisions/README.md)
 
 About the project: [Demo repository](https://github.com/joyntshops/foundry-demo) (real issues, agent PRs, runs and previews) · [Open source](docs/foundry/open-source.md), including how Foundry relates to `claude-code-action` · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 

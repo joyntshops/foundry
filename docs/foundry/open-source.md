@@ -8,9 +8,24 @@ Foundry is not Joynt's product; it is how Joynt builds products. Publishing it c
 
 The accepted costs: a support burden we do not promise to meet quickly, and rough edges in the open. The stance is that Foundry is maintained in service of Joynt's needs; contributions are welcome and reviewed when they fit, and known limitations are stated rather than hidden ([GitHub Action](github-action.md#known-limitations)).
 
+## What Joynt hosts
+
+Nothing, with one exception decided on 2026-11-03: a token broker, so that Foundry can run as one public GitHub App that any repository installs in a click. The job sends its GitHub Actions OIDC token to the broker and gets back an installation token for that repository alone; the App's private key stays in the broker. This is the model `claude-code-action` uses. The reasoning, the security posture, and what it costs Joynt to operate are in [the decision record](decisions/2026-11-03-public-app-token-broker.md).
+
+Two paths stay open to installers:
+
+| | Public Foundry App (default) | Self-owned App (fallback) |
+|---|---|---|
+| Setup | install the App on the repository | `foundry setup-bot`, two secrets, finish the permissions by hand |
+| Depends on | the joyntshops broker being up | nothing outside your organization |
+| Bot identity | the Foundry bot with its icon, the same on every repository | `<YourApp>[bot]` |
+| Permissions | set once by joyntshops; installations accept updates | yours to maintain |
+
+The broker's source lives in this repository (`packages/broker/`, landing with the broker) with the deploy and rotation commands, so anyone can run their own and point `broker-url` at it. A Marketplace listing is deferred; the App's public page is the install surface.
+
 ## Foundry and `claude-code-action`
 
-[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) runs Claude Code inside a GitHub Actions job when someone mentions `@claude` on an issue or pull request, or on a trigger the workflow defines. It bills the user's own Claude subscription through `CLAUDE_CODE_OAUTH_TOKEN` or an API key, runs on whatever `runs-on` the workflow names, and can read the thread, edit files, commit, push, and open or review pull requests.
+[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) runs Claude Code inside a GitHub Actions job when someone mentions `@claude` on an issue or pull request, or on a trigger the workflow defines. It bills the user's own Claude subscription through `CLAUDE_CODE_OAUTH_TOKEN` or an API key, runs on whatever `runs-on` the workflow names, and can read the thread, edit files, commit, push, and open or review pull requests. It acts as one public GitHub App through a hosted token exchange, which Foundry now does the same way.
 
 Foundry runs the same way and bills the same way, and its `claude-code` preset is the same CLI. The difference is the layer:
 

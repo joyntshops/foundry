@@ -72,7 +72,10 @@ gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo OWNER/REPO --body "$(pbpaste | tr -
 
 A token pasted with a trailing newline fails every run with `401 Invalid bearer token`.
 
-**A GitHub App**, `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY`. Run `foundry setup-bot`; it creates the App in two browser clicks and prints the two `gh secret set` lines. The App is part of setup, not an option: pull requests opened with the job's built-in token do not trigger the repository's other workflows, so agent PRs would get no CI and required checks could never pass. With the App, Foundry's comments and PRs carry its name and everything triggers normally. Details in [GitHub Identity](github-backends.md).
+**A GitHub App identity.** Foundry acts as a GitHub App rather than with the job's built-in token, because pull requests opened with the built-in token do not trigger the repository's other workflows: agent PRs would get no CI and required checks could never pass. With an App, Foundry's comments and PRs carry its name and everything triggers normally. There are two ways to get one ([GitHub Identity](github-backends.md) has the details and the reasoning is in [the decision record](decisions/2026-11-03-public-app-token-broker.md)):
+
+- **The public Foundry App (default).** Install it on the repository from its GitHub App page. No key, no extra secrets: the workflow exchanges the job's OIDC token for an installation token at a broker run by joyntshops, scoped to this repository. *Status: this path ships with the broker and the Action's `broker-url` input, in progress; until that release, use the self-owned App.*
+- **A self-owned App (fallback).** Run `foundry setup-bot`; it creates an App in your organization in two browser clicks and prints the two `gh secret set` lines for `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY`. Choose this when your organization must not depend on a joyntshops endpoint. The manifest cannot request every permission Foundry needs, so finish in the App's settings as `setup-bot` prints.
 
 ## 4. Push, prove, go
 
@@ -84,6 +87,6 @@ Before spending agent time, prove the wiring with a no-op. This works from any b
 gh workflow run foundry.yml --repo OWNER/REPO --ref <branch> -f issue=1 -f command=stop
 ```
 
-The run should mint the App token and log `has no task to stop`. Nothing else happens.
+The run should obtain an App token (from the broker, or from your own App) and log `has no task to stop`. Nothing else happens.
 
 Then open an issue with the **Foundry task** template ([how to write one](writing-a-task.md)) and comment `@foundry go`. Add the `mode:plan` label first to approve a plan before any code is written. The job appears under Actions → Foundry; its log is the agent's transcript. On the issue, Foundry keeps a status comment and moves the `state:*` label. From here, [Workflows](workflows.md) covers steering, stopping, and undoing a task.
