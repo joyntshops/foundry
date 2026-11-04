@@ -53,8 +53,11 @@ program
 
 program
   .command('setup-bot')
-  .description('Create a GitHub App so Foundry acts under its own name (optional under the Action)')
+  .description('Create a self-owned GitHub App for Foundry (the fallback to installing the public Foundry App)')
   .option('--server-url <url>', 'Webhook URL for the GitHub App (unused by the Action)')
+  .option('--public', 'Create the public Foundry App instead (owner use; prints the owner steps and broker commands)')
+  .option('--name <name>', 'App name (globally unique on GitHub)')
+  .option('--org <owner>', 'Owner of the App (default: the repo\'s owner)')
   .action(async (opts) => {
     const { runSetupBot } = await import('./commands/setup-bot.js');
     await runSetupBot(opts);

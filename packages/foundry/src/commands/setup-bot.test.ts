@@ -5,19 +5,27 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { buildManifest, repoSlugFromRemote } from './setup-bot.js';
+import { buildManifest, repoSlugFromRemote, missingPermissions, publicAppNextSteps, appSettingsUrl, REQUIRED_PERMISSIONS } from './setup-bot.js';
 
 describe('buildManifest', () => {
-  it('includes correct permissions', () => {
+  it('requests every permission Foundry needs, including workflows (issue 30)', () => {
     const manifest = buildManifest('Foundry Bot myorg', 'http://localhost:9999/callback');
 
     expect(manifest.default_permissions).toEqual({
       issues: 'write',
       pull_requests: 'write',
       contents: 'write',
-      metadata: 'read',
       checks: 'write',
+      actions: 'write',
+      deployments: 'write',
+      workflows: 'write',
+      metadata: 'read',
     });
+    expect(manifest.default_permissions).toEqual(REQUIRED_PERMISSIONS);
+  });
+
+  it('creates a public App when asked', () => {
+    expect(buildManifest('Joynt Foundry', 'http://localhost:1/callback', undefined, { public: true }).public).toBe(true);
   });
 
   it('includes webhook events but with active: false', () => {
@@ -54,6 +62,36 @@ describe('buildManifest', () => {
   it('uses placeholder webhook URL when serverUrl is omitted', () => {
     const manifest = buildManifest('Foundry Bot myorg', 'http://localhost:9999/callback');
     expect(manifest.hook_attributes.url).toBe('https://example.com/unused');
+  });
+});
+
+describe('missingPermissions', () => {
+  it('is empty when everything is granted', () => {
+    expect(missingPermissions({ ...REQUIRED_PERMISSIONS })).toEqual([]);
+  });
+  it('accepts write where read is required', () => {
+    expect(missingPermissions({ ...REQUIRED_PERMISSIONS, metadata: 'write' })).toEqual([]);
+  });
+  it('names what is missing or too weak', () => {
+    const granted = { issues: 'write', pull_requests: 'write', contents: 'read', metadata: 'read', checks: 'write' };
+    expect(missingPermissions(granted)).toEqual(['contents: write', 'actions: write', 'deployments: write', 'workflows: write']);
+    expect(missingPermissions(undefined)).toHaveLength(Object.keys(REQUIRED_PERMISSIONS).length);
+  });
+});
+
+describe('publicAppNextSteps', () => {
+  it('prints the logo URL, the install link and the broker commands with the App id and key path', () => {
+    const lines = publicAppNextSteps({ org: 'joyntshops', isOrg: true, slug: 'joynt-foundry', appId: 4242, pemPath: '/home/w/.joynt-foundry/public-app-joyntshops.pem' }).join('\n');
+    expect(lines).toContain('https://github.com/organizations/joyntshops/settings/apps/joynt-foundry → Display information');
+    expect(lines).toContain('packages/foundry/assets/foundry-bot.png');
+    expect(lines).toContain('https://github.com/apps/joynt-foundry/installations/new');
+    expect(lines).toContain('FOUNDRY_APP_ID=4242');
+    expect(lines).toContain('--secret-string "file:///home/w/.joynt-foundry/public-app-joyntshops.pem"');
+    expect(lines).toContain('rm /home/w/.joynt-foundry/public-app-joyntshops.pem');
+  });
+  it('uses the personal settings URL for a user-owned App', () => {
+    expect(appSettingsUrl('alice', false, 'my-app')).toBe('https://github.com/settings/apps/my-app');
+    expect(appSettingsUrl('acme', true, 'my-app')).toBe('https://github.com/organizations/acme/settings/apps/my-app');
   });
 });
 

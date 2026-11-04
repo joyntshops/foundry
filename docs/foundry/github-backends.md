@@ -30,7 +30,7 @@ foundry setup-bot
 
 Two browser clicks: GitHub's App manifest page, then the install page. Credentials land in `~/.joynt-foundry/github-app-{org}.json` and `.pem`. Copy the App ID and the `.pem` contents into the two secrets.
 
-The manifest grants **issues, pull_requests, contents, checks: write** and **metadata: read**. Add **actions: write** (preview dispatch), **deployments: write** (deployment records) and **workflows: write** (without it a push that adds or edits a file under `.github/workflows/` is rejected and the task fails) in the App's settings afterwards, then **accept the permission update on the installation**. Changing the App only creates a request; installations keep the old set until an org owner accepts it. Check what jobs actually get:
+The manifest requests every permission in the table below, including **workflows: write**, without which a push that adds or edits a file under `.github/workflows/` is rejected and the task fails. After creating the App, `setup-bot` reads it back and lists any permission GitHub did not grant, with the settings URL to add it at; after a change, **accept the permission update on the installation**. Changing the App only creates a request; installations keep the old set until an org owner accepts it. Re-running `foundry setup-bot` repeats the check. Check what jobs actually get:
 
 ```bash
 gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="YOUR_APP") | .permissions'
@@ -50,6 +50,23 @@ CLI commands (`reset`, `preview`, `review`, `release`, `init`) run on your machi
 With 3 or 4, actions appear as you.
 
 Two name families, two purposes. `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` are **repository secrets** read by the workflow template; `setup-bot` prints the `gh secret set` lines for them. `FOUNDRY_GITHUB_APP_ID`, `FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH`, and `FOUNDRY_GITHUB_APP_INSTALLATION_ID` are a **local override for the CLI** and apply to every org at once, so with several onboarded orgs do not export them; the per-org files from `setup-bot` are the mechanism that keeps them apart.
+
+### The public App: owner steps
+
+This section is for whoever owns the public Foundry App (joyntshops). Installers never need it.
+
+```bash
+foundry setup-bot --public --org joyntshops --name "Joynt Foundry"
+```
+
+One browser click creates the App with `public: true` and every permission in the table below, saves the private key to `~/.joynt-foundry/public-app-joyntshops.pem` (mode 0600), checks the granted permissions, and prints the steps GitHub has no API for:
+
+1. **Logo.** On the App's settings page under *Display information*, upload [`packages/foundry/assets/foundry-bot.png`](../../packages/foundry/assets/README.md).
+2. **Public.** The manifest asks for it; the *Advanced* tab confirms it (the button reads *Make private* when the App is public).
+3. **Broker.** The printed `aws secretsmanager create-secret` line stores the key, `scripts/deploy.sh` deploys with the App ID, then the local `.pem` is deleted. [`packages/broker/README.md`](../../packages/broker/README.md) is the runbook.
+4. **Links.** The broker URL becomes the `broker-url` default of `action.yml` and `broker-token/action.yml`; the install link `https://github.com/apps/<slug>/installations/new` goes into Onboarding.
+
+Running the command again prints the same steps for the saved App without creating another. A permission added later on the App is requested from every installation, and each installer accepts it under *Installed GitHub Apps → Configure*.
 
 ## API client
 

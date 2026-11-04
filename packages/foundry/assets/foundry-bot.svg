@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bgdark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#303845"/><stop offset="1" stop-color="#191d24"/></linearGradient>
+    <linearGradient id="bghot" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#d9480f"/></linearGradient>
+    <linearGradient id="fire" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f0531c"/><stop offset="1" stop-color="#ffb347"/></linearGradient>
+    <linearGradient id="firehot" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb347"/><stop offset="1" stop-color="#fff3b0"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bghot)"/>
+  <rect x="352" y="420" width="320" height="460" fill="url(#firehot)"/>
+  <path d="M512 850 Q392 720 512 540 Q632 720 512 850 Z" fill="#ffffff"/>
+  <path fill-rule="evenodd" fill="#1b1f26" d="
+    M150 404 Q150 380 174 380 H850 Q874 380 874 404 V880 H150 Z
+    M352 880 V600 A160 160 0 0 1 672 600 V880 Z"/>
+  <g fill="#1b1f26">
+    <circle cx="400" cy="320" r="104"/>
+    <circle cx="548" cy="250" r="134"/>
+    <circle cx="690" cy="330" r="96"/>
+    <rect x="400" y="300" width="290" height="130"/>
+  </g>
+</svg>
