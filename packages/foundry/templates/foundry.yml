@@ -15,7 +15,7 @@
 #   FOUNDRY_APP_ID, FOUNDRY_APP_PRIVATE_KEY   only for a self-owned GitHub App (`foundry setup-bot`).
 #
 # Identity: with the public Foundry App installed on this repo
-# (https://github.com/apps/joynt-foundry-bot-app/installations/new) and no FOUNDRY_APP_*
+# (https://github.com/apps/joynt-foundry/installations/new) and no FOUNDRY_APP_*
 # secrets, the job exchanges its OIDC token (`id-token: write` below) at the
 # Foundry broker for a token scoped to this repo; comments, PRs and commits carry
 # the App's name and its PRs trigger the repo's other workflows. With the secrets,
