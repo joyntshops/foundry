@@ -63,24 +63,24 @@ npm --workspace packages/broker run build         # dist/index.mjs
 
 ## Deploying (Walter runs these)
 
-All commands run from `packages/broker` in the **Foundry** account of the Joynt AWS organization. Set the region to the one the account uses.
+All commands run from `packages/broker` in the **Foundry** account of the Joynt AWS organization (SSO profile `foundry-prod`, region `us-west-2`).
 
 ```bash
-export AWS_PROFILE=foundry AWS_REGION=us-east-2
+export AWS_PROFILE=foundry-prod AWS_REGION=us-west-2
 aws sso login
 aws sts get-caller-identity --query Account --output text   # confirm it is the Foundry account
 ```
 
 ### One-time setup
 
-**The App's private key.** On the App's settings page (`https://github.com/organizations/joyntshops/settings/apps/<app-slug>`), under *Private keys*, generate a key; GitHub downloads a `.pem`. Put it in Secrets Manager and delete the local file:
+**The App's private key.** `foundry setup-bot --public` saves the key GitHub returns at `~/.joynt-foundry/public-app-joyntshops.pem` (mode 0600). For a key generated later on the App's settings page (`https://github.com/organizations/joyntshops/settings/apps/joynt-foundry-bot-app`, *Private keys*), GitHub downloads a `.pem`; use that path instead. Put it in Secrets Manager and delete the local file:
 
 ```bash
-aws secretsmanager create-secret --name foundry-broker/github-app-private-key --description "Private key of the public Foundry GitHub App" --secret-string "file://$HOME/Downloads/<downloaded>.pem"
+aws secretsmanager create-secret --name foundry-broker/github-app-private-key --description "Private key of the public Foundry GitHub App" --secret-string "file://$HOME/.joynt-foundry/public-app-joyntshops.pem"
 ```
 
 ```bash
-rm "$HOME/Downloads/<downloaded>.pem"
+rm "$HOME/.joynt-foundry/public-app-joyntshops.pem"
 ```
 
 Note the `ARN` the first command prints; it is `PRIVATE_KEY_SECRET_ARN` below. The key is now readable only by the function's role and by whoever can call `GetSecretValue` in this account, and every read is in CloudTrail.
@@ -118,7 +118,7 @@ Expected: `{"ok":true,"disabled":false}`. Then the real thing from a workflow on
 - name: Token from the Foundry broker
   shell: bash
   env:
-    BROKER_URL: https://<id>.lambda-url.<region>.on.aws/
+    BROKER_URL: https://tfmj7duxeutstzy3usrv6uch2q0rtwkg.lambda-url.us-west-2.on.aws/
   run: |
     oidc=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=joynt-foundry-broker" | jq -r .value)
     resp=$(curl -sS -X POST -H "Content-Type: application/json" -d "{\"oidc_token\":\"$oidc\"}" "${BROKER_URL}token")
