@@ -73,7 +73,7 @@ aws sts get-caller-identity --query Account --output text   # confirm it is the 
 
 ### One-time setup
 
-**The App's private key.** `foundry setup-bot --public` saves the key GitHub returns at `~/.joynt-foundry/public-app-joyntshops.pem` (mode 0600). For a key generated later on the App's settings page (`https://github.com/organizations/joyntshops/settings/apps/joynt-foundry-bot-app`, *Private keys*), GitHub downloads a `.pem`; use that path instead. Put it in Secrets Manager and delete the local file:
+**The App's private key.** `foundry setup-bot --public` saves the key GitHub returns at `~/.joynt-foundry/public-app-joyntshops.pem` (mode 0600). For a key generated later on the App's settings page (`https://github.com/organizations/joyntshops/settings/apps/joynt-foundry`, *Private keys*), GitHub downloads a `.pem`; use that path instead. Put it in Secrets Manager and delete the local file:
 
 ```bash
 aws secretsmanager create-secret --name foundry-broker/github-app-private-key --description "Private key of the public Foundry GitHub App" --secret-string "file://$HOME/.joynt-foundry/public-app-joyntshops.pem"

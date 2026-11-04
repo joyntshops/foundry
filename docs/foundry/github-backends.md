@@ -15,7 +15,7 @@ The built-in token has one limit that matters: events it causes do not start oth
 
 There are two ways to have an App, decided on 2026-11-03 ([decision record](decisions/2026-11-03-public-app-token-broker.md)):
 
-- **The public Foundry App (default).** One App, owned by joyntshops, installed from its GitHub App page. The workflow asks GitHub for an OIDC token (`permissions: id-token: write`) and exchanges it at a broker run by joyntshops for an installation token scoped to the calling repository; the private key never leaves the broker. No secrets beyond `CLAUDE_CODE_OAUTH_TOKEN`. How the exchange runs is in [GitHub Action](github-action.md#broker-mode).
+- **The public Foundry App (default).** One App, owned by joyntshops, [installed from its GitHub App page](https://github.com/apps/joynt-foundry/installations/new). The workflow asks GitHub for an OIDC token (`permissions: id-token: write`) and exchanges it at a broker run by joyntshops for an installation token scoped to the calling repository; the private key never leaves the broker. No secrets beyond `CLAUDE_CODE_OAUTH_TOKEN`. How the exchange runs is in [GitHub Action](github-action.md#broker-mode).
 - **A self-owned App (fallback).** Created by `foundry setup-bot` below. The workflow mints an App token when the `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets exist. Choose this when your organization must not depend on a joyntshops endpoint, or while the broker is unavailable.
 
 With neither, the workflow falls back to the built-in token, so a repo can be wired before the App exists.
@@ -64,7 +64,7 @@ One browser click creates the App with `public: true` and every permission in th
 1. **Logo.** On the App's settings page under *Display information*, upload [`packages/foundry/assets/foundry-bot.png`](../../packages/foundry/assets/README.md).
 2. **Public.** The manifest asks for it; the *Advanced* tab confirms it (the button reads *Make private* when the App is public).
 3. **Broker.** The printed `aws secretsmanager create-secret` line stores the key, `scripts/deploy.sh` deploys with the App ID, then the local `.pem` is deleted. [`packages/broker/README.md`](../../packages/broker/README.md) is the runbook.
-4. **Links.** The broker URL becomes the `broker-url` default of `action.yml` and `broker-token/action.yml`; the install link goes into Onboarding. For the joyntshops App (`joynt-foundry-bot-app`) these are `https://tfmj7duxeutstzy3usrv6uch2q0rtwkg.lambda-url.us-west-2.on.aws/` and `https://github.com/apps/joynt-foundry-bot-app/installations/new`.
+4. **Links.** The broker URL becomes the `broker-url` default of `action.yml` and `broker-token/action.yml`; the install link goes into Onboarding. For the joyntshops App (`joynt-foundry`) these are `https://tfmj7duxeutstzy3usrv6uch2q0rtwkg.lambda-url.us-west-2.on.aws/` and `https://github.com/apps/joynt-foundry/installations/new`.
 
 Running the command again prints the same steps for the saved App without creating another. A permission added later on the App is requested from every installation, and each installer accepts it under *Installed GitHub Apps → Configure*.
 
