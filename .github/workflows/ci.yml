@@ -32,3 +32,9 @@ jobs:
 
       - name: Test
         run: npm --workspace packages/foundry test
+
+      - name: Typecheck broker
+        run: npx tsc --noEmit -p packages/broker/tsconfig.json
+
+      - name: Test broker
+        run: npm --workspace packages/broker test

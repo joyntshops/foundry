@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Foundry token broker. Exchanges a GitHub Actions OIDC token for a GitHub App
+  installation token scoped to the calling repository. See README.md.
+
+Parameters:
+  GitHubAppId:
+    Type: String
+    Description: App ID of the public Foundry GitHub App.
+  PrivateKeySecretArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret holding the App's private key PEM (created outside this stack).
+  Audience:
+    Type: String
+    Default: joynt-foundry-broker
+    Description: The OIDC audience the workflow must request.
+  DenyList:
+    Type: String
+    Default: ''
+    Description: Owners and owner/repo entries refused regardless of installation; comma separated.
+  WorkflowRefPattern:
+    Type: String
+    Default: ''
+    Description: Optional regular expression the job_workflow_ref claim must match. Empty means any workflow.
+  TokenPermissions:
+    Type: String
+    Default: ''
+    Description: Optional JSON object narrowing the minted token's permissions. Empty means the App's full set.
+  Disabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Kill switch by configuration. The faster switch is reserved concurrency 0 (README).
+  LogRetentionDays:
+    Type: Number
+    Default: 400
+    Description: CloudWatch Logs retention for the audit log.
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: Optional address that receives an email when denies or errors spike.
+
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/foundry-broker
+      RetentionInDays: !Ref LogRetentionDays
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: foundry-broker
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt LogGroup.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref PrivateKeySecretArn
+
+  Function:
+    Type: AWS::Lambda::Function
+    DependsOn: LogGroup
+    Properties:
+      FunctionName: foundry-broker
+      Description: Foundry token broker (GitHub Actions OIDC -> App installation token)
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Handler: index.handler
+      MemorySize: 256
+      Timeout: 15
+      Role: !GetAtt Role.Arn
+      Code: ./dist
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref GitHubAppId
+          PRIVATE_KEY_SECRET_ARN: !Ref PrivateKeySecretArn
+          OIDC_AUDIENCE: !Ref Audience
+          DENY_LIST: !Ref DenyList
+          WORKFLOW_REF_PATTERN: !Ref WorkflowRefPattern
+          TOKEN_PERMISSIONS: !Ref TokenPermissions
+          BROKER_DISABLED: !Ref Disabled
+
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt Function.Arn
+      AuthType: NONE
+
+  FunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Function
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  DenyMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroup
+      FilterPattern: '{ $.decision = "deny" }'
+      MetricTransformations:
+        - MetricNamespace: FoundryBroker
+          MetricName: Denies
+          MetricValue: '1'
+          DefaultValue: 0
+
+  ErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LogGroup
+      FilterPattern: '{ $.status >= 500 }'
+      MetricTransformations:
+        - MetricNamespace: FoundryBroker
+          MetricName: Errors
+          MetricValue: '1'
+          DefaultValue: 0
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlarmEmail
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlarmEmail
+
+  DenyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlarmEmail
+    Properties:
+      AlarmDescription: More than 20 refused exchanges in 5 minutes
+      Namespace: FoundryBroker
+      MetricName: Denies
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlarmEmail
+    Properties:
+      AlarmDescription: Any broker-side error (5xx) in 5 minutes
+      Namespace: FoundryBroker
+      MetricName: Errors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+Outputs:
+  BrokerUrl:
+    Description: The URL to pass as the Action's broker-url (ends with a slash).
+    Value: !GetAtt FunctionUrl.FunctionUrl
+  FunctionName:
+    Value: !Ref Function
+  LogGroupName:
+    Value: !Ref LogGroup

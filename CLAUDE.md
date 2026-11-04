@@ -33,6 +33,10 @@ packages/foundry/src/
   backends/                  agent backends; `command` is the only type, fully generic
   lib/templates.ts           reads packages/foundry/templates/ (shipped with the package; `init` writes them into a repo)
 packages/foundry/templates/  foundry.yml (the workflow, single source; docs link it) and vercel-preview-url.sh
+packages/broker/             the token broker behind the public Foundry App (AWS Lambda); core.ts is the
+                             exchange, github.ts the App client, lambda.ts the adapter; template.yml and
+                             README.md are Walter's deploy/rotation/kill-switch runbook. Walter deploys it.
+docs/foundry/decisions/      decision records; the 2026-11-03 one is why the broker exists
 docs/foundry/                user docs; github-action.md carries the load-bearing decisions
 ```
 
@@ -42,9 +46,11 @@ docs/foundry/                user docs; github-action.md carries the load-bearin
 npm ci
 npx tsc --noEmit -p packages/foundry/tsconfig.json
 npm --workspace packages/foundry test
+npx tsc --noEmit -p packages/broker/tsconfig.json
+npm --workspace packages/broker test
 ```
 
-Those three lines are exactly what CI runs. Tests use vitest with `root: src`; unit tests sit next to the code as `*.test.ts`. `MockGitHubClient` in `lib/__tests__/` is the shared GitHub mock.
+Those lines are exactly what CI runs; the broker has its own tests (fake JWKS, fake GitHub API, no network). Tests use vitest with `root: src`; unit tests sit next to the code as `*.test.ts`. `MockGitHubClient` in `lib/__tests__/` is the shared GitHub mock.
 
 **Merging to `main` publishes.** `publish.yml` publishes `@joynt/foundry` to npmjs.com (trusted publishing, no token) as the next patch after the registry's latest, then pushes `vX.Y.Z` and moves `vX`, on every push to `main` that touches `packages/foundry/`. It never commits to `main`, so `package.json` lags the registry; a minor or major is a PR that sets `version`. `docs/foundry/releasing.md` has the whole process including rollback.
 

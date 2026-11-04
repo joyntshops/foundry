@@ -1,0 +1,27 @@
+{
+  "name": "@joynt/foundry-broker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Token broker for the public Foundry GitHub App: exchanges a GitHub Actions OIDC token for an installation token scoped to the calling repository.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/lambda.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/index.mjs --external:@aws-sdk/* --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "jose": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}
