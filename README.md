@@ -1,26 +1,31 @@
+<p align="center">
+  <img src="packages/foundry/assets/foundry-bot-256.png" width="128" alt="Foundry">
+</p>
+
 # Joynt Foundry
 
 ```
-                        _.-""""-._
-            _.-""-._  .'          '.  _.-""-._
-          .'        '.              .'        '.
-         (                                      )
-          '.                                  .'
-     _______'                                  '_______
-    |                                                |
-    |                                                |
-    |                                                |
-    |                 ______________                 |
-    |                /              \                |
-    |               |       (        |               |
-    |               |      ) )       |               |
-    |               |     ( ( (      |               |
-    |               |      ) ) )     |               |
-    |               |     (     )    |               |
-    |               |      '---'     |               |
-    |_______________|________________|_______________|
+                                 .  (  )  .
+                               (  )  .   (   )
+                              .  (   ) ( )  .  )
+                               ( )  . (  ) (  .
+                                  `-.___.-'
+                                   |     |
+                         __________|     |__________
+                        /::::::::::|     |::::::::::\
+                       |___________|_____|___________|
+                       |__|___|___|___|___|___|___|__|
+                       |____|___|___|___|___|___|____|
+                       |___|___|____.---.____|___|___|
+                       |__|___|__.'  ) (  `.__|___|__|
+                       |___|___|/   ( ) (   \|___|___|
+                       |__|___|_| ) (  )( ) |_|___|__|
+                       |___|___| ( )  (  ) ( |___|___|
+                       |__|___|_(_)_(__)_(__)_|___|__|
+                      /_______________________________\
+                     /_________________________________\
 
-          issue ──▶ agent ──▶ verify ──▶ pull request
+                  issue ──▶ agent ──▶ verify ──▶ pull request
 ```
 
 Foundry turns a GitHub Issue into a verified pull request. Comment `@foundry go` on an issue and Foundry claims it, runs a coding agent in an isolated git worktree, runs your verify commands, opens a PR into your integration branch, and stands up a preview if you have one. Humans review on GitHub. Three comments are the whole control surface: `@foundry go`, `@foundry restart`, `@foundry stop`. Every other comment is context the agent reads; labels show status.
