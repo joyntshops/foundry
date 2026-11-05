@@ -30,18 +30,18 @@
     ████████████████████████████████████████
     ███████████████▀▀▒▒▒▒▒▒▀▀███████████████
     █████████████▀▒▒▒▒▒▒▒▒▒▒▒▒▀█████████████
-    ████████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒████████████
-    ███████████▀▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▀███████████
-    ███████████▒▒▒▒▒▒▒    ▒▒▒▒▒▒▒███████████
-    ███████████▒▒▒▒▒▒      ▒▒▒▒▒▒███████████
-    ███████████▒▒▒▒▒▒      ▒▒▒▒▒▒███████████
-    ███████████▒▒▒▒▒▒      ▒▒▒▒▒▒███████████
-    ███████████▒▒▒▒▒▒      ▒▒▒▒▒▒███████████
-    ███████████▒▒▒▒▒▒░    ░▒▒▒▒▒▒███████████
-    ███████████▒▒▒▒▒▒▒░  ░▒▒▒▒▒▒▒███████████
-    ███████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒███████████
+    ████████████▒▒▒▒▒▒▒▒▒▒▒░▒▒▒▒████████████
+    ███████████▀▒▒▒▒▒▒▒▒▒▒░ ░▒▒▒▀███████████
+    ███████████▒▒▒▒▒▒▒▒▒▒░  ░▒▒▒▒███████████
+    ███████████▒▒▒▒▒▒▒▒▒░   ░▒▒▒▒███████████
+    ███████████▒▒▒▒░░▒▒░     ▒▒▒▒███████████
+    ███████████▒▒▒░  ░░      ░▒▒▒███████████
+    ███████████▒▒▒░           ▒▒▒███████████
+    ███████████▒▒▒▒░         ░▒▒▒███████████
+    ███████████▒▒▒▒▒░       ░▒▒▒▒███████████
+    ███████████▒▒▒▒▒▒░░   ░░▒▒▒▒▒███████████
 
-    issue ──▶ agent ──▶ verify ──▶ pull request
+issue ──▶ agent ──▶ verify ──▶ pull request
 ```
 
 Foundry turns a GitHub Issue into a verified pull request. Comment `@foundry go` on an issue and Foundry claims it, runs a coding agent in an isolated git worktree, runs your verify commands, opens a PR into your integration branch, and stands up a preview if you have one. Humans review on GitHub. Three comments are the whole control surface: `@foundry go`, `@foundry restart`, `@foundry stop`. Every other comment is context the agent reads; labels show status.
