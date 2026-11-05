@@ -12,7 +12,7 @@
  * owner runs this once): same manifest flow with `public: true`, no
  * installation step, and it prints the owner steps GitHub has no API for
  * (logo upload, confirming it is public) plus the broker commands that take
- * the App ID and the private key. See docs/foundry/decisions/.
+ * the App ID and the private key. See docs/foundry/maintainers/decisions/.
  *
  * `--check` audits an existing self-owned App without creating anything:
  * its permissions against REQUIRED_PERMISSIONS, and each installation

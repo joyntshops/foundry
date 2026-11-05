@@ -26,7 +26,7 @@ The issue template `init` writes has four sections. They map to what reviewers c
 Two habits pay off:
 
 - **Name the behaviour, not the implementation**, unless the implementation is the point. "The cart badge shows a warning instead of the count when any line has a stock problem" gets a better result than a list of files to edit, and leaves the agent free to find the right place.
-- **Resolve conflicts in the brief before `@foundry go`.** Given two instructions that cannot both hold, an agent picks one and may not say so. The first production tasks on Foundry lost a review round to exactly this.
+- **Resolve conflicts in the brief before `@foundry go`.** Given two instructions that cannot both hold, an agent picks one and may not say so. A conflicting brief usually costs a review round.
 
 ## Before the run
 

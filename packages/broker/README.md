@@ -1,6 +1,6 @@
 # Foundry token broker
 
-The hosted half of the public Foundry GitHub App. A Foundry job sends its GitHub Actions OIDC token here and gets back a GitHub App installation token for its own repository, valid for one hour. The App's private key lives only in this broker's secret store. The decision and the security posture are in [the decision record](../../docs/foundry/decisions/2026-11-03-public-app-token-broker.md).
+The hosted half of the public Foundry GitHub App. A Foundry job sends its GitHub Actions OIDC token here and gets back a GitHub App installation token for its own repository, valid for one hour. The App's private key lives only in this broker's secret store. The decision and the security posture are in [the decision record](../../docs/foundry/maintainers/decisions/2026-11-03-public-app-token-broker.md).
 
 It is an AWS Lambda function behind a function URL, defined by [`template.yml`](template.yml) (CloudFormation) and built by esbuild into one file. Anyone may run their own copy and point the Action's `broker-url` at it.
 

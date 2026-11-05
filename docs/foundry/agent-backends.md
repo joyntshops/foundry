@@ -108,7 +108,7 @@ agent_label_map:
   "agent:sonnet": claude-code-sonnet # per-issue choice; the default backend is Opus
 ```
 
-Which to default to: in our runs, Opus for tasks whose state spans several parts of the system, where Sonnet executed precise briefs well but resolved a conflict in the brief silently and missed the symmetric case of a rule it wrote, each costing a human review round; Sonnet, by label, for small fixes with an exact brief, where it was correct and several times cheaper. The status comment on the issue shows each run's cost, so the choice can be revisited with numbers.
+Which to default to: Opus for tasks whose state spans several parts of the system, where a cheaper model tends to resolve a conflict in the brief silently or miss the symmetric case of a rule it wrote, each costing a human review round; Sonnet, by label, for small fixes with an exact brief, where it is usually correct and several times cheaper. The status comment on the issue shows what each run cost, so the default can be revisited with numbers.
 
 Two things the alias depends on. Resolution happens in the Claude Code CLI, whose version `action.yml` pins (`claude-code-version`); an older pin resolves `opus` to an older Opus, so bump the pin when a new model matters. And the config is read from the branch the job checks out: comment-triggered runs read the default branch, so a model change takes effect there only after it is promoted, while a `workflow_dispatch` against another branch reads that branch's config.
 

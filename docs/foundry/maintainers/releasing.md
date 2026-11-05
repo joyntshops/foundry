@@ -2,7 +2,7 @@
 
 How a change to this repository becomes a published package and a tagged Action, and what to do when a release is bad. Written for whoever cuts or repairs a release next, human or agent; nothing here is derivable from the workflow file alone.
 
-The workflow is [`.github/workflows/publish.yml`](../../.github/workflows/publish.yml). It runs on every push to `main` that touches `packages/foundry/` or the workflow itself, which in practice means every merged pull request that changes the package.
+The workflow is [`.github/workflows/publish.yml`](../../../.github/workflows/publish.yml). It runs on every push to `main` that touches `packages/foundry/` or the workflow itself, which in practice means every merged pull request that changes the package.
 
 ## One release, four artifacts
 
@@ -39,7 +39,14 @@ Releases go to **npmjs.com only**, under the `@joynt` scope, which is the [`joyn
 
 Trusted publishing needs npm ≥ 11.5.1, so the job installs `npm@latest` before publishing.
 
-Versions up to 0.1.51 went to GitHub Packages as `@joyntshops/foundry` (that registry requires the scope to match the GitHub organization), which requires a token to install even a public package and so blocked `npx @joynt/foundry init` for anyone outside the organization. That copy is frozen; see [Installation](installation.md#if-you-installed-from-github-packages-before-november-2026) for the client-side change.
+Versions up to 0.1.51 went to GitHub Packages as `@joyntshops/foundry` (that registry requires the scope to match the GitHub organization), which requires a token to install even a public package and so blocked `npx @joynt/foundry init` for anyone outside the organization. That copy is frozen. Anyone who installed it replaces the global install:
+
+```bash
+npm uninstall -g @joyntshops/foundry
+npm install -g @joynt/foundry
+```
+
+A `@joyntshops:registry=https://npm.pkg.github.com/` line in `~/.npmrc` does not affect the new scope and can be removed.
 
 ### One-time setup (done once per package; recorded so it can be redone)
 
@@ -60,8 +67,12 @@ Trusted publishing can only be configured on a package that already exists, so t
 ## Consuming a release
 
 - **Workflows** pin the Action by tag: `uses: joyntshops/foundry@v0` to follow releases, or `uses: joyntshops/foundry@v0.1.52` to freeze. `@main` works but picks up every merge, released or not. The template `foundry init` writes, and the docs, use the moving major tag.
-- **The CLI** is `npx @joynt/foundry` or `npm install -g @joynt/foundry`; see [Installation](installation.md).
+- **The CLI** is `npx @joynt/foundry` or `npm install -g @joynt/foundry`; see [Installation](../installation.md).
 - The Action and the CLI do not have to match. The Action builds itself from the ref the workflow names; the CLI is only used for setup and for operating on a task from a checkout.
+
+## Testing a change before merging it
+
+Point the workflow at a branch: `uses: joyntshops/foundry@your-branch`. Composite actions are built from whatever ref you name. Switch back to `@v0` after merging; the moving major tag reaches the merged change at the next release, a few minutes after the merge. The demo repository below is where the branch is tried.
 
 ## The demo repository
 

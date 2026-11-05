@@ -33,15 +33,4 @@ foundry --version
 npm update -g @joynt/foundry
 ```
 
-Merges to `main` publish a new patch version automatically ([Releasing](releasing.md)). The CLI version and the Action ref a workflow pins can differ; nothing depends on them matching.
-
-### If you installed from GitHub Packages before November 2026
-
-Versions up to 0.1.51 were published to GitHub Packages as `@joyntshops/foundry`, which required a token to install. That copy is frozen and will not receive new versions; releases now go to npmjs.com under the new name. Replace the global install:
-
-```bash
-npm uninstall -g @joyntshops/foundry
-npm install -g @joynt/foundry
-```
-
-A `@joyntshops:registry=https://npm.pkg.github.com/` line in `~/.npmrc` does not affect the new scope and can be removed.
+Every release publishes a new version. The CLI version and the Action ref a workflow pins can differ; nothing depends on them matching.

@@ -27,7 +27,7 @@ gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="Y
 
 ## Two Foundry runs show as cancelled
 
-The workflow declares `concurrency` at the workflow level instead of on the job, so Foundry's own comments enter the group before the `if:` filters them and cancel each other. Declare it on the job, as the template does; the reason is under [Decisions](github-action.md#decisions-and-gotchas).
+The workflow declares `concurrency` at the workflow level instead of on the job, so Foundry's own comments enter the group before the `if:` filters them and cancel each other. Declare it on the job, as the template does ([GitHub Action](github-action.md#the-workflow)).
 
 ## The agent exited immediately, outcome `errored`
 
@@ -101,7 +101,7 @@ gh api repos/OWNER/REPO/rulesets/$RULESET \
   | gh api -X PUT repos/OWNER/REPO/rulesets/$RULESET --input -
 ```
 
-The same change in the browser: the repository's Settings → Rules → Rulesets → the branch's ruleset → *Require status checks to pass*, where each check lists its source; set it to the App, or remove the row and add the check again choosing the right source. [GitHub Action](github-action.md#decisions-and-gotchas) under *Branch protection that works with this* has the full list of settings.
+The same change in the browser: the repository's Settings → Rules → Rulesets → the branch's ruleset → *Require status checks to pass*, where each check lists its source; set it to the App, or remove the row and add the check again choosing the right source. [GitHub Action](github-action.md#branch-protection-that-works-with-this) has the full list of settings.
 
 ## The preview is still up after the PR was merged by hand
 
@@ -136,10 +136,6 @@ It should not: when a job ends with the agent waiting, Foundry commits anything 
 - The job log is the full agent transcript, streamed live.
 - The same transcript (`agent.log`, stream-json) is uploaded as an artifact named `foundry-issue-<n>-run-<id>` when the template's upload step is present.
 - On the issue, the status comment records each transition.
-
-## How do I test a Foundry change before merging it?
-
-Point the workflow at a branch: `uses: joyntshops/foundry@your-branch`. Composite actions are built from whatever ref you name. Switch back to `@v0` after merging; the moving major tag reaches the merged change at the next release, a few minutes after the merge ([Releasing](releasing.md)).
 
 ## A task is in a bad state and I want to start over
 

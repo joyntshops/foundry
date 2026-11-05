@@ -4,7 +4,7 @@ To see Foundry's output before reading further, the [demo repository](https://gi
 
 Foundry turns GitHub Issues into verified pull requests. It is the **orchestration layer** around a coding agent: it decides when an agent runs, where it runs, what happens to its output, and how a human steers it, all through comments and labels on the issue itself.
 
-Foundry is a GitHub Action. It is not a coding agent, and it is not a server. The one hosted piece is a token broker that lets every repository use the same public GitHub App ([decision](decisions/2026-11-03-public-app-token-broker.md)).
+Foundry is a GitHub Action. It is not a coding agent, and it is not a server. The one hosted piece is a token broker that lets every repository use the same public GitHub App, and a self-owned App works without it ([GitHub identity](github-backends.md)).
 
 ## Key concepts
 
@@ -32,7 +32,7 @@ Foundry is a GitHub Action. It is not a coding agent, and it is not a server. Th
 ## What Foundry does not do
 
 - **It does not write code.** The agent does. Foundry runs it, gates it, and routes its output.
-- **It does not host your code or previews.** Previews are orchestrated by Foundry but deployed by a command or workflow you own. The only thing joyntshops hosts is the token broker behind the public App, and a self-owned App works without it.
+- **It does not host your code or previews.** Previews are orchestrated by Foundry but deployed by a command or workflow you own. The only hosted piece is the token broker behind the public App, and a self-owned App works without it.
 - **It does not replace CI.** Verification is a pre-PR gate on the agent's branch. Your CI still runs on the PR, and approve-to-merge waits for it.
 - **It does not keep state anywhere but GitHub.** A job rebuilds the task from the issue every time. Delete the runner, nothing is lost.
 
@@ -44,11 +44,10 @@ GitHub event (comment · review · merge · dispatch · schedule)
         ▼  one Actions job
 ┌───────────────────────────────────────────────┐
 │ foundry action                                │
-│   recover task from GitHub                    │
-│   map event → FoundryEvent                    │
-│   EventHandler: claim · worktree · agent      │
-│                 report · verify · PR          │
-│                 preview · labels · comments   │
+│   rebuild the task from GitHub                │
+│   map the event to a transition               │
+│   run it: claim · worktree · agent · report   │
+│           verify · PR · preview · labels      │
 └───────────────────────────────────────────────┘
         │
         ▼
@@ -73,5 +72,5 @@ Report a vulnerability through the process in [SECURITY.md](../../SECURITY.md).
 - [Onboarding](onboarding.md)
 - [Writing a task](writing-a-task.md)
 - [Workflows](workflows.md): steering the agent from the issue
-- [GitHub Action](github-action.md): the decisions behind the design
-- [Decisions](decisions/README.md): the records that changed Foundry's shape
+- [GitHub Action](github-action.md): events, the workflow, the App, and branch rules that work with it
+- [Foundry and `claude-code-action`](comparison.md)
