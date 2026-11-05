@@ -74,7 +74,7 @@ Those lines are exactly what CI runs; the broker has its own tests (fake JWKS, f
 
 1. No verify-to-agent retry loop; a verification failure stops the task (the branch is pushed, so `@foundry go` resumes it by hand).
 2. Comments on PRs (commands or replies) resolve to the PR number, not the issue; the workflow template excludes them and `webhook.ts` ignores them.
-3. Not yet run live since the vocabulary change: `go` answering a question, `restart`, and the write-permission refusal. Run live on `cognitive-harmony-technologies/unity` (2026-10-26 to 28): `go` on a failed task, `go <feedback>` on an open PR (four rounds on one issue, PR updated in place), `stop` with no task, approval → rebase → merge → `state:done`, and the model switch by dispatching against a non-default branch.
+3. Not yet run live since the vocabulary change: `go` answering a question, `restart`, and the write-permission refusal. Run live on `cognitive-harmony-technologies/unity` (2026-10-26 to 28): `go` on a failed task, `go <feedback>` on an open PR (four rounds on one issue, PR updated in place), `stop` with no task, approval → rebase → merge → `state:done`, and the model switch by dispatching against a non-default branch. Run live under the public App on `joyntshops/foundry-demo` (2026-11-05, issue 62): broker `deny not_installed` → built-in token → PR creation refused by the org setting → `state:failed`; after the install, `go` resumed the branch, broker `allow`, PR opened as `joynt-foundry[bot]`, `pull_request` runs fired, and a `go <feedback>` round committed as the bot.
 
 ## Testing a change for real
 

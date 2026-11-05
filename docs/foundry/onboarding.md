@@ -87,7 +87,7 @@ Two browser clicks create an App in your organization with every permission Foun
 
 </details>
 
-With neither the App installed nor the secrets set, the workflow still runs with the job's built-in token and warns on every run: the agent's PRs then get no CI.
+With neither the App installed nor the secrets set, the workflow still runs with the job's built-in token and warns on every run: the agent's PRs then get no CI, and on an organization with GitHub's default Actions settings the PR cannot be opened at all (the task ends `state:failed` with its branch pushed; install the App and `@foundry go` resumes it).
 
 ## 4. Push, prove, go
 
