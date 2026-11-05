@@ -160,6 +160,12 @@ export interface TaskState {
   issue_body?: string;
   preview_url?: string;
   deployment_id?: number;
+  /**
+   * The PR whose comment records the preview. Kept apart from pr_number
+   * because it outlives the PR: on pull_request.closed the PR is already
+   * merged when the preview has to come down.
+   */
+  preview_pr_number?: number;
 }
 
 export interface RunnerState {

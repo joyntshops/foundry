@@ -649,6 +649,23 @@ describe('previewDown', () => {
     );
   });
 
+  // After a merge the task has no open PR, but the preview comment still
+  // names the PR it sits on; the down command and the comment use that.
+  it('falls back to preview_pr_number once the PR is closed', async () => {
+    mockExecWithSha('');
+    vi.mocked(github.getComments).mockResolvedValue([]);
+
+    const config = makeConfig({
+      preview: { mode: 'provider', down_command: 'teardown --pr {pr_number}' },
+    });
+    const task = makeTask({ pr_number: undefined, preview_pr_number: 63, preview_url: 'https://preview-63.example.com' });
+
+    await previewDown(config, task);
+
+    expect(execSync).toHaveBeenCalledWith('teardown --pr 63', expect.objectContaining({ env: expect.objectContaining({ FOUNDRY_PR_NUMBER: '63' }) }));
+    expect(github.commentOnPR).toHaveBeenCalledWith('acme/webapp', 63, expect.stringContaining('Torn down'));
+  });
+
   it('no-ops when config.preview is undefined', async () => {
     const config = makeConfig({ preview: undefined });
     const task = makeTask({ preview_url: 'https://preview-42.example.com' });

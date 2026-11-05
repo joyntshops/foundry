@@ -265,7 +265,9 @@ export async function previewDown(config: FoundryConfig, task: TaskState): Promi
   await previewDownTarget(config, {
     branch: task.branch,
     issue: task.issue,
-    pr_number: task.pr_number,
+    // After a merge the PR is closed and pr_number is gone; the preview
+    // comment still names its PR.
+    pr_number: task.pr_number ?? task.preview_pr_number,
     sha: resolveHeadSha(task.worktree),
     preview_url: task.preview_url,
     deployment_id: task.deployment_id,

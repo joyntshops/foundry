@@ -99,23 +99,33 @@ export async function recoverTask(
 
   let pr_url: string | undefined;
   let pr_number: number | undefined;
+  let preview_pr_number: number | undefined;
   try {
     // Only an open PR is the task's PR: a restart deletes the branch, which
     // closes the old one, and the next completion must open a new one.
     const pr = await github.getPRStatus(config.repo, branch);
-    if (pr?.url && /^open$/i.test(pr.state)) {
-      pr_url = pr.url;
-      pr_number = github.extractPRNumber(pr.url) ?? undefined;
+    if (pr?.url) {
+      const number = github.extractPRNumber(pr.url) ?? undefined;
+      if (/^open$/i.test(pr.state)) {
+        pr_url = pr.url;
+        pr_number = number;
+      }
+      // The preview comment lives on the PR, open or closed: on
+      // pull_request.closed the task's PR is already merged when its preview
+      // has to come down. A torn-down comment carries no URL, so the old PR
+      // of a restarted task yields nothing.
+      preview_pr_number = number;
     }
   } catch {}
 
   let preview_url = previewUrlFromComments(comments.map(c => c.body));
-  if (!preview_url && pr_number) {
+  if (!preview_url && preview_pr_number) {
     try {
-      const prComments = await github.getComments(config.repo, pr_number);
+      const prComments = await github.getComments(config.repo, preview_pr_number);
       preview_url = previewUrlFromComments(prComments.map(c => c.body));
     } catch {}
   }
+  if (!preview_url) preview_pr_number = undefined;
 
   const now = new Date().toISOString();
   return {
@@ -135,5 +145,6 @@ export async function recoverTask(
     pr_url,
     pr_number,
     preview_url,
+    preview_pr_number,
   };
 }
