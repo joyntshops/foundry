@@ -46,6 +46,10 @@ The token is tied to the Claude subscription of whoever ran `claude setup-token`
 
 It is waiting for the value on an interactive prompt that some terminals (the Claude desktop app's, for one) never deliver. Pass `--body` or redirect a file: `gh secret set FOUNDRY_APP_PRIVATE_KEY --repo OWNER/REPO < ~/.joynt-foundry/github-app-ORG.pem`.
 
+## `PR creation failed: GitHub Actions is not permitted to create or approve pull requests`
+
+The run had only the job's built-in token (no App installed, no `FOUNDRY_APP_*` secrets; the log's token step says so), and the organization's Actions settings do not let that token open pull requests, which is GitHub's default for organizations. The agent's work is safe: the branch was pushed and the task is `state:failed`. [Install the App](https://github.com/apps/joynt-foundry/installations/new) and comment `@foundry go`; the task resumes from the branch and the PR is opened as the App.
+
 ## The PR shows "1 workflow awaiting approval"
 
 The PR was opened with the job's built-in token, so GitHub holds `pull_request` runs for it, including this workflow's own. Install the App (`foundry setup-bot`, then the two secrets); PRs it opens trigger normally. The PR that is already stuck can be finished by approving it: the review event is yours, and Foundry merges in that job.
@@ -147,5 +151,7 @@ In a workflow, set `ACTIONS_STEP_DEBUG=true` as a repository variable for verbos
 **"The Foundry App is not installed on this repository" warning.** The public App is not installed here, or was installed on only some repositories of the organization. Install it from the App's page, or set `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` for a self-owned App. The run continued on the built-in token.
 
 **"The broker answered HTTP 429" or "503 disabled".** The broker is throttled or switched off. Runs fall back to the built-in token until it returns; a repository that must not run without the App sets `required: true` on the `broker-token` step.
+
+**Comments on the issue stay `github-actions[bot]` after the App was installed.** The claim and status comments are created once and updated in place, so a task that started under the built-in token keeps that author on them; everything created afterwards (the PR, the preview comment, new commits) carries the App's name. A fresh issue shows the App everywhere.
 
 **Commits show as github-actions[bot] although the App token was used.** The `app-slug` input did not reach the Action (the template passes it from both token steps) or the bot user lookup failed; the run log's "Configure git identity" step says which.

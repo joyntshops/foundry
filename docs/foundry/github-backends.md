@@ -18,7 +18,7 @@ There are two ways to have an App, decided on 2026-11-03 ([decision record](deci
 - **The public Foundry App (default).** One App, owned by joyntshops, [installed from its GitHub App page](https://github.com/apps/joynt-foundry/installations/new). The workflow asks GitHub for an OIDC token (`permissions: id-token: write`) and exchanges it at a broker run by joyntshops for an installation token scoped to the calling repository; the private key never leaves the broker. No secrets beyond `CLAUDE_CODE_OAUTH_TOKEN`. How the exchange runs is in [GitHub Action](github-action.md#broker-mode).
 - **A self-owned App (fallback).** Created by `foundry setup-bot` below. The workflow mints an App token when the `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` secrets exist. Choose this when your organization must not depend on a joyntshops endpoint, or while the broker is unavailable.
 
-With neither, the workflow falls back to the built-in token, so a repo can be wired before the App exists.
+With neither, the workflow falls back to the built-in token, so a repo can be wired before the App exists; whether that token may open a PR at all is an organization setting ("Allow GitHub Actions to create and approve pull requests"), off by default.
 
 Whichever token the job has, Foundry's commits are attributed to it: `<slug>[bot]` with the App's `<id>+<slug>[bot]@users.noreply.github.com` address, which GitHub links to the App, or `github-actions[bot]` with the built-in token. The Action looks the bot user up from the `app-slug` input, which the template fills from either token step.
 
