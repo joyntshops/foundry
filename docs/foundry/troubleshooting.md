@@ -17,7 +17,7 @@ Labels are status, not commands. Only Foundry sets `state:*`. Comment `@foundry 
 
 ## `Resource not accessible by integration`
 
-The token lacks a permission for that call. See the [permissions table](github-backends.md#permissions-reference). With the built-in token, grant it in the workflow's `permissions:` block. With a GitHub App, add it on the App **and accept the permission update on the installation**; installations keep the old set until an org owner accepts. Check what jobs actually get:
+The token lacks a permission for that call. See the [permissions table](github-backends.md#permissions-reference). With the built-in token, grant it in the workflow's `permissions:` block. With a self-owned GitHub App, run `foundry setup-bot --check` first: it lists what the App lacks and which installation has not accepted the App's current permissions, each with the URL to fix it at. Add a permission on the App **and accept the permission update on the installation**; installations keep the old set until an org owner accepts. To check by hand what jobs actually get:
 
 ```bash
 gh api orgs/YOUR_ORG/installations --jq '.installations[] | select(.app_slug=="YOUR_APP") | .permissions'

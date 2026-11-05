@@ -56,6 +56,9 @@ program
   .description('Create a self-owned GitHub App for Foundry (the fallback to installing the public Foundry App)')
   .option('--server-url <url>', 'Webhook URL for the GitHub App (unused by the Action)')
   .option('--public', 'Create the public Foundry App instead (owner use; prints the owner steps and broker commands)')
+  .option('--check', 'Audit an existing self-owned App: its permissions against what Foundry needs, and whether each installation accepted them. Exit 1 on any gap')
+  .option('--app-id <id>', 'With --check: the App ID (default: FOUNDRY_APP_ID, or the credentials setup-bot saved)')
+  .option('--private-key-file <path>', 'With --check: the App private key PEM (default: FOUNDRY_APP_PRIVATE_KEY, or the saved key)')
   .option('--name <name>', 'App name (globally unique on GitHub)')
   .option('--org <owner>', 'Owner of the App (default: the repo\'s owner)')
   .action(async (opts) => {

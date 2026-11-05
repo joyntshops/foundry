@@ -5,7 +5,8 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { buildManifest, repoSlugFromRemote, missingPermissions, publicAppNextSteps, appSettingsUrl, REQUIRED_PERMISSIONS } from './setup-bot.js';
+import { buildManifest, repoSlugFromRemote, missingPermissions, publicAppNextSteps, appSettingsUrl, REQUIRED_PERMISSIONS, auditApp, installationSettingsUrl } from './setup-bot.js';
+import type { InstallationInfo } from './setup-bot.js';
 
 describe('buildManifest', () => {
   it('requests every permission Foundry needs, including workflows (issue 30)', () => {
@@ -76,6 +77,56 @@ describe('missingPermissions', () => {
     const granted = { issues: 'write', pull_requests: 'write', contents: 'read', metadata: 'read', checks: 'write' };
     expect(missingPermissions(granted)).toEqual(['contents: write', 'actions: write', 'deployments: write', 'workflows: write']);
     expect(missingPermissions(undefined)).toHaveLength(Object.keys(REQUIRED_PERMISSIONS).length);
+  });
+});
+
+describe('auditApp', () => {
+  const full = { ...REQUIRED_PERMISSIONS } as Record<string, string>;
+  const inst = (over: Partial<InstallationInfo> = {}): InstallationInfo => ({
+    id: 11, account: 'acme', accountType: 'Organization', repositorySelection: 'all', permissions: { ...full }, ...over,
+  });
+
+  it('passes when the App has everything and every installation accepted it', () => {
+    const audit = auditApp({ permissions: full }, [inst(), inst({ id: 12, account: 'bob', accountType: 'User', repositorySelection: 'selected' })]);
+    expect(audit.ok).toBe(true);
+    expect(audit.appMissing).toEqual([]);
+    expect(audit.installations.map(i => i.lagging)).toEqual([[], []]);
+  });
+
+  it('names what the App itself lacks', () => {
+    const { workflows: _, ...without } = full;
+    const audit = auditApp({ permissions: { ...without, checks: 'read' } }, [inst({ permissions: { ...without, checks: 'read' } })]);
+    expect(audit.ok).toBe(false);
+    expect(audit.appMissing).toEqual(['checks: write', 'workflows: write']);
+    // The installation matches the App, so it is not the one lagging.
+    expect(audit.installations[0].lagging).toEqual([]);
+  });
+
+  it('flags an installation that has not accepted a permission the App gained', () => {
+    const { workflows: _, ...without } = full;
+    const audit = auditApp({ permissions: full }, [inst(), inst({ id: 12, permissions: { ...without, deployments: 'read' } })]);
+    expect(audit.ok).toBe(false);
+    expect(audit.appMissing).toEqual([]);
+    expect(audit.installations[0].lagging).toEqual([]);
+    expect(audit.installations[1].lagging).toEqual(['deployments: write', 'workflows: write']);
+  });
+
+  it('accepts write on the installation where the App has read', () => {
+    const audit = auditApp({ permissions: { ...full, metadata: 'read' } }, [inst({ permissions: { ...full, metadata: 'write' } })]);
+    expect(audit.installations[0].lagging).toEqual([]);
+  });
+
+  it('fails with no installations, since no job could use the App', () => {
+    const audit = auditApp({ permissions: full }, []);
+    expect(audit.ok).toBe(false);
+    expect(audit.appMissing).toEqual([]);
+  });
+});
+
+describe('installationSettingsUrl', () => {
+  it('points at the organization page for an org account and the personal page for a user', () => {
+    expect(installationSettingsUrl('acme', true, 11)).toBe('https://github.com/organizations/acme/settings/installations/11');
+    expect(installationSettingsUrl('bob', false, 12)).toBe('https://github.com/settings/installations/12');
   });
 });
 
