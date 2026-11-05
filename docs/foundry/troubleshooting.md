@@ -91,7 +91,17 @@ gh api repos/OWNER/REPO/rules/branches/BRANCH --jq '.[] | select(.type=="require
 gh api repos/OWNER/REPO/commits/$(gh pr view N --json headRefOid -q .headRefOid)/check-runs --jq '.check_runs[] | "\(.name) \(.app.id) \(.app.slug)"'
 ```
 
-When the `integration_id` in the rule is not the App that created the check run, edit the ruleset: remove the required check and add it again with the right source (or "Any source"). [GitHub Action](github-action.md#decisions-and-gotchas) under *Branch protection that works with this* has the full list of settings.
+When the `integration_id` in the rule is not the App that created the check run, point the rule at the App that does. Rulesets are replaced whole, so fetch the ruleset, change that one field, and put it back (`APP_ID` is the id of the App reporting the check; `5615485` for the public Foundry App, or `null` to accept the check from any source):
+
+```bash
+RULESET=$(gh api repos/OWNER/REPO/rules/branches/BRANCH --jq '.[] | select(.type=="required_status_checks") | .ruleset_id')
+gh api repos/OWNER/REPO/rulesets/$RULESET \
+  | jq '{name,target,enforcement,bypass_actors,conditions,rules}
+        | (.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[] | select(.context=="Foundry Verification") | .integration_id) = APP_ID' \
+  | gh api -X PUT repos/OWNER/REPO/rulesets/$RULESET --input -
+```
+
+The same change in the browser: the repository's Settings → Rules → Rulesets → the branch's ruleset → *Require status checks to pass*, where each check lists its source; set it to the App, or remove the row and add the check again choosing the right source. [GitHub Action](github-action.md#decisions-and-gotchas) under *Branch protection that works with this* has the full list of settings.
 
 ## The preview is still up after the PR was merged by hand
 
