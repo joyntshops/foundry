@@ -13,6 +13,11 @@
  * installation step, and it prints the owner steps GitHub has no API for
  * (logo upload, confirming it is public) plus the broker commands that take
  * the App ID and the private key. See docs/foundry/decisions/.
+ *
+ * `--check` audits an existing self-owned App without creating anything:
+ * its permissions against REQUIRED_PERMISSIONS, and each installation
+ * against the App (an installation keeps the old set until an owner accepts
+ * a permission update). Exit code 1 when anything is missing.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -95,6 +100,58 @@ export function appSettingsUrl(org: string, isOrg: boolean, slug: string): strin
   return isOrg
     ? `https://github.com/organizations/${org}/settings/apps/${slug}`
     : `https://github.com/settings/apps/${slug}`;
+}
+
+/** An installation's settings page, where a permission update is accepted. */
+export function installationSettingsUrl(account: string, isOrg: boolean, installationId: number): string {
+  return isOrg
+    ? `https://github.com/organizations/${account}/settings/installations/${installationId}`
+    : `https://github.com/settings/installations/${installationId}`;
+}
+
+export interface InstallationInfo {
+  id: number;
+  account: string;
+  /** `Organization` or `User`, as GitHub reports the account. */
+  accountType: string;
+  /** `all` or `selected`. */
+  repositorySelection: string;
+  permissions: Record<string, string>;
+}
+
+export interface AppAudit {
+  /** Required permissions the App itself lacks, as `key: level`. */
+  appMissing: string[];
+  installations: Array<InstallationInfo & {
+    /** App permissions this installation has not accepted yet, as `key: level`. */
+    lagging: string[];
+  }>;
+  /** True when the App has everything and every installation accepted it. */
+  ok: boolean;
+}
+
+const LEVEL: Record<string, number> = { read: 1, write: 2, admin: 3 };
+
+/**
+ * Compare the App with what Foundry needs, and each installation with the
+ * App. A permission added on the App is only a request until the
+ * installation's owner accepts it, so a job can lack a permission the App
+ * shows as granted. Only the permissions Foundry uses are compared.
+ */
+export function auditApp(app: { permissions: Record<string, string> }, installations: InstallationInfo[]): AppAudit {
+  const appMissing = missingPermissions(app.permissions);
+  const audited = installations.map(inst => {
+    const lagging = Object.keys(REQUIRED_PERMISSIONS)
+      .filter(key => {
+        const onApp = LEVEL[app.permissions[key]] ?? 0;
+        const onInstall = LEVEL[inst.permissions[key]] ?? 0;
+        return onApp > 0 && onInstall < onApp;
+      })
+      .map(key => `${key}: ${app.permissions[key]}`);
+    return { ...inst, lagging };
+  });
+  const ok = appMissing.length === 0 && installations.length > 0 && audited.every(i => i.lagging.length === 0);
+  return { appMissing, installations: audited, ok };
 }
 
 /**
@@ -283,6 +340,21 @@ async function fetchApp(appId: number, privateKey: string): Promise<{ slug: stri
   }
 }
 
+/** Every installation of the App, read with an App JWT. */
+async function fetchInstallations(appId: number, privateKey: string): Promise<InstallationInfo[]> {
+  const { createAppAuth } = await import('@octokit/auth-app');
+  const { Octokit } = await import('@octokit/rest');
+  const octokit = new Octokit({ authStrategy: createAppAuth, auth: { appId: String(appId), privateKey } });
+  const data = await (octokit as any).paginate((octokit as any).rest.apps.listInstallations, { per_page: 100 });
+  return (data as any[]).map(i => ({
+    id: i.id,
+    account: i.account?.login ?? '?',
+    accountType: i.account?.type ?? 'Organization',
+    repositorySelection: i.repository_selection ?? 'all',
+    permissions: i.permissions ?? {},
+  }));
+}
+
 /** Print the permission check; returns true when nothing is missing. */
 async function reportPermissions(appId: number, privateKey: string, settingsUrl: string): Promise<boolean> {
   const app = await fetchApp(appId, privateKey);
@@ -351,6 +423,12 @@ interface SetupBotOptions {
   serverUrl?: string;
   /** Create the one public Foundry App (owner use). */
   public?: boolean;
+  /** Audit an existing self-owned App instead of creating one. */
+  check?: boolean;
+  /** With --check: the App ID (else env or the saved state file). */
+  appId?: string;
+  /** With --check: path to the App's private key PEM (else env or the saved state file). */
+  privateKeyFile?: string;
   /** App name; GitHub requires it to be globally unique. */
   name?: string;
   /** Owner of the App; defaults to the repo's owner. */
@@ -478,6 +556,101 @@ async function runSetupPublicApp(org: string, name: string): Promise<void> {
 }
 
 /**
+ * Where `--check` takes the App ID and key from, first match wins: the
+ * options, the workflow's secret names in the environment, the CLI's local
+ * override, then the state file `setup-bot` saved for the org. The key is
+ * never printed.
+ */
+function resolveCheckCredentials(org: string, opts: SetupBotOptions): { appId: number; privateKey: string; source: string } | null {
+  const env = process.env;
+  if (opts.appId && opts.privateKeyFile) {
+    return { appId: Number(opts.appId), privateKey: fs.readFileSync(opts.privateKeyFile, 'utf-8'), source: `--app-id and ${opts.privateKeyFile}` };
+  }
+  if (env.FOUNDRY_APP_ID && env.FOUNDRY_APP_PRIVATE_KEY) {
+    return { appId: Number(env.FOUNDRY_APP_ID), privateKey: env.FOUNDRY_APP_PRIVATE_KEY, source: 'FOUNDRY_APP_ID and FOUNDRY_APP_PRIVATE_KEY in the environment' };
+  }
+  if (env.FOUNDRY_GITHUB_APP_ID && env.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH) {
+    return { appId: Number(env.FOUNDRY_GITHUB_APP_ID), privateKey: fs.readFileSync(env.FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH, 'utf-8'), source: 'FOUNDRY_GITHUB_APP_ID and FOUNDRY_GITHUB_APP_PRIVATE_KEY_PATH in the environment' };
+  }
+  const jsonPath = path.join(STATE_DIR, `github-app-${org}.json`);
+  const pemPath = path.join(STATE_DIR, `github-app-${org}.pem`);
+  if (fs.existsSync(jsonPath) && fs.existsSync(pemPath)) {
+    const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    return { appId: meta.appId, privateKey: fs.readFileSync(pemPath, 'utf-8'), source: jsonPath };
+  }
+  return null;
+}
+
+/**
+ * `setup-bot --check`: read the App and its installations back from GitHub
+ * and report what Foundry's jobs would lack. Creates nothing.
+ */
+async function runSetupBotCheck(org: string, opts: SetupBotOptions): Promise<void> {
+  const creds = resolveCheckCredentials(org, opts);
+  if (!creds) {
+    log.error(`No App credentials for ${org}: pass --app-id and --private-key-file, set FOUNDRY_APP_ID and FOUNDRY_APP_PRIVATE_KEY, or run \`foundry setup-bot\` first.`);
+    process.exitCode = 1;
+    return;
+  }
+  if (!Number.isFinite(creds.appId) || creds.appId <= 0) {
+    log.error(`App ID is not a number (from ${creds.source}).`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const app = await fetchApp(creds.appId, creds.privateKey);
+  if (!app) {
+    log.error(`GitHub did not accept the App ID and key from ${creds.source}: check that they belong to the same App and that the key has not been revoked.`);
+    process.exitCode = 1;
+    return;
+  }
+  let installations: InstallationInfo[];
+  try {
+    installations = await fetchInstallations(creds.appId, creds.privateKey);
+  } catch (err: any) {
+    log.error(`Could not list the App's installations: ${err.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const isOrg = await isOrganization(org);
+  const settings = appSettingsUrl(org, isOrg, app.slug);
+  const audit = auditApp(app, installations);
+
+  log.info(`App ${app.slug} (ID: ${creds.appId}), credentials from ${creds.source}`);
+  if (audit.appMissing.length === 0) {
+    log.success('Permissions on the App: every one Foundry needs is granted.');
+  } else {
+    log.warn(`Permissions missing on the App: ${audit.appMissing.join(', ')}`);
+    log.info(`  Add them at ${settings}/permissions; each installation then has to accept the update.`);
+  }
+
+  if (audit.installations.length === 0) {
+    log.warn('Installations: none. The App is not installed anywhere, so no job can use it.');
+    log.info(`  Install it at https://github.com/apps/${app.slug}/installations/new`);
+  } else {
+    log.info(`Installations: ${audit.installations.length}`);
+    for (const inst of audit.installations) {
+      const where = `${inst.account} (${inst.repositorySelection === 'all' ? 'all repositories' : 'selected repositories'}), installation ${inst.id}`;
+      if (inst.lagging.length === 0) {
+        log.success(`  ${where}: accepted every permission the App has.`);
+      } else {
+        log.warn(`  ${where}: has not accepted ${inst.lagging.join(', ')}`);
+        log.info(`    Accept at ${installationSettingsUrl(inst.account, inst.accountType === 'Organization', inst.id)}`);
+      }
+    }
+  }
+
+  log.info('');
+  if (audit.ok) {
+    log.success('Check passed: the App and every installation have what Foundry needs.');
+  } else {
+    log.warn('Check failed: see above. Jobs on the affected repositories fail with `Resource not accessible by integration` on the missing call.');
+    process.exitCode = 1;
+  }
+}
+
+/**
  * Main setup-bot flow.
  */
 export async function runSetupBot(opts: SetupBotOptions = {}): Promise<void> {
@@ -487,6 +660,11 @@ export async function runSetupBot(opts: SetupBotOptions = {}): Promise<void> {
   if (!org) {
     log.error('Could not determine the owner. Run from a git repo with a GitHub remote, pass --org, or run `foundry init` first.');
     process.exitCode = 1;
+    return;
+  }
+
+  if (opts.check) {
+    await runSetupBotCheck(org, opts);
     return;
   }
 
