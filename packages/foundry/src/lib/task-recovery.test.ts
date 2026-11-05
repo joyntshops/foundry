@@ -145,6 +145,46 @@ describe('recoverTask', () => {
     mock.prStatus = { state: 'CLOSED', url: 'https://github.com/o/r/pull/8' };
     const task = await recoverTask(config, '/w', 42);
     expect(task!.pr_url).toBeUndefined();
+    expect(task!.pr_number).toBeUndefined();
+    expect(task!.preview_pr_number).toBeUndefined();
+  });
+
+  it('reads a live preview from the PR comment and remembers which PR carries it', async () => {
+    mock.comments = [{ id: 1, body: CLAIM, user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:00:00Z' }] as any;
+    mock.commentsByNumber[9] = [
+      { id: 7, body: '<!-- foundry-preview -->\n**Preview Environment** — Live\n\nPreview URL: https://pr-9.example.test\n', user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:30:00Z' },
+    ] as any;
+    mock.prStatus = { state: 'OPEN', url: 'https://github.com/o/r/pull/9' };
+    const task = await recoverTask(config, '/w', 42);
+    expect(task!.pr_number).toBe(9);
+    expect(task!.preview_url).toBe('https://pr-9.example.test');
+    expect(task!.preview_pr_number).toBe(9);
+  });
+
+  // pull_request.closed: the PR is merged, so it is no longer the task's PR,
+  // but its preview is still up and the teardown needs the URL and the number.
+  it('reads the preview from a merged PR so the teardown after a merge has it', async () => {
+    mock.comments = [{ id: 1, body: CLAIM, user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:00:00Z' }] as any;
+    mock.commentsByNumber[9] = [
+      { id: 7, body: '<!-- foundry-preview -->\n**Preview Environment** — Live\n\nPreview URL: https://pr-9.example.test\n', user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:30:00Z' },
+    ] as any;
+    mock.prStatus = { state: 'CLOSED', url: 'https://github.com/o/r/pull/9' };
+    const task = await recoverTask(config, '/w', 42);
+    expect(task!.pr_url).toBeUndefined();
+    expect(task!.pr_number).toBeUndefined();
+    expect(task!.preview_url).toBe('https://pr-9.example.test');
+    expect(task!.preview_pr_number).toBe(9);
+  });
+
+  it('yields no preview from a closed PR whose preview was torn down', async () => {
+    mock.comments = [{ id: 1, body: CLAIM, user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:00:00Z' }] as any;
+    mock.commentsByNumber[8] = [
+      { id: 7, body: '<!-- foundry-preview -->\n**Preview Environment** — Torn down\n\n~~https://pr-8.example.test~~ (inactive)\n', user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:30:00Z' },
+    ] as any;
+    mock.prStatus = { state: 'CLOSED', url: 'https://github.com/o/r/pull/8' };
+    const task = await recoverTask(config, '/w', 42);
+    expect(task!.preview_url).toBeUndefined();
+    expect(task!.preview_pr_number).toBeUndefined();
   });
 
   it('uses the most recent claim when the issue was re-claimed', async () => {

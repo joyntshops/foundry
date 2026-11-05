@@ -17,6 +17,8 @@ export class MockGitHubClient implements GitHubClient {
   issues: GitHubIssue[] = [];
   issue: GitHubIssue = { number: 1, title: 'Test', body: '', labels: [], html_url: 'https://github.com/o/r/issues/1', state: 'open' };
   comments: GitHubComment[] = [];
+  /** Comments for one issue or PR number; others fall back to `comments`. */
+  commentsByNumber: Record<number, GitHubComment[]> = {};
   labels: string[] = [];
   prUrl = 'https://github.com/o/r/pull/1';
   prStatus: { state: string; url: string } | null = { state: 'OPEN', url: 'https://github.com/o/r/pull/1' };
@@ -72,7 +74,7 @@ export class MockGitHubClient implements GitHubClient {
 
   async getComments(repo: string, issue: number): Promise<GitHubComment[]> {
     this.record('getComments', [repo, issue]);
-    return this.comments;
+    return this.commentsByNumber[issue] ?? this.comments;
   }
 
   async closeIssue(repo: string, issue: number): Promise<void> {

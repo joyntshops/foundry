@@ -82,6 +82,21 @@ Foundry labels the task `state:failed` and posts each command's result and the f
 
 `yarn install` failing in under a second means the wrong Yarn ran: the repo pins Yarn 2+ through `packageManager` in `package.json` and expects corepack, which the runner has disabled. Foundry enables corepack for such repos since v0.1.49; on an older pin, commit the Yarn release instead (`yarn set version <v>` writes `.yarn/releases/` and `yarnPath`). Empty output on a failed step was a Foundry bug fixed in the same release (stderr was dropped); upgrade to see the real error.
 
+## I approved the PR and Foundry logged `not merged: merge_failed (Repository rule violations found)`
+
+The base branch's ruleset refused the merge; a human merging by hand usually succeeds because the admin role bypasses it. The common cause is a required status check bound to a source that no longer reports it: a rule that requires `Foundry Verification` from one GitHub App is never satisfied by the same check from another, and switching from a self-owned App to the public Foundry App changes the source. Compare the two:
+
+```bash
+gh api repos/OWNER/REPO/rules/branches/BRANCH --jq '.[] | select(.type=="required_status_checks") | .parameters.required_status_checks'
+gh api repos/OWNER/REPO/commits/$(gh pr view N --json headRefOid -q .headRefOid)/check-runs --jq '.check_runs[] | "\(.name) \(.app.id) \(.app.slug)"'
+```
+
+When the `integration_id` in the rule is not the App that created the check run, edit the ruleset: remove the required check and add it again with the right source (or "Any source"). [GitHub Action](github-action.md#decisions-and-gotchas) under *Branch protection that works with this* has the full list of settings.
+
+## The preview is still up after the PR was merged by hand
+
+Foundry tears a task's preview down when it completes the task: in the approval run when it merges the PR itself, otherwise in the `pull_request.closed` run. Before 0.1.58 the second path could not find the preview, because the merged PR was no longer the task's PR and the preview comment lives on it; the preview stayed up and its comment stayed *Live*. From 0.1.58 the closed run reads the comment on the merged PR, and `foundry preview down <issue>` does the same from any checkout. On an older version, run the repository's down command by hand for the PR number (for a GitHub Pages setup, dispatch its preview-down workflow).
+
 ## A PR went stale after another one merged
 
 Foundry handles this: after any merge into `integration`, it checks the other open Foundry PRs and, for each that now conflicts, posts a note on the issue and dispatches the agent with a rebase instruction. If the note says Foundry *could not* start the agent, the workflow is missing the `workflow_dispatch` trigger or `actions: write`; add them from the template, then reply with the quoted instruction. Requesting changes on the conflicting PR does nothing, because GitHub runs no workflow for a PR with conflicts.
