@@ -36,8 +36,9 @@ packages/foundry/templates/  foundry.yml (the workflow, single source; docs link
 packages/broker/             the token broker behind the public Foundry App (AWS Lambda); core.ts is the
                              exchange, github.ts the App client, lambda.ts the adapter; template.yml and
                              README.md are Walter's deploy/rotation/kill-switch runbook. Walter deploys it.
-docs/foundry/decisions/      decision records; the 2026-11-03 one is why the broker exists
-docs/foundry/                user docs; github-action.md carries the load-bearing decisions
+docs/foundry/                user docs, written for someone installing Foundry; nothing there assumes the reader works on it
+docs/foundry/maintainers/    design-notes.md (the load-bearing decisions), decisions/ (the 2026-11-03 one is why the broker
+                             exists), releasing.md, public-app.md, open-source.md; README.md indexes them
 ```
 
 ## Working on it
@@ -52,7 +53,7 @@ npm --workspace packages/broker test
 
 Those lines are exactly what CI runs; the broker has its own tests (fake JWKS, fake GitHub API, no network). Tests use vitest with `root: src`; unit tests sit next to the code as `*.test.ts`. `MockGitHubClient` in `lib/__tests__/` is the shared GitHub mock.
 
-**Merging to `main` publishes.** `publish.yml` publishes `@joynt/foundry` to npmjs.com (trusted publishing, no token) as the next patch after the registry's latest, then pushes `vX.Y.Z` and moves `vX`, on every push to `main` that touches `packages/foundry/`. It never commits to `main`, so `package.json` lags the registry; a minor or major is a PR that sets `version`. `docs/foundry/releasing.md` has the whole process including rollback.
+**Merging to `main` publishes.** `publish.yml` publishes `@joynt/foundry` to npmjs.com (trusted publishing, no token) as the next patch after the registry's latest, then pushes `vX.Y.Z` and moves `vX`, on every push to `main` that touches `packages/foundry/`. It never commits to `main`, so `package.json` lags the registry; a minor or major is a PR that sets `version`. `docs/foundry/maintainers/releasing.md` has the whole process including rollback.
 
 **PR hygiene learned the hard way.** A PR stacked on a feature branch only retargets to `main` if that base branch is deleted at merge time; otherwise it merges into the base branch and never reaches `main`. Before telling anyone a PR is ready, confirm the head SHA on GitHub matches what you pushed; a push after the merge is silently orphaned.
 
@@ -82,4 +83,4 @@ Those lines are exactly what CI runs; the broker has its own tests (fake JWKS, f
 
 ## Docs
 
-The audience for `docs/` is the next session and outside users. When a run teaches something non-obvious, write it into `docs/foundry/github-action.md` (decisions) or `docs/foundry/troubleshooting.md` (symptoms) so it is not rediscovered. Keep each fact in one place and link to it: the workflow lives in `packages/foundry/templates/foundry.yml`, the config schema in `example.joynt-foundry.yml`, the release flow in `integration-strategy.md`. No private-repo names in user docs; `CLAUDE.md` may name them.
+The audience for `docs/foundry/` is outside users: someone installing or running Foundry, who does not work on it and should not have to read anything that assumes they do. Maintainer material (design reasons, run history, source paths, release mechanics, the public App's ownership) goes under `docs/foundry/maintainers/`, whose audience is the next session. When a run teaches something non-obvious, write the symptom into `docs/foundry/troubleshooting.md` and the design reason into `docs/foundry/maintainers/design-notes.md` so it is not rediscovered. User pages say "you", never "we" or "our runs", and never name a Joynt repository or person. Keep each fact in one place and link to it: the workflow lives in `packages/foundry/templates/foundry.yml`, the config schema in `example.joynt-foundry.yml`, the release flow in `integration-strategy.md`. No private-repo names in user docs; `CLAUDE.md` and the maintainer pages may name them.

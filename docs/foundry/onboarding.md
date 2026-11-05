@@ -72,12 +72,12 @@ gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo OWNER/REPO --body "$(pbpaste | tr -
 
 A token pasted with a trailing newline fails every run with `401 Invalid bearer token`.
 
-**The Foundry App.** [Install it on the repository](https://github.com/apps/joynt-foundry/installations/new). Pick the repository (or the whole organization) on GitHub's install page and confirm. That is all: no key to download, no further secrets. Foundry's comments, PRs and commits then appear as `joynt-foundry[bot]`, and because the PRs are opened by an App rather than by the job's built-in token, the repository's own CI runs on them and required checks can pass. Under the hood the workflow trades the job's OIDC token for an App token scoped to this one repository at a broker that joyntshops runs; the App's private key never leaves that broker ([why it is built this way](decisions/2026-11-03-public-app-token-broker.md)).
+**The Foundry App.** [Install it on the repository](https://github.com/apps/joynt-foundry/installations/new). Pick the repository (or the whole organization) on GitHub's install page and confirm. That is all: no key to download, no further secrets. Foundry's comments, PRs and commits then appear as `joynt-foundry[bot]`, and because the PRs are opened by an App rather than by the job's built-in token, the repository's own CI runs on them and required checks can pass. Under the hood the workflow trades the job's OIDC token for an App token scoped to this one repository at a broker run by the App's owner; the App's private key never leaves that broker ([GitHub identity](github-backends.md) explains the exchange).
 
 <details>
 <summary><b>Fallback: an App your organization owns</b></summary>
 
-Choose this only when your organization must not depend on a joyntshops endpoint, or to keep running while the broker is unavailable. It replaces the install step above; do not do both.
+Choose this only when your organization must not depend on an endpoint outside it, or to keep running while the broker is unavailable. It replaces the install step above; do not do both.
 
 ```bash
 foundry setup-bot

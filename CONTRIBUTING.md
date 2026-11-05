@@ -12,7 +12,7 @@ npm --workspace packages/foundry test
 
 Those three lines are what CI runs on every pull request. Tests are vitest, next to the code as `*.test.ts`; `lib/__tests__/mock-github-client.ts` is the shared GitHub mock.
 
-Merging to `main` publishes `@joynt/foundry` to npmjs.com as the next patch version and tags the release. Do not edit `version` in `package.json` for a patch; a deliberate minor or major is a pull request that sets it. See [Releasing](docs/foundry/releasing.md).
+Merging to `main` publishes `@joynt/foundry` to npmjs.com as the next patch version and tags the release. Do not edit `version` in `package.json` for a patch; a deliberate minor or major is a pull request that sets it. See [Releasing](docs/foundry/maintainers/releasing.md).
 
 ## What a good change looks like
 
@@ -20,9 +20,9 @@ Merging to `main` publishes `@joynt/foundry` to npmjs.com as the next patch vers
 - **Every job starts empty.** Anything a later job needs must be written to GitHub (a label, a comment, the PR) and read back by `lib/task-recovery.ts`.
 - **Branch names come from config.** Nothing in code may assume `integration` or `main`.
 - **A new agent backend needs no code.** It is a `command` in `.joynt-foundry.yml` that ends with `foundry report`; if you think code is needed, open an issue first.
-- **Docs are part of the change.** When a run teaches something non-obvious, it goes in `docs/foundry/github-action.md` (decisions) or `docs/foundry/troubleshooting.md` (symptoms). The audience includes the next agent session, not only a human operator.
+- **Docs are part of the change.** `docs/foundry/` is written for people installing and using Foundry; nothing there assumes the reader works on it. When a run teaches something non-obvious, a user-facing symptom goes in `docs/foundry/troubleshooting.md` and a design reason in `docs/foundry/maintainers/design-notes.md`. The audience of the maintainer pages includes the next agent session, not only a human.
 
-`CLAUDE.md` at the repo root lists the invariants in full.
+`CLAUDE.md` at the repo root lists the invariants in full, and [the maintainer pages](docs/foundry/maintainers/README.md) hold the design notes, decision records and release process.
 
 ## Submitting
 

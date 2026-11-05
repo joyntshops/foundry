@@ -72,7 +72,7 @@ foundry action [--event-name <name>] [--event-path <file>]
 4. If a handler launched an agent, waits for it as a subprocess, classifies the outcome, and continues (`@foundry restart` starts the issue again in the same job)
 5. Writes `issue`, `status`, `branch`, `pr-url`, `log-dir`, `log-path` to `$GITHUB_OUTPUT`
 
-Useful locally as a dry run against a saved payload: any event that maps to nothing exits 0 after recovery, which checks auth and config. See [GitHub Action](github-action.md).
+See [GitHub Action](github-action.md) for what each event does.
 
 ### `foundry report`
 

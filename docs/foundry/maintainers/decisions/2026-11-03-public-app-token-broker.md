@@ -6,7 +6,7 @@
 
 ## Context
 
-Foundry needs a GitHub App to act as a named bot and so that the pull requests it opens trigger the repository's own workflows ([GitHub Action](../github-action.md#what-the-app-adds)). Until now each organization created its own App with `foundry setup-bot` and stored `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` as secrets.
+Foundry needs a GitHub App to act as a named bot and so that the pull requests it opens trigger the repository's own workflows ([GitHub Action](../../github-action.md#what-the-app-adds)). Until now each organization created its own App with `foundry setup-bot` and stored `FOUNDRY_APP_ID` and `FOUNDRY_APP_PRIVATE_KEY` as secrets.
 
 Two things pushed against that:
 

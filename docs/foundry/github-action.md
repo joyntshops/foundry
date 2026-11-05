@@ -1,67 +1,73 @@
 # Foundry as a GitHub Action
 
-`foundry action` runs the Foundry state machine for **one GitHub event** and exits. Packaged as the composite action at the repo root (`action.yml`), it is how Foundry runs: jobs that GitHub starts on demand. Nothing has to stay awake. State lives on GitHub.
-
-This page is written for whoever picks this up next, human or agent. It records the non-obvious decisions so they are not rediscovered.
+Foundry runs as jobs that GitHub starts on demand. Each GitHub event that matters starts one job; the job performs one transition of the task's state machine and exits. Nothing stays awake, and the task's state lives on GitHub: in labels, a structured claim comment, the PR, and the preview comment. This page is what a repository owner needs to know about that: which events do what, what the workflow needs, what the GitHub App adds, and which branch rules work with it.
 
 ## What a run looks like
 
 ```
 human comments "@foundry go" on an issue
   → job starts
-  → foundry action: claim (labels + structured claim comment)
-  → create worktree from origin/<branches.integration>
-  → run the agent as a subprocess of the job (transcript = job log)
-  → wait; classify outcome from the stream-json log
-  → completed: verify → push → PR to integration → state:ready-for-human-review → preview up
-    needs-input: post questions → state:waiting-for-input
-    plan-completed: post plan → state:plan-review
+  → claim (state:in-progress + structured claim comment)
+  → worktree from origin/<branches.integration>
+  → the agent runs as a subprocess of the job (its transcript is the job log)
+  → the agent's typed report decides what happens next:
+      done:        verify → push → PR into integration → state:ready-for-human-review → preview up
+      needs input: questions posted → state:waiting-for-input
+      plan ready:  plan posted → state:plan-review
   → job ends
 ```
 
 A human then acts on GitHub. Each action is another event, another job:
 
-| GitHub event | Condition | Foundry transition |
+| GitHub event | Condition | What Foundry does |
 |---|---|---|
 | `issue_comment.created` | body starts with `@foundry go`, by a user with write access, on an issue (not a PR) | start the issue, or proceed from the branch with the thread |
 | `issue_comment.created` | `@foundry restart` | discard the branch, start over in the same job |
-| `issue_comment.created` | `@foundry stop` | cancel the running job (concurrency), keep the branch, mark failed |
-| `pull_request_review.submitted` | state is `changes_requested` | feed review back to agent |
-| `pull_request_review.submitted` | state is `approved`, on a task PR or a `pull_request_bases` PR | rebase onto the base, wait for checks, merge (rebase method), `integration_rebuild`, complete the task or tear the promotion preview down |
-| `pull_request.closed` | `merged` is true | `state:done`, close issue, preview down; then check sibling PRs for conflicts |
-| `workflow_dispatch` | inputs `issue`, `command`, `message` | the command, as if commented; how Foundry hands work to itself |
-| `pull_request.opened` / `synchronize` / `reopened` / `closed` | base in `preview.pull_request_bases` | preview up / redeploy / down for a non-task PR |
+| `issue_comment.created` | `@foundry stop` | cancel the running job, keep the branch, mark the task failed |
+| `pull_request_review.submitted` | state is `changes_requested` | send the review to the agent |
+| `pull_request_review.submitted` | state is `approved`, on a task PR or a `pull_request_bases` PR | rebase onto the base, wait for checks, merge (rebase method), run `integration_rebuild`, complete the task or tear the promotion preview down |
+| `pull_request.closed` | `merged` is true | `state:done`, close the issue, preview down; then send the agent back to sibling PRs that now conflict |
+| `workflow_dispatch` | inputs `issue`, `command`, `message` | the command, as if commented; also how Foundry hands work to itself |
+| `pull_request.opened` / `synchronize` / `reopened` / `closed` | base in `preview.pull_request_bases` | preview up / redeploy / down for a PR that is not a task |
 | `schedule` | | reconcile: in-progress issues with no status update for `reconcile_stale_minutes` are marked failed |
 
-## Workflow template
+Everything from the claim to the preview happens inside one job; a new job starts only when a human acts, so each human interaction costs one runner start.
 
-`foundry init` writes `.github/workflows/foundry.yml` from [`packages/foundry/templates/foundry.yml`](../../packages/foundry/templates/foundry.yml), with the repo's production branch in the PR filter. That file is the single source. It pins `uses: joyntshops/foundry@v0`: the moving major tag, updated by every release, so a repo follows releases rather than every merge to `main`; pin an exact `@vX.Y.Z` to freeze, or a branch to test unmerged work ([Releasing](releasing.md#consuming-a-release)); the decisions below explain its shape (the `if:` filter, job-level concurrency, the App token step, the schedule). `.joynt-foundry.yml` in the target repo configures everything else; see [Configuration](config-reference.md).
+## The workflow
+
+`foundry init` writes `.github/workflows/foundry.yml` from [the shipped template](../../packages/foundry/templates/foundry.yml), with the repository's production branch in its PR filter. That file is the single source; copy it rather than writing your own. It pins `uses: joyntshops/foundry@v0`, the moving major tag that every release updates, so the repository follows releases rather than every merge; pin an exact `@vX.Y.Z` to freeze. Everything else is configured in `.joynt-foundry.yml` ([Configuration](config-reference.md)).
+
+Three parts of the template matter if you edit it:
+
+- **The `if:` filter.** Every `issue_comment` event, including Foundry's own status comments, would otherwise start a runner that does about forty seconds of setup and exits. The filter starts a job only for `@foundry` comments on issues from `OWNER`, `MEMBER` and `COLLABORATOR` authors, PR events on listed bases or merges, reviews, dispatches, and the schedule. The job then checks the commenter's actual repository permission and requires write.
+- **Job-level concurrency.** `concurrency.group: foundry-<issue>` serialises runs per issue and makes `@foundry stop` cancel the running job. Declare it on the job, not the workflow: a workflow-level group admits every triggered run before the `if:` is evaluated, so Foundry's own comments enter the group and cancel each other.
+- **The schedule.** The `schedule` trigger runs `foundry reconcile`, which marks any `state:in-progress` issue whose status comment is older than `reconcile_stale_minutes` (default 120) as failed, so a job that died without cleanup (a runner failure, the six-hour limit) never leaves an issue stuck. Set the threshold above the job's `timeout-minutes`.
+
+Comment, schedule and dispatch runs use the workflow and `.joynt-foundry.yml` from the **default branch**, and the worktree is then cut from `origin/<branches.integration>`, which may be a different branch. On a repository that promotes `test` to `main`, a change to the config governs comment-triggered runs only once it reaches `main`; `gh workflow run foundry.yml --ref test` reads it immediately. `pull_request` and `pull_request_review` events run from the PR's head.
 
 ## Secrets
 
 | Secret | Required | What it is |
 |---|---|---|
-| `CLAUDE_CODE_OAUTH_TOKEN` | yes | From `claude setup-token`. Runs bill the subscription of the person who generated it, not the API. Tied to that person; for an org-shared secret Anthropic recommends `ANTHROPIC_API_KEY` instead. |
-| `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY` | only for a self-owned App | With the public Foundry App there are no App secrets: the job exchanges its OIDC token at the joyntshops broker ([decision](decisions/2026-11-03-public-app-token-broker.md)). With a self-owned App, the template mints an installation token from these. With neither, the job's built-in token is used, and PRs it opens leave `pull_request` runs, including this workflow's own, stuck at "awaiting approval". |
+| `CLAUDE_CODE_OAUTH_TOKEN` | yes | From `claude setup-token`. Runs bill the subscription of the person who generated it, not the API. For an organization-shared secret Anthropic recommends `ANTHROPIC_API_KEY` instead. |
+| `FOUNDRY_APP_ID`, `FOUNDRY_APP_PRIVATE_KEY` | only for a self-owned App | With the public Foundry App there are no App secrets: the job exchanges its OIDC token at the broker ([below](#broker-mode)). With a self-owned App, the template mints an installation token from these. With neither, the job's built-in token is used; see [what the App adds](#what-the-app-adds) for what that costs. |
 
-No GitHub credentials are *needed*. Inside a job, GitHub has already established identity: `${{ github.token }}` is scoped to the repo, carries the permissions the workflow grants, and dies with the job.
+No GitHub credentials are needed to run at all. Inside a job, GitHub has already established identity: `${{ github.token }}` is scoped to the repository, carries the permissions the workflow grants, and dies with the job.
 
 ### What the App adds
 
-- **A named bot.** Comments, labels, and PRs appear as `<YourApp>[bot]` instead of `github-actions[bot]`.
-- **CI on the PRs Foundry opens.** Pushes and PRs made with the built-in token do not trigger `push` or `pull_request` workflows, so a repo's CI would silently skip agent PRs and required checks could never pass. On some repos the run is created but held at `action_required` ("1 workflow awaiting approval" on the PR), which includes this workflow's own `pull_request` trigger. With an App token they run normally; a PR already opened under the built-in token can be finished by approving it, since the review event is the human's.
+- **A named bot.** Comments, labels, PRs and commits appear as `joynt-foundry[bot]` (or `<YourApp>[bot]`) instead of `github-actions[bot]`.
+- **CI on the PRs Foundry opens.** Pushes and PRs made with the built-in token do not trigger `push` or `pull_request` workflows, so a repository's CI would silently skip agent PRs and required checks could never pass. On some repositories the run is created but held at "1 workflow awaiting approval", which includes this workflow's own `pull_request` trigger. With an App token they run normally. On an organization with GitHub's default Actions settings the built-in token cannot open a pull request at all ([Troubleshooting](troubleshooting.md#pr-creation-failed-github-actions-is-not-permitted-to-create-or-approve-pull-requests)).
 
-The public Foundry App carries every permission below. A self-owned App from `foundry setup-bot` works too. It needs **issues, pull_requests, contents, checks, actions, deployments, workflows: write**. Older Apps lack `checks` (verification results are posted as a Check Run; without it you get a non-fatal warning), `actions` (preview dispatch), and `deployments`. Add them in the App's settings, then **accept the permission update on the installation**: changing the App definition only creates a request, and jobs keep minting tokens with the old set until an org owner accepts it.
+The public Foundry App carries every permission Foundry needs. A self-owned App from `foundry setup-bot` works the same way and needs **issues, pull_requests, contents, checks, actions, deployments, workflows: write**; `foundry setup-bot --check` audits it ([GitHub Identity](github-backends.md)).
 
-The template's `if: env.FOUNDRY_APP_ID != ''` exists because the `secrets` context is not available in a step's `if:`. Surfacing the App ID (not the key) into `env` makes the check possible; `steps.app.outputs.token || steps.broker.outputs.token || github.token` falls back in that order when a step was skipped or came back empty.
+The template's `if: env.FOUNDRY_APP_ID != ''` on the self-owned step exists because the `secrets` context is not available in a step's `if:`; surfacing the App ID (not the key) into `env` makes the check possible. The Action then takes `steps.app.outputs.token || steps.broker.outputs.token || github.token`, in that order, so a self-owned App always wins and the built-in token is the last resort.
 
 ### Broker mode
 
-The public Foundry App has no key to store. The job proves who it is with the OIDC token GitHub issues to every job that has `permissions: id-token: write` (the template grants it), and a broker run by joyntshops turns that into an installation token for this one repository ([decision record](decisions/2026-11-03-public-app-token-broker.md)).
+The public Foundry App has no key to store. The job proves who it is with the OIDC token GitHub issues to every job that has `permissions: id-token: write` (the template grants it), and a broker run by the App's owner turns that into an installation token for this one repository.
 
-The template runs the exchange **before checkout**, through `joyntshops/foundry/broker-token@v0`, because `actions/checkout` persists the token it is given for every later `git push`; a token minted after checkout would leave pushes running as `github-actions`. The step is skipped when `FOUNDRY_APP_ID` is set, so a self-owned App always wins. The Action itself also accepts `broker-url` and performs the exchange when it was handed the built-in token, rewriting git's credential afterwards; that path serves hand-written workflows and is slower by one step.
-
-What the exchange needs and what it yields:
+The template runs the exchange **before checkout**, through `joyntshops/foundry/broker-token@v0`, because `actions/checkout` persists the token it is given for every later `git push`; a token minted after checkout would leave pushes running as `github-actions`. The step is skipped when `FOUNDRY_APP_ID` is set. The Action itself also accepts `broker-url` and performs the exchange when it was handed the built-in token, rewriting git's credential afterwards; that path serves hand-written workflows and is slower by one step.
 
 | | |
 |---|---|
@@ -70,70 +76,30 @@ What the exchange needs and what it yields:
 | On failure | a **warning** on the run and empty outputs, so the job continues with the built-in token (PRs then get no CI). `required: true` on the step, or `broker-required: true` on the Action, makes it fail instead |
 | Refusals | `not_installed` (install the App or set the self-owned secrets), `deny_list`, `workflow_ref`, `disabled` (the broker's kill switch) |
 
-A fork pull request never gets `id-token: write`, so a fork cannot obtain the upstream repository's token; the template does not run on fork PRs anyway. The broker URL is the default of the `broker-url` input on both actions; pass your own to use a broker you run against your own App (`packages/broker/README.md`).
+A fork pull request never gets `id-token: write`, so a fork cannot obtain the upstream repository's token; the template does not run on fork PRs anyway. The broker URL is the default of the `broker-url` input on both actions; pass your own to use a broker you run against your own App ([the broker](../../packages/broker/README.md)).
 
-## Decisions and gotchas
+## Approval and merge
 
-**The config and the workflow come from the branch the job checks out.** For `issue_comment`, `schedule`, and `workflow_dispatch` without `--ref`, that is the default branch; the worktree is then created from `origin/<branches.integration>`, which may be a different branch. So on a repo that promotes `test` to `main`, a change to `.joynt-foundry.yml` (the model, verify commands, previews) governs comment-triggered runs only once it reaches `main`, while `gh workflow run foundry.yml --ref test` reads it immediately. `pull_request` and `pull_request_review` events run from the PR's head, which is why a promotion PR exercises the workflow on `test` before anything is merged.
+An approving review on a task PR, or on a promotion PR into a `pull_request_bases` branch, is the merge button. Foundry rebases the branch onto its base and pushes it; when that changed the head, it runs `verify` again and publishes the result as a new **Foundry Verification** check run, because the agent's run is on the old head and the commit being merged needs its own; it then waits for the PR's checks, merges with the rebase method, runs `integration_rebuild`, and finishes the lifecycle in the same job. A conflict, or a verify failure on the rebased head, sends the agent back and asks for a second approval once it is green. Red or still-pending checks stop before the merge, with the reason on the PR. `review.merge_on_approval: false` turns this off. Preview verification is not repeated after the rebase.
 
-**Nothing Foundry does may depend on triggering another run.** Events caused by the job's built-in token do not start workflow runs, with two exceptions: `workflow_dispatch` and `repository_dispatch`. Preview up/down use `gh workflow run`, which is `workflow_dispatch`, so they are fine. Merges are done by humans, so `pull_request.closed` fires. `@foundry restart` discards the task and starts it again inside the same job rather than putting a label back and hoping. Design any new transition the same way: finish it in-job, or make it a dispatch.
+After any merge into the integration branch, the same job lists the other open Foundry PRs into that base and, for each one that now conflicts, dispatches the agent with a rebase instruction.
 
-**No branching on prose.** What happens after the agent exits is decided from facts Foundry can check (run error, commits) and the agent's typed report (`done`, `needs_input`, `plan_ready`, `blocked`), submitted as Claude Code structured output or via `foundry report`. Contradictions and missing reports fail closed. The regex heuristics this replaced misread "I have not completed this" as completion and treated "can't tell" as success. Details in [Agent Backends](agent-backends.md#the-agent-report).
+## Branch protection that works with this
 
-**Approval is the merge button.** An approving review on a task PR, or on a promotion PR into a `pull_request_bases` branch, runs the same flow `foundry review` does from a checkout: rebase the branch onto its base and push with `--force-with-lease`; when that changed the head, run `verify` on it and publish the result as a new **Foundry Verification** check run (the agent's run is on the old head, and the commit being merged needs its own); wait for the PR's checks on the rebased head; merge with the rebase method; run `integration_rebuild`; and finish the lifecycle in the same job (task → `state:done`, promotion PR → preview down). A conflict, or a verify failure on the rebased head, sends the task's agent back and asks for a second approval once it is green. Red or still-pending checks stop before the merge, with the reason on the PR. The job's own check (`GITHUB_JOB`) is ignored while waiting, since it is never finished while it looks at itself. `review.merge_on_approval: false` turns this off. Preview verification is not repeated after the rebase; a branch rule should require `Foundry Verification`, not `Foundry Preview Verification`.
+Require pull requests with one approval, the repository's own CI as required status checks with *require branches to be up to date*, *linear history*, and the rebase merge method allowed. Then:
 
-**Branch protection that works with this.** Require pull requests with one approval, the repository's own CI as required status checks with *require branches to be up to date*, *linear history*, and the rebase merge method allowed. Do not enable *dismiss stale approvals on push* or *require approval of the most recent push*: Foundry's rebase pushes after the approval, and the merge then needs that approval to still stand. Foundry waits on check runs (the Checks API), not commit statuses, so a required commit status such as a hosting provider's is not waited for and the merge can be refused while it is pending. `Foundry Verification` exists only on PRs Foundry opened, so requiring it blocks every human PR into the same branch; require it only once every PR gets it (a `pull_request` workflow that runs the same commands, under a different check name so the two sources do not share one). When you do, the run is created by the Foundry App (or by `github-actions` on the built-in token), and a rule bound to another source is never satisfied. GitHub does not run review workflows on a PR with conflicts, so approve after it is clean. Nothing Foundry does pushes to the protected branches directly, so deletion and force-push rules on them cost nothing.
-
-**Stale PRs are handled from the merge, never from reviews.** When a PR merges into `integration`, the same job lists the other open Foundry PRs into that base, waits for GitHub to recompute mergeability, and for each one that now conflicts dispatches the workflow with a `continue` command carrying a rebase instruction. `workflow_dispatch` is used because it is one of the two event types GitHub delivers even when the job's own token caused it, and the dispatched job runs under the conflicting issue's own concurrency group. Reviews cannot do this: GitHub does not run `pull_request_review` workflows for a PR that has conflicts.
-
-**Relaunch pushes use `--force-with-lease`.** An agent sent back to a branch may rebase. The lease is the remote-tracking ref the job fetched when it recreated the worktree, so a push by anyone else in the meantime is still refused.
-
-**Consecutive transitions happen inside one job.** Claim → agent → verify → PR → preview-up is a single run. A new job is only needed when a human acts. This keeps runner spin-ups to one per human interaction.
-
-**Concurrency groups replace the claim race.** `concurrency.group: foundry-<issue>` makes GitHub serialise runs per issue. The claim protocol's one-second sleep and read-back were written for two runners racing to claim; here that cannot happen. The structured claim comment is kept as the audit record and as the source for task recovery.
-
-**Declare concurrency on the job, not the workflow.** GitHub keeps at most one *pending* run per group and cancels the rest. A workflow-level group admits every triggered run before the job `if:` is evaluated, so Foundry's own comments and labels (filtered out by `if:`) still enter the group, queue behind the active run, and cancel each other. A pending human `@foundry` command could be the one cancelled. Job-level concurrency is evaluated only for jobs that pass `if:`. Seen on the first real run as two "cancelled" Foundry runs.
-
-**Task state is rebuilt from GitHub every run.** The file store under `~/.joynt-foundry/` is empty in every fresh job. `lib/task-recovery.ts` reconstructs a `TaskState` from the latest claim comment (`<!-- foundry-claim-block -->`), the issue's current `state:*` label, the PR for the branch, and the preview comment (`<!-- foundry-preview -->`). This is why the single-state-label invariant (`setStateLabel`) is load-bearing: recovery reads the label to learn the status.
-
-**There is no session resume; there is a hand-off.** `claude --resume` would need the session file from the job that asked, and that job is gone. Instead: when a job ends with the agent waiting (question or plan), Foundry commits anything uncommitted and pushes the branch. When the human answers, the next job recreates the worktree from that branch and relaunches the agent with `FOUNDRY_RESUME_CONTEXT` set to "you stopped because X; the human replied Y; continue from the branch, do not start over". The preset's prompt includes that variable. The human replies with `@foundry go <answer>`; a plain reply is context for the next launch and starts nothing.
-
-**Stopping a run.** `@foundry stop` works: the template sets `cancel-in-progress` for that comment, so GitHub cancels the issue's running job, the action's `if: cancelled()` step marks the task failed, and the stop command's own job tears the preview down. Cancel from the Actions UI has the same effect through the same cleanup step. Either way the issue never stays at `state:in-progress` with nothing running.
-
-**Runs that die silently are reconciled.** A runner failure or the six-hour limit can end a job with no cleanup. The `schedule` trigger (the template's default is every six hours) runs `foundry reconcile`: any `state:in-progress` issue whose status comment is older than `reconcile_stale_minutes` (default 120) is marked failed with a note. Set the threshold above your job `timeout-minutes`.
-
-**Package managers pinned through corepack are enabled.** A repo with `packageManager` in `package.json` (Yarn 2+, pnpm) expects corepack to supply that version, and the runner image ships Yarn 1 with corepack disabled. The action runs `corepack enable` when the field is present, before the agent starts, so both the agent and the verify commands get the pinned manager. A repo that commits its Yarn release (`yarnPath` in `.yarnrc.yml`) never needed this. The first repo that relied on corepack failed every verify on `yarn install` in 150 ms with no output.
-
-**The verification check run is created after the push.** GitHub rejects a check run for a commit it has not seen, so Foundry pushes the branch first and then records one completed check run, success or failure, with the step summary. There is no in-progress check run while verification runs.
-
-**Cost is visible per issue.** The status comment's `Last run` row shows the cost, turns, and duration the agent CLI reported. `agent_max_turns` (default 150) caps a runaway session; the preset passes it as `--max-turns`.
-
-**The Claude Code version is pinned** in `action.yml` (`claude-code-version`). Four CLI behaviours surprised us on the first day; a release should not change Foundry under you. Bump deliberately, or pass `latest`.
-
-**The `if:` filter matters for cost and for safety.** Every `issue_comment` event, including Foundry's own status comments, would otherwise start a runner that does ~40 seconds of setup and exits. The filter in the template starts a job only for `@foundry` comments on issues from `OWNER`/`MEMBER`/`COLLABORATOR` authors, PR events on listed bases or merges, reviews, dispatches, and the schedule. `author_association` is on the comment payload, so it costs nothing to check; it is coarse (a `MEMBER` may have read access only), which is why the job then asks the API for the commenter's actual permission and requires write.
-
-**Who may start a run is Foundry's to decide, not GitHub's.** A GitHub App's permissions govern what the App may do to the repo, not who may address it; the event that starts a job is a comment, and anyone who can see the issue can comment. There is no native "only these users may invoke this App" setting. Interaction limits and conversation locks exist but are blunt. The two gates above are the mechanism.
-
-**Stacked PRs only retarget if the base branch is deleted.** Learned the hard way: a PR stacked on a feature branch merged into that branch instead of `main` because the feature branch was kept at merge time. Merge with "Delete branch" or expect to open a follow-up PR.
-
-Symptoms and fixes from real runs are collected in [Troubleshooting](troubleshooting.md).
+- Do not enable *dismiss stale approvals on push* or *require approval of the most recent push*: Foundry's rebase pushes after the approval, and the merge needs that approval to still stand.
+- Foundry waits on check runs (the Checks API), not commit statuses, so a required commit status such as a hosting provider's is not waited for and the merge can be refused while it is pending.
+- `Foundry Verification` exists only on PRs Foundry opened, so requiring it blocks every human PR into the same branch. Require it only once every PR gets it (a `pull_request` workflow that runs the same commands, under a different check name so the two sources do not share one). A required check is bound to the App that reports it: a rule bound to one App is never satisfied by the same check from another ([Troubleshooting](troubleshooting.md#i-approved-the-pr-and-foundry-logged-not-merged-merge_failed-repository-rule-violations-found)).
+- GitHub does not run review workflows on a PR with conflicts, so approve after it is clean.
+- Nothing Foundry does pushes to the protected branches directly, so deletion and force-push rules on them cost nothing.
 
 ## Known limitations
 
-- `@foundry` commands left as **PR comments** are not yet resolved to their issue and are ignored. Comment on the issue.
+- `@foundry` commands left as **PR comments** are not resolved to their issue and are ignored. Comment on the issue.
 - No verify-to-agent retry loop yet: a verification failure posts the output, pushes the branch, and marks the task failed; `@foundry go` sends the agent back to it.
-- `deployment_id` is not recovered between jobs, so preview-down under the Action cannot mark the GitHub Deployment record inactive; have the teardown workflow do it (the demo repo's does).
+- `deployment_id` is not recovered between jobs, so preview-down under the Action cannot mark the GitHub Deployment record inactive; have the teardown workflow do it.
 
 ## Outputs
 
-`issue`, `status`, `branch`, `pr-url`, `log-dir`, `log-path`. Upload `log-dir` as an artifact to keep the agent transcript beyond the job log.
-
-## Local dry run
-
-```bash
-cd path/to/target-repo   # where .joynt-foundry.yml lives
-node path/to/foundry/packages/foundry/dist/cli.js action \
-  --event-name issues --event-path ./some-payload.json
-```
-
-Any payload that maps to no Foundry event (a non-state label, an unmerged PR close) exits 0 after task recovery, which makes for a cheap read-only check that auth and config are wired.
+`issue`, `status`, `branch`, `pr-url`, `log-dir`, `log-path`. Upload `log-dir` as an artifact to keep the agent transcript beyond the job log; the template does.
