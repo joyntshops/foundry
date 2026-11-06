@@ -92,6 +92,45 @@ function splitRepo(repo: string): { owner: string; repo: string } {
   return { owner, repo: repoName };
 }
 
+// ── Stale keep-alive sockets ─────────────────────────────────────────────
+
+/**
+ * Error codes of a request that died on the wire before GitHub answered:
+ * the pooled keep-alive socket was closed by the server (idle too long, or
+ * while this process was busy) and the next write hit the dead socket.
+ * undici reports them as `TypeError: fetch failed` with the code on `cause`.
+ */
+const DEAD_SOCKET_CODES = new Set(['EPIPE', 'ECONNRESET', 'UND_ERR_SOCKET']);
+
+export function isDeadSocketError(err: unknown): boolean {
+  let e: any = err;
+  for (let depth = 0; e && depth < 4; depth++) {
+    if (typeof e.code === 'string' && DEAD_SOCKET_CODES.has(e.code)) return true;
+    if (typeof e.message === 'string' && /\b(EPIPE|ECONNRESET)\b|other side closed/.test(e.message)) return true;
+    e = e.cause;
+  }
+  return false;
+}
+
+/**
+ * A fetch that retries once when the request never reached GitHub because
+ * the connection was dead. Only a request whose body can be replayed (a
+ * string, or none) is retried; the retry opens a fresh connection because
+ * the failure removed the dead socket from the pool.
+ */
+export function withDeadSocketRetry(fetchImpl: typeof fetch = (...a) => globalThis.fetch(...a), delayMs = 250): typeof fetch {
+  return async (input, init) => {
+    try {
+      return await fetchImpl(input, init);
+    } catch (err) {
+      if (!isDeadSocketError(err)) throw err;
+      if (init?.body !== undefined && init.body !== null && typeof init.body !== 'string') throw err;
+      await new Promise(r => setTimeout(r, delayMs));
+      return fetchImpl(input, init);
+    }
+  };
+}
+
 // Lazy-loaded Octokit instance
 type OctokitLike = {
   rest: {
@@ -139,6 +178,9 @@ type OctokitLike = {
 
 async function createOctokit(org?: string): Promise<OctokitLike> {
   const { Octokit } = await import('@octokit/rest');
+  // A job spends minutes in child processes (the agent, verify, a preview
+  // deploy); the first GitHub call afterwards must survive a dead socket.
+  const request = { fetch: withDeadSocketRetry() };
 
   const appAuth = resolveAppAuth(org);
   if (appAuth) {
@@ -150,10 +192,11 @@ async function createOctokit(org?: string): Promise<OctokitLike> {
         privateKey: appAuth.privateKey,
         installationId: appAuth.installationId,
       },
+      request,
     }) as unknown as OctokitLike;
   }
 
-  return new Octokit({ auth: resolveToken() });
+  return new Octokit({ auth: resolveToken(), request });
 }
 
 /** Exposed for direct use by modules that need Octokit outside the GitHubClient interface (e.g. deployments). */

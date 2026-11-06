@@ -3,6 +3,8 @@
  * comment upsert, and GitHub Deployment coordination.
  */
 import { execSync } from 'node:child_process';
+import { runCommand, describeFailure } from './run-command.js';
+import { DEFAULT_READY_TIMEOUT_S } from './preview-verify.js';
 import * as github from './github.js';
 import * as state from './state.js';
 import * as deployments from './deployments.js';
@@ -100,6 +102,16 @@ function resolveTemplateUrl(config: FoundryConfig, vars: TemplateVars): string |
 }
 
 /**
+ * The deadline for a provider's up and down commands: `ready_timeout_seconds`,
+ * the same budget `verify_preview` gives the preview to come up. An up
+ * command that waits for the deployment itself (the Vercel script does)
+ * needs the whole budget, not a fixed two minutes.
+ */
+export function providerCommandTimeoutMs(config: FoundryConfig): number {
+  return (config.preview?.ready_timeout_seconds ?? DEFAULT_READY_TIMEOUT_S) * 1000;
+}
+
+/**
  * Run the provider's up command. Returns the URL it printed, or null.
  *
  * When `expectUrl` is false the caller has a url_template and only needs the
@@ -107,38 +119,35 @@ function resolveTemplateUrl(config: FoundryConfig, vars: TemplateVars): string |
  * This matters because commands like `gh workflow run` print an Actions run
  * URL, which is a URL but not the preview.
  */
-function runProviderCommand(command: string, vars: TemplateVars, expectUrl: boolean): string | null {
+async function runProviderCommand(command: string, vars: TemplateVars, expectUrl: boolean, timeoutMs: number): Promise<string | null> {
   const expanded = expandTemplate(command, vars);
   const env = { ...process.env, ...makeEnvVars(vars) };
 
-  try {
-    const output = execSync(expanded, {
-      encoding: 'utf-8',
-      timeout: 120_000,
-      env,
-    }).trim();
-
-    if (!expectUrl) return null;
-
-    // Try to parse as JSON with a `url` field
-    try {
-      const parsed = JSON.parse(output);
-      if (parsed.url) return parsed.url;
-    } catch {
-      // Not JSON — treat entire output as URL
-    }
-
-    // Validate it looks like a URL
-    if (output.startsWith('http://') || output.startsWith('https://')) {
-      return output.split('\n').pop()!.trim();
-    }
-
-    log.warn(`Provider command output does not look like a URL: ${output.slice(0, 200)}`);
-    return null;
-  } catch (err: any) {
-    log.warn(`Provider up command failed: ${err.message}`);
+  const r = await runCommand(expanded, { env, timeoutMs });
+  if (!r.success) {
+    const tail = r.stderr.trim().slice(-300);
+    log.warn(`Provider up command failed (${describeFailure(r, timeoutMs)})${tail ? `: ${tail}` : ''}`);
     return null;
   }
+  const output = r.stdout.trim();
+
+  if (!expectUrl) return null;
+
+  // Try to parse as JSON with a `url` field
+  try {
+    const parsed = JSON.parse(output);
+    if (parsed.url) return parsed.url;
+  } catch {
+    // Not JSON — treat entire output as URL
+  }
+
+  // Validate it looks like a URL
+  if (output.startsWith('http://') || output.startsWith('https://')) {
+    return output.split('\n').pop()!.trim();
+  }
+
+  log.warn(`Provider command output does not look like a URL: ${output.slice(0, 200)}`);
+  return null;
 }
 
 // ── Comment upsert ───────────────────────────────────────────────────────
@@ -212,7 +221,7 @@ export async function previewUpTarget(
   let url: string | null = null;
 
   if (config.preview.mode === 'provider' && config.preview.up_command) {
-    url = runProviderCommand(config.preview.up_command, vars, !hasTemplate);
+    url = await runProviderCommand(config.preview.up_command, vars, !hasTemplate, providerCommandTimeoutMs(config));
   }
 
   if (hasTemplate) {
@@ -284,10 +293,10 @@ export async function previewDownTarget(config: FoundryConfig, target: PreviewTa
   if (config.preview.mode === 'provider' && config.preview.down_command) {
     const expanded = expandTemplate(config.preview.down_command, vars);
     const env = { ...process.env, ...makeEnvVars(vars) };
-    try {
-      execSync(expanded, { encoding: 'utf-8', timeout: 120_000, env });
-    } catch (err: any) {
-      log.warn(`Preview down command failed for ${label}: ${err.message}`);
+    const timeoutMs = providerCommandTimeoutMs(config);
+    const r = await runCommand(expanded, { env, timeoutMs });
+    if (!r.success) {
+      log.warn(`Preview down command failed for ${label} (${describeFailure(r, timeoutMs)}): ${r.stderr.trim().slice(-300)}`);
     }
   }
 

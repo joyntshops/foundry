@@ -32,7 +32,8 @@ export interface PreviewVerifyOutcome {
   results: VerifyResult[];
 }
 
-const DEFAULT_READY_TIMEOUT_S = 300;
+/** Also the deadline for a provider's up/down command (preview.ts). */
+export const DEFAULT_READY_TIMEOUT_S = 300;
 const READY_POLL_MS = 5_000;
 
 /** Poll until the URL answers with a non-5xx status, or the timeout passes. */
@@ -112,7 +113,7 @@ export async function verifyPreview(config: FoundryConfig, input: PreviewVerifyI
     FOUNDRY_PREVIEW_URL: input.url,
   };
   for (const cmd of commands) {
-    const r = runVerifyStep(cmd, input.cwd, env);
+    const r = await runVerifyStep(cmd, input.cwd, env);
     results.push(r);
     if (!r.success) return { passed: false, url: input.url, results };
   }

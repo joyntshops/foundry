@@ -113,38 +113,56 @@ function rebaseAndPush(config: FoundryConfig, repoDir: string, branch: string, b
   }
 }
 
+/** Attempts to publish the check run on the rebased head before giving up. */
+const CHECK_RUN_ATTEMPTS = 3;
+const CHECK_RUN_RETRY_MS = 2_000;
+
+export interface ReviewOpts {
+  /** Between attempts to publish the check run. Tests shorten it. */
+  checkRunRetryMs?: number;
+}
+
 /**
  * Run `verify` on the rebased head and publish a check run for it. The check
  * run is created after the push (GitHub refuses one for a commit it has not
- * seen) and is best-effort: a failure to create it is logged, not fatal, as
- * in the agent path. Returns whether it passed and, when not, the failing
- * steps' tails for the PR comment.
+ * seen). When a branch rule requires "Foundry Verification", a missing run
+ * on this head means GitHub refuses the merge, so publishing is retried a
+ * few times; `checkError` carries the last failure when it never landed.
+ * Returns whether verification passed and, when not, the failing steps'
+ * tails for the PR comment.
  */
-async function verifyRebasedHead(config: FoundryConfig, worktree: string, sha: string): Promise<{ passed: boolean; detail: string }> {
-  const result = verifyLib.runVerifyPipeline(config, worktree);
+async function verifyRebasedHead(config: FoundryConfig, worktree: string, sha: string, opts: ReviewOpts): Promise<{ passed: boolean; detail: string; checkError?: string }> {
+  const result = await verifyLib.runVerifyPipeline(config, worktree);
   const stepSummary = result.results.map(r => `- \`${r.command}\`: ${r.success ? 'passed' : 'FAILED'} (${r.duration_ms}ms)`).join('\n');
   const failed = result.results.filter(r => !r.success);
   const annotations = verifyLib.parseAnnotations(result.results);
-  try {
-    await github.createCheckRun(config.repo, {
-      name: verifyLib.VERIFY_CHECK_NAME,
-      head_sha: sha,
-      status: 'completed',
-      conclusion: result.passed ? 'success' : 'failure',
-      output: {
-        title: result.passed ? 'Verification passed (rebased head)' : 'Verification failed (rebased head)',
-        summary: stepSummary,
-        annotations: annotations.length > 0 ? annotations : undefined,
-      },
-    });
-  } catch (err: any) {
-    log.warn(`Failed to create check run for ${sha.slice(0, 7)}: ${err.message}`);
+  let checkError: string | undefined;
+  for (let attempt = 1; attempt <= CHECK_RUN_ATTEMPTS; attempt++) {
+    try {
+      await github.createCheckRun(config.repo, {
+        name: verifyLib.VERIFY_CHECK_NAME,
+        head_sha: sha,
+        status: 'completed',
+        conclusion: result.passed ? 'success' : 'failure',
+        output: {
+          title: result.passed ? 'Verification passed (rebased head)' : 'Verification failed (rebased head)',
+          summary: stepSummary,
+          annotations: annotations.length > 0 ? annotations : undefined,
+        },
+      });
+      checkError = undefined;
+      break;
+    } catch (err: any) {
+      checkError = err.message ?? String(err);
+      log.warn(`Failed to create check run for ${sha.slice(0, 7)} (attempt ${attempt}/${CHECK_RUN_ATTEMPTS}): ${checkError}`);
+      if (attempt < CHECK_RUN_ATTEMPTS) await new Promise(r => setTimeout(r, opts.checkRunRetryMs ?? CHECK_RUN_RETRY_MS));
+    }
   }
   const detail = failed.map(r => `\`${r.command}\`\n\`\`\`\n${r.output.slice(-800)}\n\`\`\``).join('\n');
-  return { passed: result.passed, detail };
+  return { passed: result.passed, detail, checkError };
 }
 
-export async function reviewAndMerge(config: FoundryConfig, repoDir: string, target: ReviewTarget): Promise<ReviewOutcome> {
+export async function reviewAndMerge(config: FoundryConfig, repoDir: string, target: ReviewTarget, opts: ReviewOpts = {}): Promise<ReviewOutcome> {
   const { pr_number: pr, branch, base } = target;
   const repo = config.repo;
   const who = target.reviewer ? ` by @${target.reviewer}` : '';
@@ -177,16 +195,20 @@ export async function reviewAndMerge(config: FoundryConfig, repoDir: string, tar
   //    check run is on the old head. Verify this one and publish the result,
   //    so a branch rule that requires "Foundry Verification" sees it on the
   //    commit being merged. An unchanged head keeps the agent's run.
+  let checkMissing: string | undefined;
   try {
     if (rebased && config.verify.length > 0) {
       await postReviewComment(repo, pr, [...lines, '- Verifying the rebased head…'].join('\n'));
-      const v = await verifyRebasedHead(config, worktree, sha);
+      const v = await verifyRebasedHead(config, worktree, sha, opts);
       if (!v.passed) {
         lines.push(`- Not merged: verification failed on the rebased head.\n${v.detail}`);
         await postReviewComment(repo, pr, lines.join('\n'));
         return { merged: false, reason: 'verify_failed', detail: v.detail };
       }
-      lines.push('- Verification passed on the rebased head.');
+      checkMissing = v.checkError;
+      lines.push(checkMissing
+        ? `- Verification passed on the rebased head, but the \`${verifyLib.VERIFY_CHECK_NAME}\` check could not be published on ${sha.slice(0, 7)}: ${checkMissing}. A branch rule that requires it will refuse the merge; approve again to retry.`
+        : '- Verification passed on the rebased head.');
     }
   } finally {
     try { git.removeWorktree(worktree, repoDir); } catch {}
@@ -206,7 +228,7 @@ export async function reviewAndMerge(config: FoundryConfig, repoDir: string, tar
     await postReviewComment(repo, pr, lines.join('\n'));
     return { merged: false, reason: 'checks_timeout', detail: checks.pending.join(', ') };
   }
-  lines.push('- Checks passed.');
+  lines.push(checkMissing ? `- Other checks passed; \`${verifyLib.VERIFY_CHECK_NAME}\` is missing on this head.` : '- Checks passed.');
 
   // 5. Merge. If the rebase changed the head, GitHub recomputes mergeability; wait for it.
   if (rebased) await awaitMergeability(repo, pr);
@@ -229,7 +251,7 @@ export async function reviewAndMerge(config: FoundryConfig, repoDir: string, tar
       git.pruneWorktrees(repoDir);
       if (git.worktreeExists(wt, repoDir)) git.removeWorktree(wt, repoDir);
       git.addWorktreeTracking(wt, base, repoDir);
-      rebuild = verifyLib.runIntegrationRebuild(config, wt);
+      rebuild = await verifyLib.runIntegrationRebuild(config, wt);
       if (rebuild && !rebuild.success) {
         lines.push(`- **Integration rebuild FAILED** on \`${base}\` after the merge:\n\`\`\`\n${rebuild.output.slice(-800)}\n\`\`\``);
       } else {

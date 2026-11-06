@@ -747,6 +747,29 @@ export class EventHandler {
     });
   }
 
+  /**
+   * finishReadyForReview, with a failure in it attributed to the step that
+   * failed rather than to the PR: the PR exists by now, and the status
+   * comment must keep saying so.
+   */
+  private async finishAfterPR(task: TaskState, message: string, historyEntry: string, prUrl?: string): Promise<void> {
+    const config = this.config;
+    try {
+      await this.finishReadyForReview(task, message, historyEntry, prUrl);
+    } catch (err: any) {
+      log.error(`Finishing #${task.issue} after its PR failed: ${err.message}`);
+      state.updateTaskStatus(config.repo, task.issue, 'failed');
+      await claim.markFailed(config, task.issue);
+      const failedTask = state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? { ...task, status: 'failed' as const };
+      await statusComment.updateStatusComment(config.repo, task.issue, {
+        task: failedTask,
+        prUrl,
+        message: `The PR is open${prUrl ? ` (${prUrl})` : ''}, but the preview step after it failed:\n\n${err.message}\n\n${FAILED_FOOTER}`,
+        historyEntry: 'Preview failed after PR',
+      });
+    }
+  }
+
   private async handleCompleted(task: TaskState, outcome?: AgentOutcome): Promise<void> {
     const config = this.config;
 
@@ -764,7 +787,7 @@ export class EventHandler {
       }
     };
 
-    const result = verify.runVerifyPipeline(config, task.worktree);
+    const result = await verify.runVerifyPipeline(config, task.worktree);
 
     const stepSummary = result.results.map(r =>
       `- \`${r.command}\`: ${r.success ? 'passed' : 'FAILED'} (${r.duration_ms}ms)`
@@ -806,10 +829,11 @@ export class EventHandler {
           }
         }
         state.updateTaskStatus(config.repo, task.issue, 'pr-open');
-        await this.finishReadyForReview(task, 'Verification passed. PR updated with new changes.', 'Verification passed, PR updated');
+        await this.finishAfterPR(task, 'Verification passed. PR updated with new changes.', 'Verification passed, PR updated', task.pr_url);
       } else {
+        let prUrl: string;
         try {
-          const prUrl = await github.createPR(config.repo, {
+          prUrl = await github.createPR(config.repo, {
             // Issues and PRs share one number sequence, so a leading "#<issue>:"
             // reads as the PR's own number, off by one. Reference the issue at the end.
             title: `${task.title} (issue #${task.issue})`,
@@ -817,13 +841,6 @@ export class EventHandler {
             head: task.branch,
             base: integrationBranch(config),
           });
-          log.success(`PR created: ${prUrl}`);
-          const prNumber = github.extractPRNumber(prUrl);
-          state.updateTaskStatus(config.repo, task.issue, 'pr-open', {
-            pr_url: prUrl,
-            pr_number: prNumber ?? undefined,
-          });
-          await this.finishReadyForReview(task, 'Verification passed. PR created and ready for review.', 'Verification passed, PR created', prUrl);
         } catch (err: any) {
           log.error(`PR creation failed for #${task.issue}: ${err.message}`);
           state.updateTaskStatus(config.repo, task.issue, 'failed');
@@ -834,7 +851,18 @@ export class EventHandler {
             message: `PR creation failed:\n\n${err.message}\n\n${FAILED_FOOTER}`,
             historyEntry: 'PR creation failed',
           });
+          return;
         }
+        log.success(`PR created: ${prUrl}`);
+        // Record the PR before anything slower runs: whatever happens next
+        // (the preview, its verification), the task and its status comment
+        // must say the PR exists, so `@foundry go` and an approval find it.
+        const prNumber = github.extractPRNumber(prUrl);
+        state.updateTaskStatus(config.repo, task.issue, 'pr-open', {
+          pr_url: prUrl,
+          pr_number: prNumber ?? undefined,
+        });
+        await this.finishAfterPR(task, 'Verification passed. PR created and ready for review.', 'Verification passed, PR created', prUrl);
       }
     } else {
       log.error(`Verification failed for #${task.issue}.`);

@@ -94,7 +94,10 @@ export interface FoundryConfig {
      * promotion PR from `integration` into `main`.
      */
     pull_request_bases?: string[];
-    /** How long to wait for the preview URL to answer before verify_preview runs. Default 300. */
+    /**
+     * How long to wait for the preview URL to answer before verify_preview
+     * runs, and the deadline for up_command and down_command. Default 300.
+     */
     ready_timeout_seconds?: number;
     /**
      * Text the preview's body must contain before it counts as up, with

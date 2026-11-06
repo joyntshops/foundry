@@ -74,7 +74,7 @@ Configuration for preview/staging environments deployed per-task.
 - `up_command` — Shell command to spin up the preview environment (`provider` mode). Without `url_template` it must print a URL, or JSON `{ "url": "..." }`, to stdout. Same template variables. Under the Action, `gh` is available and `GH_TOKEN` is set, so `gh workflow run your-deploy.yml -f pr={pr_number}` is the common shape; it needs `actions: write`.
 - `down_command` — Shell command to tear down the preview environment (`provider` mode). Same template variables.
 - `comment` — Whether to post/update a PR comment with the preview URL. Default `true`.
-- `ready_timeout_seconds` — How long `verify_preview` waits for the preview URL to answer before giving up. Default `300`.
+- `ready_timeout_seconds` — How long `verify_preview` waits for the preview URL to answer before giving up, and the deadline for `up_command` and `down_command`. Set it above the time a deploy takes; an up command that waits for the deployment itself is killed at this limit. Default `300`.
 - `ready_match` — Text the preview's body must contain before it counts as up; `{sha}`, `{branch}`, `{pr_number}` are expanded. Without it, a redeploy is verified against the previous version that is still being served. Have the page print its commit and set `"{sha}"`.
 - `pull_request_bases` — Base branches whose pull requests get a preview even when they are not Foundry tasks (up on open, redeploy on push, down on close). Typically `[main]` for the promotion PR from `integration`. See [Preview Environments](preview-environments.md#previews-for-pull-requests-that-are-not-tasks).
 

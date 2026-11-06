@@ -431,6 +431,44 @@ describe('EventHandler', () => {
       expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'verifying');
     });
 
+    it('records the PR before the preview step, and a failure there is not "PR creation failed"', async () => {
+      vi.mocked(verify.runVerifyPipeline).mockReturnValue({ passed: true, results: [] });
+      vi.mocked(github.createPR).mockResolvedValue('https://github.com/owner/repo/pull/8');
+      vi.mocked(github.extractPRNumber).mockReturnValue(8);
+      // The preview verification is where a long deploy used to leave the
+      // GitHub socket dead; here it throws the error that produced.
+      vi.mocked(previewVerify.isConfigured).mockReturnValueOnce(true);
+      vi.mocked(state.getAllTasks).mockReturnValue([makeTask({ status: 'pr-open', pr_url: 'https://github.com/owner/repo/pull/8', pr_number: 8, preview_url: 'https://pr-8.x' })]);
+      vi.mocked(previewVerify.verifyPreview).mockRejectedValueOnce(new Error('write EPIPE'));
+
+      await handler.handleEvent({ type: 'agent_completed', task: makeTask(), outcome: {
+        type: 'completed', session_id: 's', final_message: 'Done', ask_user_questions: null,
+        report: { status: 'done', summary: 'Did it.' },
+      } });
+
+      expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'pr-open', { pr_url: 'https://github.com/owner/repo/pull/8', pr_number: 8 });
+      expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'failed');
+      expect(claim.markFailed).toHaveBeenCalled();
+      const last = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(last.historyEntry).toBe('Preview failed after PR');
+      expect(last.prUrl).toBe('https://github.com/owner/repo/pull/8');
+      expect(last.message).toContain('The PR is open');
+      expect(last.message).toContain('write EPIPE');
+      expect(last.message).not.toContain('PR creation failed');
+    });
+
+    it('reports a PR that could not be created as such', async () => {
+      vi.mocked(verify.runVerifyPipeline).mockReturnValue({ passed: true, results: [] });
+      vi.mocked(github.createPR).mockRejectedValueOnce(new Error('GraphQL: pull request creation is disabled'));
+      await handler.handleEvent({ type: 'agent_completed', task: makeTask(), outcome: {
+        type: 'completed', session_id: 's', final_message: 'Done', ask_user_questions: null,
+        report: { status: 'done', summary: 'Did it.' },
+      } });
+      const last = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(last.historyEntry).toBe('PR creation failed');
+      expect(state.updateTaskStatus).not.toHaveBeenCalledWith('owner/repo', 42, 'pr-open', expect.anything());
+    });
+
     it('titles the PR with the issue number at the end, not as a leading "#N:"', async () => {
       vi.mocked(verify.runVerifyPipeline).mockReturnValue({ passed: true, results: [] });
       vi.mocked(github.createPR).mockResolvedValue('https://github.com/owner/repo/pull/43');

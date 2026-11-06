@@ -27,16 +27,22 @@ vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
 }));
 
+vi.mock('./run-command.js', () => ({
+  runCommand: vi.fn(),
+  describeFailure: vi.fn().mockReturnValue('exit 1'),
+}));
+
 vi.mock('./log.js', () => ({
   info: vi.fn(),
   warn: vi.fn(),
 }));
 
-import { previewUp, previewDown, getPreviewStatus, previewUpTarget, previewDownTarget, findPreviewUrlOnPR } from './preview.js';
+import { previewUp, previewDown, getPreviewStatus, previewUpTarget, previewDownTarget, findPreviewUrlOnPR, providerCommandTimeoutMs } from './preview.js';
 import * as github from './github.js';
 import * as state from './state.js';
 import * as deployments from './deployments.js';
 import { execSync } from 'node:child_process';
+import { runCommand, type RunCommandResult } from './run-command.js';
 
 // ── Helper factories ────────────────────────────────────────────────────
 
@@ -94,16 +100,22 @@ function makeTask(overrides: Partial<TaskState> = {}): TaskState {
 
 const MOCK_SHA = 'abc1234def5678';
 
+const ran = (stdout: string, success = true): RunCommandResult =>
+  ({ success, stdout, stderr: success ? '' : stdout, status: success ? 0 : 1, signal: null, timedOut: false, duration_ms: 1 });
+
 /**
- * Helper: mock execSync so that `git rev-parse HEAD` returns MOCK_SHA,
- * while any other command returns the provided value.
+ * Helper: `git rev-parse HEAD` (execSync) returns MOCK_SHA; the provider
+ * command (runCommand) returns the provided output, or fails when the
+ * provided function throws.
  */
 function mockExecWithSha(providerReturn?: string | (() => string)): void {
-  vi.mocked(execSync).mockImplementation((cmd: string, ..._args: any[]) => {
-    if (cmd === 'git rev-parse HEAD') return MOCK_SHA + '\n';
-    if (providerReturn === undefined) return '';
-    if (typeof providerReturn === 'function') return providerReturn();
-    return providerReturn;
+  vi.mocked(execSync).mockImplementation((cmd: string, ..._args: any[]) => cmd === 'git rev-parse HEAD' ? MOCK_SHA + '\n' : '');
+  vi.mocked(runCommand).mockImplementation(async () => {
+    if (providerReturn === undefined) return ran('');
+    if (typeof providerReturn === 'function') {
+      try { return ran(providerReturn()); } catch (err: any) { return ran(err.message, false); }
+    }
+    return ran(providerReturn);
   });
 }
 
@@ -228,7 +240,7 @@ describe('previewUp', () => {
   });
 
   describe('provider mode', () => {
-    it('calls execSync with expanded command and correct env vars', async () => {
+    it('runs the expanded command with the env vars and the ready timeout', async () => {
       mockExecWithSha('https://dynamic-preview.example.com\n');
 
       const config = makeConfig({
@@ -241,11 +253,10 @@ describe('previewUp', () => {
 
       await previewUp(config, task);
 
-      expect(execSync).toHaveBeenCalledWith(
+      expect(runCommand).toHaveBeenCalledWith(
         'deploy --branch feature/42-fix-login --issue 42',
         expect.objectContaining({
-          encoding: 'utf-8',
-          timeout: 120_000,
+          timeoutMs: 300_000,
           env: expect.objectContaining({
             FOUNDRY_BRANCH: 'feature/42-fix-login',
             FOUNDRY_ISSUE: '42',
@@ -255,6 +266,24 @@ describe('previewUp', () => {
           }),
         }),
       );
+    });
+
+    it('gives the up command ready_timeout_seconds as its deadline', async () => {
+      mockExecWithSha('https://p.example.com\n');
+      const config = makeConfig({
+        preview: { mode: 'provider', up_command: 'deploy', ready_timeout_seconds: 900 },
+      });
+      expect(providerCommandTimeoutMs(config)).toBe(900_000);
+      await previewUp(config, makeTask());
+      expect(runCommand).toHaveBeenCalledWith('deploy', expect.objectContaining({ timeoutMs: 900_000 }));
+    });
+
+    it('resolves no URL when the up command is killed at the deadline', async () => {
+      vi.mocked(execSync).mockReturnValue(MOCK_SHA + '\n');
+      vi.mocked(runCommand).mockResolvedValue({ ...ran('', false), timedOut: true, signal: 'SIGTERM' });
+      const config = makeConfig({ preview: { mode: 'provider', up_command: 'deploy' } });
+      await previewUp(config, makeTask());
+      expect(state.updateTaskStatus).not.toHaveBeenCalled();
     });
 
     it('captures plain URL from command output', async () => {
@@ -318,7 +347,7 @@ describe('previewUp', () => {
       await previewUp(config, task);
 
       // The deploy command still ran...
-      expect(execSync).toHaveBeenCalledWith(
+      expect(runCommand).toHaveBeenCalledWith(
         'gh workflow run preview-up.yml -f pr=99',
         expect.anything(),
       );
@@ -420,8 +449,7 @@ describe('previewUp', () => {
       await previewUp(config, task);
 
       // Only git rev-parse HEAD should run, not a provider command
-      expect(execSync).toHaveBeenCalledTimes(1);
-      expect(execSync).toHaveBeenCalledWith('git rev-parse HEAD', expect.anything());
+      expect(runCommand).not.toHaveBeenCalled();
       expect(state.updateTaskStatus).toHaveBeenCalledWith(
         'acme/webapp',
         42,
@@ -441,8 +469,7 @@ describe('previewUp', () => {
       await previewUp(config, task);
 
       // Only git rev-parse HEAD should run, not a provider command
-      expect(execSync).toHaveBeenCalledTimes(1);
-      expect(execSync).toHaveBeenCalledWith('git rev-parse HEAD', expect.anything());
+      expect(runCommand).not.toHaveBeenCalled();
       expect(state.updateTaskStatus).not.toHaveBeenCalled();
     });
   });
@@ -574,6 +601,7 @@ describe('previewUp', () => {
     expect(github.commentOnPR).not.toHaveBeenCalled();
     expect(deployments.createDeployment).not.toHaveBeenCalled();
     expect(execSync).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
   });
 });
 
@@ -591,11 +619,10 @@ describe('previewDown', () => {
 
     await previewDown(config, task);
 
-    expect(execSync).toHaveBeenCalledWith(
+    expect(runCommand).toHaveBeenCalledWith(
       'teardown --branch feature/42-fix-login',
       expect.objectContaining({
-        encoding: 'utf-8',
-        timeout: 120_000,
+        timeoutMs: 300_000,
         env: expect.objectContaining({
           FOUNDRY_BRANCH: 'feature/42-fix-login',
           FOUNDRY_ISSUE: '42',
@@ -662,7 +689,7 @@ describe('previewDown', () => {
 
     await previewDown(config, task);
 
-    expect(execSync).toHaveBeenCalledWith('teardown --pr 63', expect.objectContaining({ env: expect.objectContaining({ FOUNDRY_PR_NUMBER: '63' }) }));
+    expect(runCommand).toHaveBeenCalledWith('teardown --pr 63', expect.objectContaining({ env: expect.objectContaining({ FOUNDRY_PR_NUMBER: '63' }) }));
     expect(github.commentOnPR).toHaveBeenCalledWith('acme/webapp', 63, expect.stringContaining('Torn down'));
   });
 
@@ -673,6 +700,7 @@ describe('previewDown', () => {
     await previewDown(config, task);
 
     expect(execSync).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
     expect(deployments.createDeploymentStatus).not.toHaveBeenCalled();
     expect(github.getComments).not.toHaveBeenCalled();
   });
@@ -686,6 +714,7 @@ describe('previewDown', () => {
     await previewDown(config, task);
 
     expect(execSync).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
     expect(deployments.createDeploymentStatus).not.toHaveBeenCalled();
     expect(github.getComments).not.toHaveBeenCalled();
   });
@@ -698,9 +727,7 @@ describe('previewDown', () => {
 
     await previewDown(config, task);
 
-    // Only git rev-parse HEAD should run, not the down_command
-    expect(execSync).toHaveBeenCalledTimes(1);
-    expect(execSync).toHaveBeenCalledWith('git rev-parse HEAD', expect.anything());
+    expect(runCommand).not.toHaveBeenCalled();
   });
 
   it('does not set deployment status when deployment_id is absent', async () => {
@@ -915,7 +942,7 @@ describe('previews for pull requests that are not tasks', () => {
     const result = await previewUpTarget(config, { branch: 'integration', pr_number: 7, sha: 'abc123' });
 
     expect(result).toEqual({ url: 'https://integration.preview.example.com', deploymentId: undefined });
-    expect(execSync).toHaveBeenCalledWith('deploy integration abc123', expect.objectContaining({
+    expect(runCommand).toHaveBeenCalledWith('deploy integration abc123', expect.objectContaining({
       env: expect.objectContaining({ FOUNDRY_BRANCH_SLUG: 'integration', FOUNDRY_ISSUE: '', FOUNDRY_PR_NUMBER: '7', FOUNDRY_SHA: 'abc123' }),
     }));
     expect(github.commentOnPR).toHaveBeenCalledWith('acme/webapp', 7, expect.stringContaining('https://integration.preview.example.com'));
@@ -933,7 +960,7 @@ describe('previews for pull requests that are not tasks', () => {
     mockExecWithSha('');
     const config = makeConfig({ preview: { mode: 'provider', url_template: 'https://u', down_command: 'teardown {pr_number}' } });
     await previewDownTarget(config, { branch: 'integration', pr_number: 7, sha: 's', preview_url: 'https://u' });
-    expect(execSync).toHaveBeenCalledWith('teardown 7', expect.anything());
+    expect(runCommand).toHaveBeenCalledWith('teardown 7', expect.anything());
     expect(github.commentOnPR).toHaveBeenCalledWith('acme/webapp', 7, expect.stringContaining('~~https://u~~'));
   });
 
