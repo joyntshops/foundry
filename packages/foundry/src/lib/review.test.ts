@@ -108,6 +108,36 @@ describe('reviewAndMerge', () => {
     expect(fs.existsSync(path.join(repo, 'wts', 'review-9'))).toBe(false);
   });
 
+  it('retries publishing the check run on the rebased head when the first attempts die on the wire', async () => {
+    mock.checkRuns = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
+    let attempts = 0;
+    const real = mock.createCheckRun.bind(mock);
+    mock.createCheckRun = async (r, o) => { attempts++; if (attempts < 3) throw new Error('write EPIPE'); return real(r, o); };
+    const out = await reviewAndMerge({ ...config(), verify: ['test -f c.txt'] }, repo, { pr_number: 9, branch: 'feature/7-x', base: 'integration' }, { checkRunRetryMs: 1 });
+    expect(out).toMatchObject({ merged: true, rebased: true });
+    expect(attempts).toBe(3);
+    expect(mock.getCalls('createCheckRun')).toHaveLength(1);
+    const comment = mock.getCalls('commentOnPR').at(-1)!.args[2];
+    expect(comment).toContain('Verification passed on the rebased head.');
+    expect(comment).toContain('- Checks passed.');
+    expect(comment).not.toContain('could not be published');
+  });
+
+  it('says the check is missing, not "Checks passed", when it never lands', async () => {
+    mock.checkRuns = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
+    let attempts = 0;
+    mock.createCheckRun = async () => { attempts++; throw new Error('write EPIPE'); };
+    const out = await reviewAndMerge({ ...config(), verify: ['test -f c.txt'] }, repo, { pr_number: 9, branch: 'feature/7-x', base: 'integration' }, { checkRunRetryMs: 1 });
+    // The mock GitHub merges anyway; a real branch rule refuses, and the comment says why.
+    expect(out.merged).toBe(true);
+    expect(attempts).toBe(3);
+    const comment = mock.getCalls('commentOnPR').at(-1)!.args[2];
+    expect(comment).toContain('`Foundry Verification` check could not be published');
+    expect(comment).toContain('write EPIPE');
+    expect(comment).toContain('`Foundry Verification` is missing on this head');
+    expect(comment).not.toContain('- Checks passed.');
+  });
+
   it('stops when verification fails on the rebased head, leaving the branch rebased', async () => {
     mock.checkRuns = [{ name: 'ci', status: 'completed', conclusion: 'success' }];
     const before = sh(repo, 'rev-parse', 'origin/feature/7-x');

@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { OctokitClient, resolveAppAuth, appCredsExist } from './octokit-client.js';
+import { OctokitClient, resolveAppAuth, appCredsExist, isDeadSocketError, withDeadSocketRetry } from './octokit-client.js';
 
 function createMockOctokit() {
   return {
@@ -440,5 +440,47 @@ describe('appCredsExist', () => {
   it('returns false for a non-existent org (no files in ~/.joynt-foundry/)', () => {
     // Use a unique org name that will never have real files
     expect(appCredsExist('__nonexistent_org_test_12345__')).toBe(false);
+  });
+});
+
+describe('withDeadSocketRetry', () => {
+  const epipe = () => new TypeError('fetch failed', { cause: Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }) });
+  const reset = () => Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+
+  it('recognises the errors a dead keep-alive socket produces', () => {
+    expect(isDeadSocketError(epipe())).toBe(true);
+    expect(isDeadSocketError(reset())).toBe(true);
+    expect(isDeadSocketError(new TypeError('fetch failed', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) }))).toBe(true);
+    expect(isDeadSocketError(new Error('Not Found'))).toBe(false);
+    expect(isDeadSocketError(Object.assign(new Error('x'), { name: 'AbortError' }))).toBe(false);
+  });
+
+  it('retries once on EPIPE and returns the second answer', async () => {
+    const ok = new Response('{}', { status: 200 });
+    const inner = vi.fn<typeof fetch>().mockRejectedValueOnce(epipe()).mockResolvedValueOnce(ok);
+    const f = withDeadSocketRetry(inner, 0);
+    const res = await f('https://api.github.com/repos/o/r/check-runs', { method: 'POST', body: '{"name":"x"}' });
+    expect(res).toBe(ok);
+    expect(inner).toHaveBeenCalledTimes(2);
+    expect(inner.mock.calls[1][1]).toMatchObject({ method: 'POST', body: '{"name":"x"}' });
+  });
+
+  it('gives up after one retry', async () => {
+    const inner = vi.fn<typeof fetch>().mockRejectedValue(reset());
+    await expect(withDeadSocketRetry(inner, 0)('https://x')).rejects.toThrow('ECONNRESET');
+    expect(inner).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry other failures', async () => {
+    const inner = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('fetch failed', { cause: Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }) }));
+    await expect(withDeadSocketRetry(inner, 0)('https://x')).rejects.toThrow('fetch failed');
+    expect(inner).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not replay a stream body', async () => {
+    const inner = vi.fn<typeof fetch>().mockRejectedValue(epipe());
+    const body = new ReadableStream();
+    await expect(withDeadSocketRetry(inner, 0)('https://x', { method: 'POST', body, duplex: 'half' } as any)).rejects.toThrow();
+    expect(inner).toHaveBeenCalledTimes(1);
   });
 });

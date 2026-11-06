@@ -103,6 +103,12 @@ gh api repos/OWNER/REPO/rulesets/$RULESET \
 
 The same change in the browser: the repository's Settings → Rules → Rulesets → the branch's ruleset → *Require status checks to pass*, where each check lists its source; set it to the App, or remove the row and add the check again choosing the right source. [GitHub Action](github-action.md#branch-protection-that-works-with-this) has the full list of settings.
 
+## `write EPIPE` after a long preview deploy or verify, reported as `PR creation failed` or a missing `Foundry Verification` check
+
+Before 0.1.61 Foundry ran `up_command` and the `verify` steps synchronously. A step that took minutes left the GitHub client's keep-alive socket dead, and the first API call after it failed with `write EPIPE` (logged as a `500 with id UNKNOWN`). Two shapes: the PR was created, then the preview failed, and the issue ended `state:failed` with "PR creation failed: write EPIPE"; or on approval the re-verify of a rebased head passed but the check run was never posted, so a rule requiring `Foundry Verification` refused Foundry's own merge. The `up_command` was also killed after two minutes whatever `ready_timeout_seconds` said.
+
+From 0.1.61 the steps run without blocking, the first call after one is retried on a dead socket, `up_command` and `down_command` get `ready_timeout_seconds` as their deadline, a preview failure after the PR is reported as that with the PR linked, and the approval path retries the check run and says when it is missing. On an older version: the PR is real, so approve it; if GitHub refuses the merge because the check is expected, merge by hand with a bypass, or approve again after upgrading.
+
 ## The preview is still up after the PR was merged by hand
 
 Foundry tears a task's preview down when it completes the task: in the approval run when it merges the PR itself, otherwise in the `pull_request.closed` run. Before 0.1.58 the second path could not find the preview, because the merged PR was no longer the task's PR and the preview comment lives on it; the preview stayed up and its comment stayed *Live*. From 0.1.58 the closed run reads the comment on the merged PR, and `foundry preview down <issue>` does the same from any checkout. On an older version, run the repository's down command by hand for the PR number (for a GitHub Pages setup, dispatch its preview-down workflow).

@@ -1,11 +1,18 @@
 /**
  * Verification pipeline — lint, typecheck, build, unit tests.
+ *
+ * Every step runs asynchronously (see run-command.ts): a verify step can
+ * take minutes, and blocking the event loop that long leaves the GitHub
+ * client's keep-alive socket dead for the call that publishes the result.
  */
-import { execSync } from 'node:child_process';
+import { runCommand, describeFailure } from './run-command.js';
 import type { FoundryConfig } from '../types.js';
 
 /** Name of the check run that carries a verify result; the one a branch rule requires. */
 export const VERIFY_CHECK_NAME = 'Foundry Verification';
+
+/** Per step. */
+export const VERIFY_STEP_TIMEOUT_MS = 300_000;
 
 export interface VerifyResult {
   command: string;
@@ -14,41 +21,39 @@ export interface VerifyResult {
   duration_ms: number;
 }
 
-export function runVerifyStep(command: string, cwd: string, extraEnv: Record<string, string> = {}): VerifyResult {
-  const start = Date.now();
-  try {
-    const output = execSync(command, {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 300_000, // 5 min per step
-      env: { ...process.env, CI: '1', ...extraEnv },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return {
-      command,
-      success: true,
-      output: output.slice(-5000), // keep tail
-      duration_ms: Date.now() - start,
-    };
-  } catch (err: any) {
-    return {
-      command,
-      success: false,
-      output: ((err.stdout ?? '') + '\n' + (err.stderr ?? '')).trim().slice(-5000),
-      duration_ms: Date.now() - start,
-    };
+export async function runVerifyStep(
+  command: string,
+  cwd: string,
+  extraEnv: Record<string, string> = {},
+  timeoutMs: number = VERIFY_STEP_TIMEOUT_MS,
+): Promise<VerifyResult> {
+  const r = await runCommand(command, {
+    cwd,
+    timeoutMs,
+    env: { ...process.env, CI: '1', ...extraEnv },
+  });
+  if (r.success) {
+    return { command, success: true, output: r.stdout.slice(-5000), duration_ms: r.duration_ms };
   }
+  const combined = (r.stdout + '\n' + r.stderr).trim();
+  const why = r.status === 0 || r.timedOut || r.signal ? `\n[${describeFailure(r, timeoutMs)}]` : '';
+  return {
+    command,
+    success: false,
+    output: (combined + why).slice(-5000),
+    duration_ms: r.duration_ms,
+  };
 }
 
-export function runVerifyPipeline(config: FoundryConfig, cwd: string): {
+export async function runVerifyPipeline(config: FoundryConfig, cwd: string): Promise<{
   passed: boolean;
   results: VerifyResult[];
-} {
+}> {
   const results: VerifyResult[] = [];
   let passed = true;
 
   for (const cmd of config.verify) {
-    const result = runVerifyStep(cmd, cwd);
+    const result = await runVerifyStep(cmd, cwd);
     results.push(result);
     if (!result.success) {
       passed = false;
@@ -59,7 +64,7 @@ export function runVerifyPipeline(config: FoundryConfig, cwd: string): {
   return { passed, results };
 }
 
-export function runIntegrationRebuild(config: FoundryConfig, cwd: string): VerifyResult | null {
+export async function runIntegrationRebuild(config: FoundryConfig, cwd: string): Promise<VerifyResult | null> {
   if (!config.integration_rebuild) return null;
   return runVerifyStep(config.integration_rebuild, cwd);
 }
