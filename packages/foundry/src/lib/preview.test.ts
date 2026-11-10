@@ -1085,7 +1085,8 @@ describe('expiry (preview.ttl_hours)', () => {
     expect(await previewDownTarget(config, { branch: 'b', issue: 12, pr_number: 7, sha: 'abc', preview_url: 'https://pr-7.x' }, 'expired')).toBe(true);
     const body = vi.mocked(github.commentOnPR).mock.calls[0][2];
     expect(body).toContain('**Preview Environment** — Expired');
-    expect(body).toContain('comment `@foundry preview` on issue #12 to bring it back');
+    // Standing alone after the struck-out URL, the hint is a sentence of its own.
+    expect(body).toContain('(expired and torn down). Comment `@foundry preview` on issue #12 to bring it back.');
     expect(previewRecordFromComments([body])).toBeUndefined();
   });
 });

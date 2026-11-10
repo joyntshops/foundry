@@ -165,6 +165,10 @@ foundry reset 42 --force    # preview down, close PR, delete branch, clear the s
 
 Works from any checkout; the task is rebuilt from the issue's claim comment.
 
+## A `foundry` command from a checkout fails with `Integration not found`
+
+The CLI found saved credentials for a self-owned GitHub App under `~/.joynt-foundry/` (`github-app-<org>.json` and `.pem`) and used them, but that App has since been deleted or uninstalled. Saved App credentials take precedence over `GITHUB_TOKEN` and over `gh`, and `FOUNDRY_GITHUB_BACKEND` does not change that. Remove the two files for that organisation and the CLI falls back to your own token. This affects only commands run by hand (`foundry reconcile`, `preview`, `reset`, `review`); the Action never reads that directory.
+
 ## Local files
 
 CLI commands and jobs use `~/.joynt-foundry/` for App credentials (from `setup-bot`), transcripts, and a per-repo state file that is only a cache; deleting it loses nothing that is not on GitHub, except the App credentials.

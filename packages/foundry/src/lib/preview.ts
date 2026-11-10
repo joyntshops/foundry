@@ -219,6 +219,11 @@ function utc(d: Date): string {
   return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
+/** The hint is written to follow "After that:"; standing alone it starts a sentence. */
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export function buildPreviewComment(opts: PreviewCommentOpts): string {
   const { url, state: commentState, sha, expiresAt, hint } = opts;
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
@@ -232,9 +237,9 @@ export function buildPreviewComment(opts: PreviewCommentOpts): string {
       lines.push(`<!-- foundry-preview-expires: ${expiresAt} -->`);
     }
   } else if (commentState === 'expired') {
-    lines.push('**Preview Environment** — Expired', '', `~~${url}~~ (expired and torn down)${hint ? `. ${hint}` : ''}`);
+    lines.push('**Preview Environment** — Expired', '', `~~${url}~~ (expired and torn down)${hint ? `. ${sentence(hint)}` : ''}`);
   } else if (commentState === 'off') {
-    lines.push('**Preview Environment** — Torn down', '', `~~${url}~~ (torn down on request)${hint ? `. ${hint}` : ''}`);
+    lines.push('**Preview Environment** — Torn down', '', `~~${url}~~ (torn down on request)${hint ? `. ${sentence(hint)}` : ''}`);
   } else {
     lines.push('**Preview Environment** — Torn down', '', `~~${url}~~ (inactive)`);
   }
