@@ -30,7 +30,8 @@ describe('runCommand', () => {
     // `sleep` is a child of the shell here (not exec'd: two commands), and
     // holds the stdout pipe open; the whole group must go.
     const start = Date.now();
-    const r = await runCommand('echo started; sleep 30', { timeoutMs: 150 });
+    // A timeout long enough that the shell has started and echoed even on a busy machine.
+    const r = await runCommand('echo started; sleep 30', { timeoutMs: 1000 });
     expect(r.timedOut).toBe(true);
     expect(r.stdout).toBe('started\n');
     expect(Date.now() - start).toBeLessThan(5000);

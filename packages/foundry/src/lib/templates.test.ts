@@ -20,6 +20,16 @@ describe('shipped templates', () => {
     expect(wf.jobs.foundry.steps.map((s: any) => s.uses ?? s.name)).toContain('joyntshops/foundry@v0');
   });
 
+  it('the comment filter lets every command through on issues and only the preview command on pull requests', () => {
+    const wf = parseYaml(readTemplate('foundry.yml'));
+    const filter: string = wf.jobs.foundry.if;
+    expect(filter).toContain("startsWith(github.event.comment.body, '@foundry')");
+    expect(filter).toContain("(!github.event.issue.pull_request || startsWith(github.event.comment.body, '@foundry preview'))");
+    // Still gated on who is commenting, before a runner starts.
+    expect(filter).toContain('github.event.comment.author_association');
+    expect(wf.on.workflow_dispatch.inputs.command.description).toContain('preview');
+  });
+
   it('renders the production branch into the PR filter and leaves no placeholder', () => {
     const out = renderWorkflow(readTemplate('foundry.yml'), { production: 'release' });
     expect(out).toContain("github.event.pull_request.base.ref == 'release'");

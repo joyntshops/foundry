@@ -2,8 +2,9 @@
  * EventHandler — processes FoundryEvent instances.
  *
  * All behavior lives here; `commands/action.ts` is composition only. Humans
- * drive a task with three commands (`go`, `restart`, `stop`); everything
- * else that moves a task is a review, a merge, or the agent finishing.
+ * drive a task with three commands (`go`, `restart`, `stop`) and ask for a
+ * pull request's preview with a fourth (`preview`); everything else that
+ * moves a task is a review, a merge, or the agent finishing.
  */
 import * as github from './github.js';
 import * as git from './git.js';
@@ -27,6 +28,8 @@ import * as review from './review.js';
 import { resolveBackend, resolveBackendForIssue } from '../backends/index.js';
 import * as preview from './preview.js';
 import * as statusComment from './status-comment.js';
+import { issueNumberFromBranch, recoverTask } from './task-recovery.js';
+import type { PullRequestInfo } from './github.js';
 import type { FoundryConfig, TaskState, AgentLaunchParams, AgentOutcome, GitHubIssue } from '../types.js';
 import type {
   FoundryEvent,
@@ -41,6 +44,23 @@ import type {
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 const PREVIEW_VERIFY_MARKER = '<!-- foundry-preview-verify -->';
+/** On Foundry's answers to the preview command, so they never reach the agent as thread context. */
+const PREVIEW_REPLY_MARKER = '<!-- foundry-preview-reply -->';
+
+/** What a preview is deployed for: a pull request's head, and the task behind it when there is one. */
+interface PreviewSubject {
+  pr_number: number;
+  branch: string;
+  sha: string;
+  issue?: number;
+}
+
+function runLogNote(): string {
+  const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
+  return GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
+    ? ` The [run log](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) has the details.`
+    : '';
+}
 
 /** What every non-success ending tells the human. */
 export const FAILED_FOOTER = '`@foundry go` to continue from the branch · `@foundry restart` to start over';
@@ -261,12 +281,25 @@ export class EventHandler {
     const label = `PR #${event.pr_number} (${event.branch} → ${event.base})`;
 
     if (event.action === 'up') {
+      // On demand, an open or a push deploys nothing by itself. A preview
+      // someone asked for and that is still up follows the branch, on the
+      // clock it already has.
+      let expires_at: string | undefined;
+      if (preview.isOnDemand(config)) {
+        const live = await preview.findPreviewOnPR(config.repo, event.pr_number);
+        if (!live || preview.isExpired(live.expiresAt)) {
+          log.info(`Previews are on demand and ${label} has none up. Not deploying.`);
+          return;
+        }
+        expires_at = live.expiresAt;
+      }
       log.info(`Preview up for ${label}`);
       try {
         const result = await preview.previewUpTarget(config, {
           branch: event.branch,
           pr_number: event.pr_number,
           sha: event.sha,
+          expires_at,
         });
         if (!result) {
           log.warn(`No preview URL resolved for ${label}.`);
@@ -300,23 +333,29 @@ export class EventHandler {
   }
 
   /**
-   * Run `verify_preview` for a non-task PR from a throwaway checkout of its
-   * head branch. The result goes on the PR as a comment and, when the token
-   * allows, as a check run on the head SHA.
+   * Run `verify_preview` against a pull request's preview and publish the
+   * result: a comment on the PR and, when the token allows, a check run on
+   * the head SHA. This is the report-only path (a non-task PR, or a preview
+   * asked for on demand); it never changes a task's state. The commands run
+   * in `cwd` when given (the task's worktree, inside an agent job), otherwise
+   * in a throwaway checkout of the head branch. Returns null when the branch
+   * could not be checked out.
    */
-  private async verifyPullRequestPreview(event: PRPreviewEvent, url: string): Promise<void> {
+  private async verifyPullRequestPreview(subject: PreviewSubject, url: string, cwd?: string): Promise<previewVerify.PreviewVerifyOutcome | null> {
     const config = this.config;
-    const label = `PR #${event.pr_number}`;
-    const cwd = path.resolve(this.repoDir, config.worktree_base, `pr-${event.pr_number}`);
+    const label = `PR #${subject.pr_number}`;
+    const throwaway = cwd ? null : path.resolve(this.repoDir, config.worktree_base, `pr-${subject.pr_number}`);
 
-    try {
-      try { git.fetchAll(this.repoDir); } catch {}
-      git.pruneWorktrees(this.repoDir);
-      if (git.worktreeExists(cwd, this.repoDir)) git.removeWorktree(cwd, this.repoDir);
-      git.addWorktreeTracking(cwd, event.branch, this.repoDir);
-    } catch (err: any) {
-      log.warn(`Could not check out ${event.branch} for preview verification of ${label}: ${err.message}`);
-      return;
+    if (throwaway) {
+      try {
+        try { git.fetchAll(this.repoDir); } catch {}
+        git.pruneWorktrees(this.repoDir);
+        if (git.worktreeExists(throwaway, this.repoDir)) git.removeWorktree(throwaway, this.repoDir);
+        git.addWorktreeTracking(throwaway, subject.branch, this.repoDir);
+      } catch (err: any) {
+        log.warn(`Could not check out ${subject.branch} for preview verification of ${label}: ${err.message}`);
+        return null;
+      }
     }
 
     let outcome: previewVerify.PreviewVerifyOutcome;
@@ -324,22 +363,26 @@ export class EventHandler {
       log.info(`Running preview verification for ${label} against ${url}...`);
       outcome = await previewVerify.verifyPreview(config, {
         url,
-        cwd,
-        env: { FOUNDRY_BRANCH: event.branch, FOUNDRY_PR_NUMBER: String(event.pr_number) },
-        sha: event.sha, branch: event.branch, pr_number: event.pr_number,
+        cwd: cwd ?? throwaway!,
+        env: {
+          FOUNDRY_BRANCH: subject.branch,
+          FOUNDRY_PR_NUMBER: String(subject.pr_number),
+          ...(subject.issue !== undefined ? { FOUNDRY_ISSUE: String(subject.issue) } : {}),
+        },
+        sha: subject.sha, branch: subject.branch, pr_number: subject.pr_number,
       });
     } finally {
-      try { git.removeWorktree(cwd, this.repoDir); } catch {}
+      if (throwaway) { try { git.removeWorktree(throwaway, this.repoDir); } catch {} }
     }
 
     (outcome.passed ? log.success : log.error)(`Preview verification ${outcome.passed ? 'passed' : 'failed'} for ${label}.`);
 
     const body = PREVIEW_VERIFY_MARKER + '\n' + previewVerify.formatPreviewVerify(outcome);
     try {
-      const comments = await github.getComments(config.repo, event.pr_number);
+      const comments = await github.getComments(config.repo, subject.pr_number);
       const existing = comments.find(c => c.body.includes(PREVIEW_VERIFY_MARKER));
       if (existing) await github.updateComment(config.repo, existing.id, body);
-      else await github.commentOnPR(config.repo, event.pr_number, body);
+      else await github.commentOnPR(config.repo, subject.pr_number, body);
     } catch (err: any) {
       log.warn(`Could not post preview verification on ${label}: ${err.message}`);
     }
@@ -347,7 +390,7 @@ export class EventHandler {
     try {
       await github.createCheckRun(config.repo, {
         name: 'Foundry Preview Verification',
-        head_sha: event.sha,
+        head_sha: subject.sha,
         status: 'completed',
         conclusion: outcome.passed ? 'success' : 'failure',
         output: {
@@ -358,6 +401,7 @@ export class EventHandler {
     } catch (err: any) {
       log.warn(`Failed to create check run for ${label}: ${err.message}`);
     }
+    return outcome;
   }
 
   // ── Commands ─────────────────────────────────────────────────────────
@@ -370,7 +414,187 @@ export class EventHandler {
         return this.handleCommandRestart(event);
       case 'stop':
         return this.handleCommandStop(event);
+      case 'preview':
+        return this.handleCommandPreview(event);
     }
+  }
+
+  // ── `@foundry preview` / `@foundry preview off` ──────────────────────
+
+  /**
+   * Deploy, or tear down, a pull request's preview because someone with
+   * write access asked. Works whatever `preview.trigger` is: with `auto` it
+   * redeploys or brings back an expired preview, with `on_demand` it is the
+   * only thing that deploys one. Typed on a task's issue, on the task's pull
+   * request, or on a `pull_request_bases` pull request (which has no issue).
+   *
+   * It never changes the task's state and never launches the agent: a
+   * failed verification is reported, and the human decides whether to send
+   * the agent back with `go`.
+   */
+  private async handleCommandPreview(event: CommandEvent): Promise<void> {
+    const config = this.config;
+    const t = config.comment_triggers.preview;
+    const reply = async (body: string): Promise<void> => {
+      try {
+        await github.addComment(config.repo, event.issue, `${PREVIEW_REPLY_MARKER}\n${body}`);
+      } catch (err: any) {
+        log.warn(`Could not reply on #${event.issue}: ${err.message}`);
+      }
+    };
+
+    if (!config.preview) {
+      await reply(`\`${t}\` needs a \`preview\` section in \`.joynt-foundry.yml\`; this repository has none.`);
+      return;
+    }
+    const arg = (event.message ?? '').trim().toLowerCase();
+    if (arg !== '' && arg !== 'off') {
+      await reply(`\`${t}\` deploys the pull request's preview and \`${t} off\` tears it down; \`${event.message}\` is not something it understands.`);
+      return;
+    }
+    const off = arg === 'off';
+
+    // A task's preview can outlive its pull request being open; tearing it
+    // down needs only the task.
+    if (off && event.task) return this.previewOffForTask(event.task, reply);
+
+    const subject = await this.resolvePreviewSubject(event, !off);
+    if ('refusal' in subject) {
+      log.warn(`Preview command on #${event.issue} refused: ${subject.refusal}`);
+      await reply(subject.refusal);
+      return;
+    }
+    const { pr, task } = subject;
+
+    if (off) {
+      if (task) return this.previewOffForTask(task, reply);
+      const live = await preview.findPreviewOnPR(config.repo, pr.number);
+      if (!live) {
+        await reply(`No preview is up for pull request #${pr.number}.`);
+        return;
+      }
+      const ok = await preview.previewDownTarget(config, { branch: pr.head, pr_number: pr.number, sha: pr.sha, preview_url: live.url }, 'off');
+      await reply(ok
+        ? `Preview for pull request #${pr.number} torn down.`
+        : `The down command for pull request #${pr.number}'s preview failed, so it may still be running.${runLogNote()}`);
+      return;
+    }
+
+    const target: PreviewSubject = { pr_number: pr.number, branch: pr.head, sha: pr.sha, issue: task?.issue };
+    log.info(`Preview requested for PR #${pr.number} (${pr.head} @ ${pr.sha.slice(0, 7)}) by ${event.commentAuthor}.`);
+
+    let result: Awaited<ReturnType<typeof preview.previewUpTarget>> = null;
+    try {
+      result = await preview.previewUpTarget(config, target);
+    } catch (err: any) {
+      log.warn(`Preview up failed for PR #${pr.number}: ${err.message}`);
+    }
+    if (!result) {
+      await reply(`The preview for pull request #${pr.number} could not be deployed: no preview URL was produced.${runLogNote()}`);
+      return;
+    }
+    if (task) {
+      state.updateTaskStatus(config.repo, task.issue, task.status, {
+        preview_url: result.url,
+        preview_expires_at: result.expiresAt,
+        preview_pr_number: pr.number,
+      });
+    }
+
+    const lines: string[] = [`Preview for pull request #${pr.number} is up: ${result.url} (commit \`${pr.sha.slice(0, 7)}\`).`];
+    if (previewVerify.isConfigured(config)) {
+      const outcome = await this.verifyPullRequestPreview(target, result.url);
+      if (!outcome) {
+        lines.push(`Preview verification could not run: the branch could not be checked out.${runLogNote()}`);
+      } else if (outcome.passed) {
+        lines.push(`Preview verification passed (${outcome.results.length} check${outcome.results.length === 1 ? '' : 's'}).`);
+      } else {
+        lines.push(task
+          ? `**Preview verification failed**; the output is on pull request #${pr.number}. \`${config.comment_triggers.go} <feedback>\` on issue #${task.issue} sends the agent back to fix it.`
+          : `**Preview verification failed**; the output is on pull request #${pr.number}.`);
+      }
+    }
+    if (result.expiresAt) {
+      lines.push(`It is torn down after ${result.expiresAt.replace('T', ' ').slice(0, 16)} UTC; \`${t}\` again restarts the clock.`);
+    }
+    lines.push(`\`${t} off\` tears it down now.`);
+    await reply(lines.join('\n'));
+    log.success(`Preview for PR #${pr.number} is up at ${result.url}.`);
+  }
+
+  private async previewOffForTask(task: TaskState, reply: (body: string) => Promise<void>): Promise<void> {
+    const config = this.config;
+    if (!task.preview_url) {
+      await reply(`No preview is up for #${task.issue}.`);
+      return;
+    }
+    let ok = false;
+    try {
+      ok = await preview.previewDown(config, task, 'off');
+    } catch (err: any) {
+      log.warn(`Preview down failed for #${task.issue}: ${err.message}`);
+    }
+    if (ok) state.updateTaskStatus(config.repo, task.issue, task.status, { preview_url: undefined, preview_expires_at: undefined });
+    await reply(ok
+      ? `Preview for #${task.issue} torn down. \`${config.comment_triggers.preview}\` brings it back.`
+      : `The down command for #${task.issue}'s preview failed, so it may still be running.${runLogNote()}`);
+  }
+
+  /**
+   * Which pull request a preview command is about, and the task behind it.
+   * The command's number is a task's issue (the task's open PR), or a pull
+   * request: a task's own, found through its branch and confirmed against
+   * the task's claim, or one into a `pull_request_bases` branch. Anything
+   * else, and any pull request from a fork, is refused: this job holds the
+   * repository's credentials and deploys only the repository's own code.
+   */
+  private async resolvePreviewSubject(
+    event: CommandEvent,
+    requireOpen: boolean,
+  ): Promise<{ pr: PullRequestInfo; task: TaskState | null } | { refusal: string }> {
+    const config = this.config;
+    const t = config.comment_triggers.preview;
+    let task = event.task;
+
+    if (task && !task.pr_number) {
+      return { refusal: `There is no open pull request for #${task.issue} yet. A preview is deployed from a pull request, so \`${t}\` works once Foundry has opened one.` };
+    }
+    const prNumber = task?.pr_number ?? event.issue;
+
+    let pr: PullRequestInfo;
+    try {
+      pr = await github.getPR(config.repo, prNumber);
+    } catch {
+      return {
+        refusal: task
+          ? `Pull request #${prNumber} could not be read.${runLogNote()}`
+          : `#${event.issue} is not a Foundry task with an open pull request, and not a pull request. \`${t}\` goes on a task's issue or on a pull request.`,
+      };
+    }
+    if (requireOpen && !pr.open) {
+      return { refusal: `Pull request #${pr.number} is closed; there is nothing to preview.` };
+    }
+    if (pr.head_repo.toLowerCase() !== config.repo.toLowerCase()) {
+      return { refusal: `Pull request #${pr.number} comes from ${pr.head_repo ? `the fork \`${pr.head_repo}\`` : 'a repository that no longer exists'}. Foundry only deploys previews of branches in this repository.` };
+    }
+
+    if (!task) {
+      const issueNumber = issueNumberFromBranch(config.branch_template, pr.head);
+      if (issueNumber !== null) {
+        let candidate = state.getAllTasks(config.repo).find(x => x.issue === issueNumber) ?? null;
+        if (!candidate) {
+          try { candidate = await recoverTask(config, this.repoDir, issueNumber); } catch {}
+        }
+        if (candidate && candidate.branch === pr.head) {
+          task = { ...candidate, pr_number: candidate.pr_number ?? pr.number };
+          state.upsertTask(config.repo, task);
+        }
+      }
+      if (!task && !(config.preview?.pull_request_bases ?? []).includes(pr.base)) {
+        return { refusal: `Pull request #${pr.number} is not a Foundry task's pull request and \`${pr.base}\` is not listed in \`preview.pull_request_bases\`, so it has no preview.` };
+      }
+    }
+    return { pr, task };
   }
 
   /**
@@ -693,10 +917,15 @@ export class EventHandler {
     const config = this.config;
     const fresh = () => state.getAllTasks(config.repo).find(t => t.issue === task.issue) ?? task;
 
-    await triggerPreviewUp(config, task);
+    // On demand, the PR is ready on `verify` alone: nothing is deployed and
+    // `verify_preview` gates nothing. A preview someone asked for and that is
+    // still up follows the branch instead.
+    const onDemand = Boolean(config.preview) && preview.isOnDemand(config);
+    if (onDemand) await this.redeployLivePreview(fresh());
+    else await triggerPreviewUp(config, task);
 
     let verified: previewVerify.PreviewVerifyOutcome | null = null;
-    if (previewVerify.isConfigured(config)) {
+    if (!onDemand && previewVerify.isConfigured(config)) {
       const current = fresh();
       if (!current.preview_url) {
         verified = {
@@ -740,11 +969,38 @@ export class EventHandler {
       message: [
         message,
         verified ? `Preview verification passed (${verified.results.length} check${verified.results.length === 1 ? '' : 's'}).` : null,
+        onDemand ? `Previews are on demand: comment \`${config.comment_triggers.preview}\` on this issue to deploy this pull request, \`${config.comment_triggers.preview} off\` to tear it down.` : null,
         '',
         'Foundry is watching this PR. Submit a review with **Request changes**, or comment `@foundry go <feedback>` on this issue.',
       ].filter(l => l !== null).join('\n'),
       historyEntry: verified ? `${historyEntry}, preview verified` : historyEntry,
     });
+  }
+
+  /**
+   * `preview.trigger: on_demand`, after an agent round: when a preview is up
+   * for this task's PR, deploy the new head to it and report
+   * `verify_preview` on the PR. The expiry it already has is kept; only an
+   * explicit `preview` command restarts the clock. Never fails the task.
+   */
+  private async redeployLivePreview(task: TaskState): Promise<void> {
+    const config = this.config;
+    if (!config.preview || !task.preview_url || !task.pr_number) return;
+    if (preview.isExpired(task.preview_expires_at)) return;
+    try {
+      const sha = git.headSha(task.worktree);
+      const subject: PreviewSubject = { pr_number: task.pr_number, branch: task.branch, sha, issue: task.issue };
+      log.info(`A preview is up for #${task.issue}; deploying ${sha.slice(0, 7)} to it.`);
+      const result = await preview.previewUpTarget(config, { ...subject, expires_at: task.preview_expires_at });
+      if (!result) {
+        log.warn(`Preview redeploy for #${task.issue} produced no URL.`);
+        return;
+      }
+      state.updateTaskStatus(config.repo, task.issue, task.status, { preview_url: result.url, preview_expires_at: result.expiresAt });
+      if (previewVerify.isConfigured(config)) await this.verifyPullRequestPreview(subject, result.url, task.worktree);
+    } catch (err: any) {
+      log.warn(`Preview redeploy failed for #${task.issue}: ${err.message}`);
+    }
   }
 
   /**

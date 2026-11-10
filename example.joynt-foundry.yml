@@ -44,10 +44,11 @@ verify:
 integration_rebuild: "npm run build"
 
 # ── Comment commands (defaults shown) ─────────────────────────────────
-comment_triggers:                 # the only comments that start or stop work
+comment_triggers:                 # the only comments that make Foundry act
   go: "@foundry go"               # start, or proceed from the branch with the whole thread
   restart: "@foundry restart"     # discard the branch, start over
   stop: "@foundry stop"           # stop the agent, keep the branch
+  preview: "@foundry preview"     # deploy the open PR's preview; "@foundry preview off" tears it down
 
 # ── Unified versioning ────────────────────────────────────────────────
 # Every file that shares one version. First entry is the primary.
@@ -98,6 +99,8 @@ agent_label_map:
 #   up_command:   "gh workflow run preview-up.yml -f pr={pr_number} -f sha={sha} -f branch={branch}"
 #   down_command: "gh workflow run preview-down.yml -f pr={pr_number}"
 #   comment: true
+#   trigger: "auto"                # "on_demand" = deploy only when someone comments `@foundry preview`
+#   ttl_hours: 4                   # tear previews down after this long (the scheduled run does it)
 
 # GitHub Deployment records for previews (optional; needs deployments: write).
 # github_deployments:

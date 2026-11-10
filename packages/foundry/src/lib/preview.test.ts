@@ -37,7 +37,10 @@ vi.mock('./log.js', () => ({
   warn: vi.fn(),
 }));
 
-import { previewUp, previewDown, getPreviewStatus, previewUpTarget, previewDownTarget, findPreviewUrlOnPR, providerCommandTimeoutMs } from './preview.js';
+import {
+  previewUp, previewDown, getPreviewStatus, previewUpTarget, previewDownTarget, findPreviewUrlOnPR, providerCommandTimeoutMs,
+  previewRecordFromComments, buildPreviewComment, expiryFor, isExpired, isOnDemand,
+} from './preview.js';
 import * as github from './github.js';
 import * as state from './state.js';
 import * as deployments from './deployments.js';
@@ -66,6 +69,7 @@ function makeConfig(overrides: Partial<FoundryConfig> = {}): FoundryConfig {
       go: '@foundry go',
       restart: '@foundry restart',
       stop: '@foundry stop',
+      preview: '@foundry preview',
     },
     version_sources: ['package.json'],
     tag_prefix: 'v',
@@ -970,5 +974,118 @@ describe('previews for pull requests that are not tasks', () => {
       { id: 2, body: '<!-- foundry-preview -->\n**Preview Environment** — Live\n\nPreview URL: https://pr-7.x\n', user: { login: 'b' }, created_at: '' },
     ] as any);
     expect(await findPreviewUrlOnPR('acme/webapp', 7)).toBe('https://pr-7.x');
+  });
+});
+
+describe('expiry (preview.ttl_hours)', () => {
+  const NOW = new Date('2026-11-10T12:00:00.000Z');
+
+  it('expiryFor adds ttl_hours, and is undefined without one', () => {
+    expect(expiryFor(makeConfig({ preview: { mode: 'template', ttl_hours: 4 } }), NOW)).toBe('2026-11-10T16:00:00.000Z');
+    expect(expiryFor(makeConfig({ preview: { mode: 'template', ttl_hours: 0.5 } }), NOW)).toBe('2026-11-10T12:30:00.000Z');
+    expect(expiryFor(makeConfig({ preview: { mode: 'template' } }), NOW)).toBeUndefined();
+    expect(expiryFor(makeConfig({ preview: { mode: 'template', ttl_hours: 0 } }), NOW)).toBeUndefined();
+    expect(expiryFor(makeConfig(), NOW)).toBeUndefined();
+  });
+
+  it('isExpired compares against now; no expiry never expires', () => {
+    expect(isExpired('2026-11-10T11:59:59.000Z', NOW)).toBe(true);
+    expect(isExpired('2026-11-10T12:00:01.000Z', NOW)).toBe(false);
+    expect(isExpired(undefined, NOW)).toBe(false);
+    expect(isExpired('not a date', NOW)).toBe(false);
+  });
+
+  it('isOnDemand reads preview.trigger, default auto', () => {
+    expect(isOnDemand(makeConfig({ preview: { mode: 'template', trigger: 'on_demand' } }))).toBe(true);
+    expect(isOnDemand(makeConfig({ preview: { mode: 'template', trigger: 'auto' } }))).toBe(false);
+    expect(isOnDemand(makeConfig({ preview: { mode: 'template' } }))).toBe(false);
+    expect(isOnDemand(makeConfig())).toBe(false);
+  });
+
+  it('a live comment carries the commit and the expiry, and reads back as a record', () => {
+    const body = buildPreviewComment({ url: 'https://pr-9.x', state: 'active', sha: 'cafe1234cafe', expiresAt: '2026-11-10T16:00:00.000Z', hint: 'comment `@foundry preview` on issue #7 to bring it back.' });
+    expect(body).toContain('Preview URL: https://pr-9.x');
+    expect(body).toContain('Commit: `cafe123`');
+    expect(body).toContain('Expires: 2026-11-10 16:00 UTC. After that: comment `@foundry preview` on issue #7');
+    expect(previewRecordFromComments(['unrelated', body])).toEqual({ url: 'https://pr-9.x', expiresAt: '2026-11-10T16:00:00.000Z' });
+  });
+
+  it('a comment without an expiry reads back without one (previews posted before ttl_hours existed)', () => {
+    expect(previewRecordFromComments(['<!-- foundry-preview -->\n**Preview Environment** — Live\n\nPreview URL: https://old.x\n'])).toEqual({ url: 'https://old.x' });
+  });
+
+  it('expired, torn-down and off comments carry no URL line, so nothing reads back as live', () => {
+    for (const state of ['expired', 'off', 'closed'] as const) {
+      const body = buildPreviewComment({ url: 'https://pr-9.x', state, hint: 'comment `@foundry preview` on issue #7 to bring it back.' });
+      expect(previewRecordFromComments([body])).toBeUndefined();
+      expect(body).toContain('~~https://pr-9.x~~');
+    }
+    expect(buildPreviewComment({ url: 'u', state: 'expired', hint: 'H' })).toContain('**Preview Environment** — Expired');
+    expect(buildPreviewComment({ url: 'u', state: 'expired', hint: 'H' })).toContain('H');
+    // A preview taken down because its PR closed offers no way back: there is nothing to preview.
+    expect(buildPreviewComment({ url: 'u', state: 'closed' })).toContain('(inactive)');
+  });
+
+  it('previewUp stamps the comment with the expiry and records it on the task', async () => {
+    mockExecWithSha();
+    const config = makeConfig({ preview: { mode: 'template', url_template: 'https://pr-{pr_number}.x', ttl_hours: 4 } });
+    const before = Date.now();
+    await previewUp(config, makeTask());
+
+    const body = vi.mocked(github.commentOnPR).mock.calls[0][2];
+    const record = previewRecordFromComments([body])!;
+    expect(record.url).toBe('https://pr-99.x');
+    const ms = Date.parse(record.expiresAt!) - before;
+    expect(ms).toBeGreaterThanOrEqual(4 * 3_600_000 - 1000);
+    expect(ms).toBeLessThan(4 * 3_600_000 + 60_000);
+    expect(body).toContain('comment `@foundry preview` on issue #42 to bring it back');
+    expect(state.updateTaskStatus).toHaveBeenCalledWith('acme/webapp', 42, 'pr-open', expect.objectContaining({ preview_url: 'https://pr-99.x', preview_expires_at: record.expiresAt }));
+  });
+
+  it('without ttl_hours the comment has no expiry', async () => {
+    mockExecWithSha();
+    await previewUp(makeConfig({ preview: { mode: 'template', url_template: 'https://pr-{pr_number}.x' } }), makeTask());
+    const body = vi.mocked(github.commentOnPR).mock.calls[0][2];
+    expect(body).not.toContain('Expires');
+    expect(previewRecordFromComments([body])).toEqual({ url: 'https://pr-99.x' });
+  });
+
+  it('a redeploy that passes expires_at keeps that clock', async () => {
+    mockExecWithSha();
+    const config = makeConfig({ preview: { mode: 'template', url_template: 'https://pr-{pr_number}.x', ttl_hours: 4 } });
+    const result = await previewUpTarget(config, { branch: 'b', pr_number: 7, sha: 'abc', expires_at: '2026-11-10T13:00:00.000Z' });
+    expect(result!.expiresAt).toBe('2026-11-10T13:00:00.000Z');
+    expect(previewRecordFromComments([vi.mocked(github.commentOnPR).mock.calls[0][2]])!.expiresAt).toBe('2026-11-10T13:00:00.000Z');
+  });
+
+  it('a non-task pull request is told how to bring its preview back without an issue', async () => {
+    mockExecWithSha();
+    const config = makeConfig({ preview: { mode: 'template', url_template: 'https://pr-{pr_number}.x', ttl_hours: 1 } });
+    await previewUpTarget(config, { branch: 'integration', pr_number: 7, sha: 'abc' });
+    expect(vi.mocked(github.commentOnPR).mock.calls[0][2]).toContain('`issue=7` and `command=preview`');
+  });
+
+  it('previewDownTarget reports a failed down command; an expired preview then keeps its live comment for the next run', async () => {
+    mockExecWithSha(() => { throw new Error('boom'); });
+    const config = makeConfig({ preview: { mode: 'provider', down_command: 'destroy' } });
+    const target = { branch: 'b', pr_number: 7, sha: 'abc', preview_url: 'https://pr-7.x' };
+
+    expect(await previewDownTarget(config, target, 'expired')).toBe(false);
+    expect(github.commentOnPR).not.toHaveBeenCalled();
+    expect(github.updateComment).not.toHaveBeenCalled();
+
+    // On request and on close the comment is still updated; the caller reports the failure.
+    expect(await previewDownTarget(config, target, 'off')).toBe(false);
+    expect(vi.mocked(github.commentOnPR).mock.calls[0][2]).toContain('torn down on request');
+  });
+
+  it('previewDownTarget marks an expired preview as expired when the down command succeeds', async () => {
+    mockExecWithSha('');
+    const config = makeConfig({ preview: { mode: 'provider', down_command: 'destroy' } });
+    expect(await previewDownTarget(config, { branch: 'b', issue: 12, pr_number: 7, sha: 'abc', preview_url: 'https://pr-7.x' }, 'expired')).toBe(true);
+    const body = vi.mocked(github.commentOnPR).mock.calls[0][2];
+    expect(body).toContain('**Preview Environment** — Expired');
+    expect(body).toContain('comment `@foundry preview` on issue #12 to bring it back');
+    expect(previewRecordFromComments([body])).toBeUndefined();
   });
 });

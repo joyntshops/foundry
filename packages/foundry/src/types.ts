@@ -62,14 +62,17 @@ export interface FoundryConfig {
   integration_rebuild: string;          // e.g. "npm run build"
 
   /**
-   * The three commands, the only comments that start or stop work. Every
-   * other comment is context: it reaches the agent through the issue file
-   * on the next launch, and never starts a job.
+   * The commands, the only comments that make Foundry act. `go`, `restart`
+   * and `stop` start or stop the agent; `preview` deploys the open PR's
+   * preview and `<preview> off` tears it down. Every other comment is
+   * context: it reaches the agent through the issue file on the next
+   * launch, and never starts a job.
    */
   comment_triggers: {
     go: string;                         // default "@foundry go"
     restart: string;                    // default "@foundry restart"
     stop: string;                       // default "@foundry stop"
+    preview: string;                    // default "@foundry preview"; followed by " off" to tear down
   };
 
   version_sources: string[];            // ordered list of version file paths (package.json, Cargo.toml, pyproject.toml)
@@ -88,6 +91,21 @@ export interface FoundryConfig {
     up_command?: string;
     down_command?: string;
     comment?: boolean;
+    /**
+     * When a preview is deployed. `auto` (default): when the PR opens and
+     * after every agent round, and `verify_preview` gates ready-for-review.
+     * `on_demand`: only when someone with write access asks with the
+     * `preview` command; a task is ready for review on `verify` alone. For
+     * previews that cost money while they are up.
+     */
+    trigger?: 'auto' | 'on_demand';
+    /**
+     * Tear a preview down this many hours after it was deployed. The
+     * scheduled reconcile run does it, so the real lifetime is rounded up to
+     * the workflow's `schedule:` interval. Unset: previews live until the PR
+     * closes.
+     */
+    ttl_hours?: number;
     /**
      * Also preview any pull request whose base branch is listed here, task or
      * not: up on open/reopen, redeploy on push, down on close. For the
@@ -162,6 +180,8 @@ export interface TaskState {
   /** The issue body at claim time; written to FOUNDRY_ISSUE_FILE on every launch. */
   issue_body?: string;
   preview_url?: string;
+  /** ISO time after which the preview is reaped (preview.ttl_hours); read back from the preview comment. */
+  preview_expires_at?: string;
   deployment_id?: number;
   /**
    * The PR whose comment records the preview. Kept apart from pr_number

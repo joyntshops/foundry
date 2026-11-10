@@ -101,7 +101,8 @@ export function runCommand(command: string, opts: RunCommandOpts): Promise<RunCo
     });
     // 'close' waits for the pipes, which a surviving grandchild can hold
     // open; after a timeout the shell's exit is the end of it.
-    child.on('exit', (status, signal) => { if (timedOut) finish(status, signal); });
+    // Give output already in the pipes a moment to be read first.
+    child.on('exit', (status, signal) => { if (timedOut) setTimeout(() => finish(status, signal), 50); });
     child.on('close', (status, signal) => finish(status, signal));
   });
 }

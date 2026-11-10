@@ -80,7 +80,7 @@ Start here:
 - [Overview](docs/foundry/overview.md): what Foundry does, what it does not, and the security model
 - [Onboarding](docs/foundry/onboarding.md): get a repo running
 - [Writing a task](docs/foundry/writing-a-task.md): what the agent sees and how to brief it
-- [Workflows](docs/foundry/workflows.md): the three commands and how to steer a task
+- [Workflows](docs/foundry/workflows.md): the commands and how to steer a task
 
 Reference:
 

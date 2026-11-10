@@ -4,7 +4,7 @@
  * Extracted from the original github.ts. All `gh` calls go through this class.
  */
 import { execFileSync } from 'node:child_process';
-import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts } from './github-client.js';
+import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts, PullRequestInfo } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
 
 function gh(args: string[], cwd?: string): string {
@@ -148,6 +148,25 @@ export class GhCliClient implements GitHubClient {
     ]);
     const data = JSON.parse(raw);
     return data.headRefName;
+  }
+
+  async getPR(repo: string, pr: number): Promise<PullRequestInfo> {
+    const raw = gh([
+      'pr', 'view', String(pr),
+      '--repo', repo,
+      '--json', 'number,state,headRefName,baseRefName,headRefOid,headRepository,headRepositoryOwner',
+    ]);
+    const d = JSON.parse(raw);
+    const owner = d.headRepositoryOwner?.login;
+    const name = d.headRepository?.name;
+    return {
+      number: d.number,
+      open: /^open$/i.test(d.state ?? ''),
+      head: d.headRefName,
+      base: d.baseRefName,
+      sha: d.headRefOid,
+      head_repo: owner && name ? `${owner}/${name}` : '',
+    };
   }
 
   async mergePR(repo: string, pr: string | number, method: 'merge' | 'rebase' | 'squash' = 'merge'): Promise<void> {

@@ -1,18 +1,19 @@
 # Workflows
 
-Everything on this page is driven from GitHub. Three comments start or stop work, reviews send it back, approvals merge it. Each of those is an event, and each event is one Actions job.
+Everything on this page is driven from GitHub. Three comments start or stop work, a fourth asks for a preview, reviews send it back, approvals merge it. Each of those is an event, and each event is one Actions job.
 
 `integration` and `main` throughout mean the branches named under `branches:` in `.joynt-foundry.yml`; a repo keeps whatever names it deploys from.
 
-## The three commands
+## The commands
 
-Humans act on a task with exactly three comments on its **issue**:
+Humans act on a task with four comments on its **issue**. Three drive the agent; the fourth asks for the pull request's preview:
 
 | Command | What it does |
 |---|---|
 | `@foundry go [message]` | Start the issue if it has never been started. Otherwise proceed from the branch: this is how you answer a question, approve or revise a plan, send a PR back with feedback, or pick a failed task up again. |
 | `@foundry restart` | Discard the branch and start the issue over from scratch, in the same job. |
 | `@foundry stop` | Stop the agent. The branch stays, the task is marked failed, and `@foundry go` continues it. |
+| `@foundry preview` | Deploy the open pull request's preview, verify it, and post the URL. `@foundry preview off` tears it down. It never changes the task's state and never starts the agent. See [On-demand previews](preview-environments.md#on-demand-previews). |
 
 The message can be on the same line as `go` or start on the next line. Multiline messages are fine:
 
@@ -62,8 +63,8 @@ Anyone who can comment can type `@foundry go`, and on a public repository that i
 
 ### Where to comment
 
-- **Issue comments** work for all three commands.
-- **PR comments** do not: a comment on the PR carries the PR number, not the issue number, and is ignored. Comment on the issue. Formal reviews with **Request changes** on the PR do work.
+- **Issue comments** work for every command.
+- **PR comments** work for `@foundry preview` and `@foundry preview off` only, because a preview belongs to a pull request. `go`, `restart` and `stop` on a PR are ignored: comment on the issue. Formal reviews with **Request changes** on the PR do work. A workflow file written before the preview command existed ignores every PR comment until [one line of it is changed](preview-environments.md#asking-from-the-pull-request).
 
 ## A task, start to finish
 

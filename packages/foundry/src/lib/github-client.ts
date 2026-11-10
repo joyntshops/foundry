@@ -57,6 +57,19 @@ export interface UpdateCheckRunOpts {
 
 // ── GitHubClient interface ───────────────────────────────────────────────
 
+export interface PullRequestInfo {
+  number: number;
+  open: boolean;
+  /** Head branch name. */
+  head: string;
+  /** Base branch name. */
+  base: string;
+  /** Head commit. */
+  sha: string;
+  /** `owner/name` of the repository the head branch lives in; differs from the base repository for a fork. */
+  head_repo: string;
+}
+
 export interface GitHubClient {
   // Issues
   listIssuesByLabel(repo: string, label: string): Promise<GitHubIssue[]>;
@@ -81,6 +94,8 @@ export interface GitHubClient {
   updatePRBody(repo: string, pr: string | number, body: string): Promise<void>;
   getPRStatus(repo: string, branch: string): Promise<{ state: string; url: string } | null>;
   getPRBranch(repo: string, pr: string | number): Promise<string>;
+  /** One pull request by number. Throws when the number is not a pull request. */
+  getPR(repo: string, pr: number): Promise<PullRequestInfo>;
   mergePR(repo: string, pr: string | number, method?: 'merge' | 'rebase' | 'squash'): Promise<void>;
   isPRMergeable(repo: string, pr: string | number): Promise<boolean>;
   /** Tri-state: GitHub computes mergeability lazily after the base changes. */

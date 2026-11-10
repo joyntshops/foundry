@@ -39,6 +39,7 @@ const DEFAULTS: FoundryConfig = {
     go: '@foundry go',
     restart: '@foundry restart',
     stop: '@foundry stop',
+    preview: '@foundry preview',
   },
   version_sources: [],
   tag_prefix: 'v',

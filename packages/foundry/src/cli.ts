@@ -105,12 +105,16 @@ program
 
 program
   .command('reconcile')
-  .description('Mark in-progress issues with no live run as failed (also runs on the schedule trigger)')
+  .description('Mark in-progress issues with no live run as failed and tear down expired previews (also runs on the schedule trigger)')
   .action(async () => {
     const { loadConfig, getConfigDir } = await import('./config.js');
     const { reconcile } = await import('./lib/reconcile.js');
-    const changed = await reconcile(loadConfig(), getConfigDir());
+    const { reapExpiredPreviews } = await import('./lib/preview-reaper.js');
+    const config = loadConfig();
+    const changed = await reconcile(config, getConfigDir());
     console.log(`${changed.length} issue(s) marked failed.`);
+    const reaped = await reapExpiredPreviews(config, getConfigDir());
+    console.log(`${reaped.filter(r => r.tornDown).length} expired preview(s) torn down.`);
   });
 
 // ── Operate on a task from any checkout ───────────────────────────────

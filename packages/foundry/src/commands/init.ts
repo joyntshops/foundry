@@ -116,6 +116,7 @@ const DEFAULT_CONFIG = {
     go: '@foundry go',
     restart: '@foundry restart',
     stop: '@foundry stop',
+    preview: '@foundry preview',
   },
   version_sources: [] as string[],
   tag_prefix: 'v',

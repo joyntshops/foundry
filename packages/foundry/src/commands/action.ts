@@ -55,6 +55,9 @@ export async function runAction(opts: ActionOptions): Promise<void> {
     const { reconcile } = await import('../lib/reconcile.js');
     const changed = await reconcile(config, repoDir);
     log.info(`Reconcile: ${changed.length} issue(s) marked failed.`);
+    const { reapExpiredPreviews } = await import('../lib/preview-reaper.js');
+    const reaped = await reapExpiredPreviews(config, repoDir);
+    if (reaped.length > 0) log.info(`Preview expiry: ${reaped.filter(r => r.tornDown).length} of ${reaped.length} expired preview(s) torn down.`);
     return;
   }
 
