@@ -49,7 +49,7 @@ describe('reapExpiredPreviews', () => {
     expect(updates[0].args[1]).toBe(901);
     const body: string = updates[0].args[2];
     expect(body).toContain('**Preview Environment** — Expired');
-    expect(body).toContain('comment `@foundry preview` on issue #7 to bring it back');
+    expect(body).toContain('Comment `@foundry preview` on issue #7 to bring it back');
     // Nothing reads back as live, so the next run leaves it alone and a respawn starts clean.
     expect(previewRecordFromComments([body])).toBeUndefined();
   });
@@ -67,7 +67,7 @@ describe('reapExpiredPreviews', () => {
     mock.commentsByNumber[40] = [live(940, 'https://pr-40.x', PAST)];
     const reaped = await reapExpiredPreviews(config('true', { pull_request_bases: ['main'] }), '/w', NOW);
     expect(reaped).toEqual([expect.objectContaining({ pr_number: 40, tornDown: true })]);
-    expect(mock.getCalls('updateComment')[0].args[2]).toContain('`issue=40` and `command=preview`');
+    expect(mock.getCalls('updateComment')[0].args[2]).toContain('Run the Foundry workflow with `issue=40` and `command=preview`');
   });
 
   it('does nothing without a preview section, with no open pull requests, or when nothing has expired', async () => {
