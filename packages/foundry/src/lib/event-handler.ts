@@ -112,8 +112,39 @@ export function buildPRBody(task: TaskState, outcome?: AgentOutcome): string {
       parts.push('## Assumptions', '', ...report.assumptions.map(a => `- ${a}`), '');
     }
   }
-  parts.push('---', `Opened by Foundry (${task.agent_backend}). Request changes on this PR, or comment \`@foundry go <feedback>\` on the issue, to send the agent back to work.`);
+  parts.push(PR_FOOTER_MARKER, '---', `Opened by Foundry (${task.agent_backend}). Request changes on this PR, or comment \`@foundry go <feedback>\` on the issue, to send the agent back to work.`);
   return parts.join('\n');
+}
+
+/** Before Foundry's footer in a PR description, so later rounds can add their note above it. */
+const PR_FOOTER_MARKER = '<!-- foundry-pr-footer -->';
+/** The footer of descriptions written before the marker existed. */
+const LEGACY_PR_FOOTER = '\n---\nOpened by Foundry (';
+
+/**
+ * A later round's note, added to the PR description that is already there.
+ * The description is never rebuilt: by the second round it may hold the
+ * first round's full account, steps for the reviewer, or text a person
+ * edited in, and a rebase round's two-line summary must not replace that.
+ * The note goes above Foundry's footer when there is one, at the end
+ * otherwise. Without a report there is nothing to add.
+ */
+export function appendPRUpdate(body: string, task: TaskState, outcome: AgentOutcome | undefined, now: Date = new Date()): string {
+  const report = outcome?.report;
+  if (!report) return body;
+  if (body.trim() === '') return buildPRBody(task, outcome);
+
+  const when = now.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  const note = [`### Update, ${when}`, '', report.summary, ''];
+  if (report.assumptions && report.assumptions.length > 0) {
+    note.push('Assumptions:', '', ...report.assumptions.map(a => `- ${a}`), '');
+  }
+
+  const marker = body.lastIndexOf(PR_FOOTER_MARKER);
+  const legacy = marker === -1 ? body.lastIndexOf(LEGACY_PR_FOOTER) : -1;
+  const at = marker !== -1 ? marker : legacy !== -1 ? legacy + 1 : -1;
+  if (at === -1) return `${body.replace(/\s+$/, '')}\n\n${note.join('\n')}`.replace(/\s+$/, '') + '\n';
+  return `${body.slice(0, at).replace(/\s+$/, '')}\n\n${note.join('\n')}\n${body.slice(at)}`;
 }
 
 function resolvePermissionMode(issueLabels: string[], config: FoundryConfig): string {
@@ -267,7 +298,7 @@ export class EventHandler {
     // (GITHUB_TOKEN), so complete the lifecycle here. Both paths are
     // idempotent if it does arrive.
     if (event.task) {
-      await this.handlePRMerged({ type: 'pr_merged', task: event.task, base: event.base });
+      await this.handlePRMerged({ type: 'pr_merged', task: event.task, base: event.base, pr_number: event.pr_number });
     } else {
       await this.handlePRPreview({ type: 'pr_preview', action: 'down', pr_number: event.pr_number, branch: event.branch, base: event.base, sha: outcome.sha });
       await stalePRs.handleStalePRs(config, event.base, event.pr_number);
@@ -817,6 +848,15 @@ export class EventHandler {
     const config = this.config;
     const repoDir = this.repoDir;
 
+    // When Foundry merged the PR itself, the approval job has already done
+    // all of this, and `pull_request.closed` still arrives when the merge was
+    // made with an App token. Doing it twice sent the agent to every
+    // conflicting sibling PR twice.
+    if (task.status === 'done') {
+      log.info(`#${task.issue} is already done (completed by the job that merged its PR). Nothing to do.`);
+      return;
+    }
+
     log.success(`PR for #${task.issue} has been merged. Completing task.`);
 
     await triggerPreviewDown(config, task);
@@ -831,7 +871,7 @@ export class EventHandler {
     log.success(`Auto-cleaned resources for #${task.issue}.`);
 
     // integration moved: any sibling PR that now conflicts gets its agent back.
-    await stalePRs.handleStalePRs(config, event.base ?? integrationBranch(config), task.pr_number);
+    await stalePRs.handleStalePRs(config, event.base ?? integrationBranch(config), event.pr_number ?? task.pr_number);
   }
 
   // ── PR Review ────────────────────────────────────────────────────────
@@ -1074,12 +1114,17 @@ export class EventHandler {
 
       if (task.pr_url) {
         log.success(`PR already exists for #${task.issue}: ${task.pr_url}`);
-        // The description is the reviewer's summary of what the branch now
-        // holds; after a resumed run it must describe this run, not the first.
+        // The description stays; this round's report is added to it. A round
+        // that ended on the commit it started from (a rebase with nothing to
+        // rebase) changed nothing a reviewer needs to hear about.
         const prNumber = task.pr_number ?? github.extractPRNumber(task.pr_url);
-        if (prNumber) {
+        if (prNumber && task.round_start_sha && task.round_start_sha === headSha) {
+          log.info(`This round added no commits; the description of PR #${prNumber} is unchanged.`);
+        } else if (prNumber) {
           try {
-            await github.updatePRBody(config.repo, prNumber, buildPRBody(task, outcome));
+            const current = await github.getPR(config.repo, prNumber);
+            const next = appendPRUpdate(current.body, task, outcome);
+            if (next !== current.body) await github.updatePRBody(config.repo, prNumber, next);
           } catch (err: any) {
             log.warn(`Could not update the PR description for #${task.issue}: ${err.message}`);
           }
@@ -1262,6 +1307,10 @@ export class EventHandler {
   private async relaunch(task: TaskState, humanText: string, kind: ResumeKind): Promise<void> {
     const config = this.config;
     ensureWorktree(this.config, task, this.repoDir);
+    // Where the branch stands before the agent touches it; completion
+    // compares against it to tell a round that added nothing.
+    let roundStartSha: string | undefined;
+    try { roundStartSha = git.headSha(task.worktree) || undefined; } catch {}
 
     await setStateLabel(config, task.issue, 'in_progress');
 
@@ -1298,6 +1347,7 @@ export class EventHandler {
 
     state.updateTaskStatus(config.repo, task.issue, 'agent-running', {
       permission_mode: '--dangerously-skip-permissions',
+      round_start_sha: roundStartSha,
     });
     log.success(`Relaunched agent for #${task.issue} in ${task.tmux_session} (${kind})`);
   }

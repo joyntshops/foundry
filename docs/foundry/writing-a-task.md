@@ -43,4 +43,4 @@ Two habits pay off:
 
 ## Reading the result
 
-The PR description is the agent's own report: what it did, and the assumptions it made without asking. Read the assumptions first; they are where a brief was ambiguous. The issue's status comment records each transition with the run's cost, turns, and duration.
+The PR description is the agent's own report: what it did, and the assumptions it made without asking. Read the assumptions first; they are where a brief was ambiguous. Later rounds never replace it: each round that adds commits appends a dated **Update** with that round's report, above Foundry's footer, and anything you edit into the description yourself stays. A round that adds no commits leaves it untouched. The issue's status comment records each transition with the run's cost, turns, and duration.

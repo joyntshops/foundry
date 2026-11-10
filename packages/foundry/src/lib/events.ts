@@ -53,6 +53,8 @@ export interface PRMergedEvent {
   task: TaskState;
   /** Base branch the PR merged into. */
   base?: string;
+  /** The merged PR. The recovered task no longer carries it: only an open PR is the task's PR. */
+  pr_number?: number;
 }
 
 export interface PRReviewEvent {

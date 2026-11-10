@@ -195,7 +195,7 @@ function mapPullRequestClosed(
   // A task's PR: completion on merge; a close without merge is a human
   // decision Foundry leaves alone.
   const task = state.getAllTasks(repo).find(t => t.branch === branch);
-  if (task) return pr.merged ? [{ type: 'pr_merged', task, base: pr.base?.ref }] : [];
+  if (task) return pr.merged ? [{ type: 'pr_merged', task, base: pr.base?.ref, pr_number: pr.number }] : [];
 
   // Any other PR with a listed base: its preview comes down, merged or not.
   return mapPullRequestPreview(payload, config, 'down');

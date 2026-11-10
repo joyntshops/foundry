@@ -68,6 +68,8 @@ export interface PullRequestInfo {
   sha: string;
   /** `owner/name` of the repository the head branch lives in; differs from the base repository for a fork. */
   head_repo: string;
+  /** The description as it stands, including anything a person edited in. */
+  body: string;
 }
 
 export interface GitHubClient {

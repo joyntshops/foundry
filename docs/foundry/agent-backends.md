@@ -17,7 +17,7 @@ Foundry never reads an agent's prose to decide what happens next. The agent ends
 | Field | |
 |---|---|
 | `status` | `done` · `needs_input` · `plan_ready` · `blocked` |
-| `summary` | What was done or why it stopped. Becomes the PR description. |
+| `summary` | What was done or why it stopped. Becomes the PR description on the first round and an appended update on later ones. |
 | `assumptions[]` | Decisions made without asking. Listed in the PR for the reviewer. |
 | `questions[]` | For `needs_input`: `question`, optional `options[{label, description}]`, optional `multi_select`. |
 | `plan` | For `plan_ready`: the plan in Markdown. |

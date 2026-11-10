@@ -154,7 +154,7 @@ export class GhCliClient implements GitHubClient {
     const raw = gh([
       'pr', 'view', String(pr),
       '--repo', repo,
-      '--json', 'number,state,headRefName,baseRefName,headRefOid,headRepository,headRepositoryOwner',
+      '--json', 'number,state,headRefName,baseRefName,headRefOid,headRepository,headRepositoryOwner,body',
     ]);
     const d = JSON.parse(raw);
     const owner = d.headRepositoryOwner?.login;
@@ -166,6 +166,7 @@ export class GhCliClient implements GitHubClient {
       base: d.baseRefName,
       sha: d.headRefOid,
       head_repo: owner && name ? `${owner}/${name}` : '',
+      body: d.body ?? '',
     };
   }
 
