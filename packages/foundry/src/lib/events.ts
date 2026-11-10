@@ -5,9 +5,10 @@
  * a task. Every event is produced from one GitHub event payload
  * (lib/webhook.ts) or from an agent finishing (lib/completion.ts).
  *
- * Humans act through three commands only. Labels never start work and plain
- * comments never start work; both are inputs the agent reads on its next
- * launch.
+ * Humans act through four commands only: `go`, `restart` and `stop` drive
+ * the agent, `preview` deploys or tears down a pull request's preview.
+ * Labels never start work and plain comments never start work; both are
+ * inputs the agent reads on its next launch.
  */
 import type { AgentOutcome, TaskState } from '../types.js';
 
@@ -21,14 +22,19 @@ export type FoundryEvent =
   | PRPreviewEvent
   | PRApprovedEvent;
 
-export type FoundryCommand = 'go' | 'restart' | 'stop';
+export type FoundryCommand = 'go' | 'restart' | 'stop' | 'preview';
 
 /**
- * `@foundry go|restart|stop` on an issue, or the same delivered through
- * `workflow_dispatch` when Foundry hands work to itself.
+ * `@foundry go|restart|stop|preview` on an issue, or the same delivered
+ * through `workflow_dispatch` when Foundry hands work to itself.
  *
  * `task` is null when the issue has never been claimed: `go` and `restart`
  * then start it fresh, `stop` does nothing.
+ *
+ * `preview` is the one command also accepted as a comment on a pull request
+ * (when the repository's workflow lets PR comments through). `issue` is then
+ * the PR's number and `task` is null; the handler resolves the PR to its
+ * task, or to a `pull_request_bases` PR. `message` is `off` to tear down.
  */
 export interface CommandEvent {
   type: 'command';

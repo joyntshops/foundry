@@ -117,6 +117,19 @@ Foundry tears a task's preview down when it completes the task: in the approval 
 
 Foundry handles this: after any merge into `integration`, it checks the other open Foundry PRs and, for each that now conflicts, posts a note on the issue and dispatches the agent with a rebase instruction. If the note says Foundry *could not* start the agent, the workflow is missing the `workflow_dispatch` trigger or `actions: write`; add them from the template, then reply with the quoted instruction. Requesting changes on the conflicting PR does nothing, because GitHub runs no workflow for a PR with conflicts.
 
+## `@foundry preview` did nothing, or replied that it cannot
+
+- **No reply at all, on an issue.** The commenter lacks write access (the run's log says `write access ... is required`), or the comment did not start with the command. Foundry ignores both silently, as for every command.
+- **No reply and no run, on a pull request.** The workflow file predates the preview command and filters out every PR comment. Change [one line of its `if:` filter](preview-environments.md#asking-from-the-pull-request), or comment on the issue instead.
+- **"There is no open pull request".** A preview is deployed from a pull request. The command works once Foundry has opened one for the issue.
+- **"comes from the fork".** Foundry deploys only branches of the repository itself; a comment-triggered job holds the repository's credentials.
+- **"is not a Foundry task's pull request".** On a pull request, the command works for a task's own PR and for PRs into a branch listed in `preview.pull_request_bases`.
+- **"could not be deployed: no preview URL was produced".** The `up_command` failed, timed out (`preview.ready_timeout_seconds`), or printed no URL and there is no `url_template`. The run log linked in the reply has the command's output.
+
+## A preview is still up after its expiry
+
+`preview.ttl_hours` is enforced by the workflow's scheduled run, so a preview lives until the first scheduled run after its expiry: up to six hours later with the template's cron. Shorten the cron to tighten it. If the scheduled run logs that the preview "could not be torn down", the `down_command` failed; the comment stays live and the next run tries again. `foundry reconcile` from a checkout runs the same teardown immediately.
+
 ## `@foundry go` on a PR comment did nothing
 
 Not yet supported: a comment on the PR carries the PR number, not the issue number. Comment on the issue instead.

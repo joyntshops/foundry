@@ -2,7 +2,7 @@
  * MockGitHubClient — call-recording mock with configurable returns.
  * Used across all test suites.
  */
-import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts } from '../github-client.js';
+import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts, PullRequestInfo } from '../github-client.js';
 import type { GitHubIssue, GitHubComment } from '../../types.js';
 
 export interface MockCall {
@@ -23,6 +23,8 @@ export class MockGitHubClient implements GitHubClient {
   prUrl = 'https://github.com/o/r/pull/1';
   prStatus: { state: string; url: string } | null = { state: 'OPEN', url: 'https://github.com/o/r/pull/1' };
   prBranch = 'feature/1-test';
+  /** Pull requests by number for getPR; a number not listed here is not a pull request. */
+  prs: Record<number, PullRequestInfo> = {};
   prMergeable = true;
   prMergeability: 'mergeable' | 'conflicting' | 'unknown' = 'mergeable';
   openPRs: Array<{ number: number; head: string }> = [];
@@ -115,6 +117,13 @@ export class MockGitHubClient implements GitHubClient {
   async getPRBranch(repo: string, pr: string | number): Promise<string> {
     this.record('getPRBranch', [repo, pr]);
     return this.prBranch;
+  }
+
+  async getPR(repo: string, pr: number): Promise<PullRequestInfo> {
+    this.record('getPR', [repo, pr]);
+    const found = this.prs[pr];
+    if (!found) throw new Error(`Not Found: pull request #${pr}`);
+    return found;
   }
 
   async mergePR(repo: string, pr: string | number, method?: 'merge' | 'rebase' | 'squash'): Promise<void> {

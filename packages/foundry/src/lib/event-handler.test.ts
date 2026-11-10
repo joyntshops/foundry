@@ -27,7 +27,13 @@ vi.mock('./github.js', () => ({
   getPRReviews: vi.fn(),
   createCheckRun: vi.fn(),
   updateCheckRun: vi.fn(),
+  getPR: vi.fn(),
 }));
+
+vi.mock('./task-recovery.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./task-recovery.js')>();
+  return { issueNumberFromBranch: real.issueNumberFromBranch, recoverTask: vi.fn().mockResolvedValue(null) };
+});
 
 vi.mock('./issue-file.js', () => ({
   writeIssueFile: vi.fn().mockReturnValue({ FOUNDRY_ISSUE_FILE: '/tmp/state/42/issue.md' }),
@@ -101,13 +107,19 @@ vi.mock('./agent-output.js', () => ({
   formatInputRequestComment: vi.fn().mockReturnValue('Agent needs input'),
 }));
 
-vi.mock('./preview.js', () => ({
-  previewUp: vi.fn(),
-  previewDown: vi.fn(),
-  previewUpTarget: vi.fn().mockResolvedValue({ url: 'https://pr-40.x' }),
-  previewDownTarget: vi.fn(),
-  findPreviewUrlOnPR: vi.fn().mockResolvedValue('https://pr-40.x'),
-}));
+vi.mock('./preview.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./preview.js')>();
+  return {
+    isOnDemand: real.isOnDemand,
+    isExpired: real.isExpired,
+    previewUp: vi.fn(),
+    previewDown: vi.fn().mockResolvedValue(true),
+    previewUpTarget: vi.fn().mockResolvedValue({ url: 'https://pr-40.x' }),
+    previewDownTarget: vi.fn().mockResolvedValue(true),
+    findPreviewUrlOnPR: vi.fn().mockResolvedValue('https://pr-40.x'),
+    findPreviewOnPR: vi.fn().mockResolvedValue({ url: 'https://pr-40.x' }),
+  };
+});
 
 vi.mock('./status-comment.js', () => ({
   updateStatusComment: vi.fn(),
@@ -169,6 +181,7 @@ import * as reviewMod from './review.js';
 import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
+import * as taskRecovery from './task-recovery.js';
 import { EventHandler } from './event-handler.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -188,6 +201,7 @@ function makeConfig(): FoundryConfig {
       go: '@foundry go',
       restart: '@foundry restart',
       stop: '@foundry stop',
+      preview: '@foundry preview',
     },
     branch_template: 'feature/{issue}-{slug}',
     worktree_base: '../wts',
@@ -221,7 +235,7 @@ function makeTask(overrides?: Partial<TaskState>): TaskState {
 
 const ISSUE = { number: 42, title: 'Fix bug', body: 'Build it', labels: [] as Array<{ name: string }>, html_url: 'https://github.com/owner/repo/issues/42', state: 'open' };
 
-function cmd(command: 'go' | 'restart' | 'stop', task: TaskState | null, message?: string): FoundryEvent {
+function cmd(command: 'go' | 'restart' | 'stop' | 'preview', task: TaskState | null, message?: string): FoundryEvent {
   return { type: 'command', issue: 42, task, command, message, commentId: 1, commentAuthor: 'alice', via: 'comment' };
 }
 
@@ -745,6 +759,279 @@ describe('EventHandler', () => {
       await handler.handleEvent({ type: 'pr_approved', pr_number: 40, branch: 'integration', base: 'main', reviewer: 'alice' });
       expect(previewMod.previewDownTarget).not.toHaveBeenCalled();
       expect(stalePRs.dispatchCommand).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── @foundry preview ────────────────────────────────────────────────
+
+  describe('@foundry preview', () => {
+    const PR = { number: 5, open: true, head: 'feature/42-fix-bug', base: 'integration', sha: 'cafe1234cafe', head_repo: 'owner/repo' };
+    const previewConfig = (extra: object = {}): FoundryConfig => ({
+      ...makeConfig(),
+      preview: { mode: 'provider', up_command: 'deploy', down_command: 'destroy', ...extra },
+    } as FoundryConfig);
+    const taskWithPR = (o: Partial<TaskState> = {}) => makeTask({ status: 'pr-open', pr_number: 5, pr_url: 'https://github.com/owner/repo/pull/5', ...o });
+    const lastReply = () => vi.mocked(github.addComment).mock.calls.at(-1)![2] as string;
+    const stateLabelTouched = () => vi.mocked(github.transitionLabels).mock.calls.length > 0;
+
+    beforeEach(() => {
+      handler = new EventHandler(previewConfig(), '/tmp/repo');
+      vi.mocked(github.getPR).mockReset().mockResolvedValue(PR);
+      vi.mocked(github.getComments).mockResolvedValue([]);
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(false);
+      vi.mocked(previewMod.previewUpTarget).mockResolvedValue({ url: 'https://pr-5.x', expiresAt: '2026-11-10T18:00:00.000Z' });
+      vi.mocked(previewMod.previewDown).mockResolvedValue(true);
+      vi.mocked(previewMod.previewDownTarget).mockResolvedValue(true);
+      vi.mocked(previewMod.findPreviewOnPR).mockResolvedValue({ url: 'https://pr-40.x' });
+      vi.mocked(taskRecovery.recoverTask).mockReset().mockResolvedValue(null);
+    });
+
+    it('deploys the open PR head, records it on the task, and answers on the issue', async () => {
+      await handler.handleEvent(cmd('preview', taskWithPR()));
+
+      expect(github.getPR).toHaveBeenCalledWith('owner/repo', 5);
+      // The head comes from GitHub: this job has no worktree for the branch.
+      expect(previewMod.previewUpTarget).toHaveBeenCalledWith(expect.anything(), { pr_number: 5, branch: 'feature/42-fix-bug', sha: 'cafe1234cafe', issue: 42 });
+      expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'pr-open', { preview_url: 'https://pr-5.x', preview_expires_at: '2026-11-10T18:00:00.000Z', preview_pr_number: 5 });
+      const reply = lastReply();
+      expect(vi.mocked(github.addComment).mock.calls.at(-1)![1]).toBe(42);
+      expect(reply).toContain('<!-- foundry-preview-reply -->');
+      expect(reply).toContain('https://pr-5.x');
+      expect(reply).toContain('`cafe123`');
+      expect(reply).toContain('2026-11-10 18:00 UTC');
+      expect(reply).toContain('`@foundry preview off`');
+      // It is not a state transition and not an agent launch.
+      expect(stateLabelTouched()).toBe(false);
+      expect(mockWorkerSpawn).not.toHaveBeenCalled();
+    });
+
+    it('running it again deploys again (a respawn after an expiry, or a redeploy)', async () => {
+      await handler.handleEvent(cmd('preview', taskWithPR()));
+      await handler.handleEvent(cmd('preview', taskWithPR({ preview_url: undefined })));
+      expect(previewMod.previewUpTarget).toHaveBeenCalledTimes(2);
+      // Each explicit request starts a new clock: no expiry is carried over.
+      expect(vi.mocked(previewMod.previewUpTarget).mock.calls[1][1]).not.toHaveProperty('expires_at');
+    });
+
+    it('runs verify_preview from a throwaway checkout and publishes the check on the PR head', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(true);
+      vi.mocked(previewVerify.verifyPreview).mockResolvedValueOnce({ passed: true, url: 'https://pr-5.x', results: [{ command: 'e2e', success: true, output: '', duration_ms: 1 }] });
+      await handler.handleEvent(cmd('preview', taskWithPR()));
+
+      expect(git.addWorktreeTracking).toHaveBeenCalledWith(expect.stringMatching(/pr-5$/), 'feature/42-fix-bug', '/tmp/repo');
+      expect(previewVerify.verifyPreview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        url: 'https://pr-5.x', sha: 'cafe1234cafe', pr_number: 5,
+        env: { FOUNDRY_BRANCH: 'feature/42-fix-bug', FOUNDRY_PR_NUMBER: '5', FOUNDRY_ISSUE: '42' },
+      }));
+      expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ name: 'Foundry Preview Verification', head_sha: 'cafe1234cafe', conclusion: 'success' }));
+      expect(github.commentOnPR).toHaveBeenCalledWith('owner/repo', 5, expect.stringContaining('foundry-preview-verify'));
+      expect(lastReply()).toContain('Preview verification passed (1 check)');
+    });
+
+    it('a failed verification is reported and neither fails the task nor relaunches the agent', async () => {
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(true);
+      vi.mocked(previewVerify.verifyPreview).mockResolvedValueOnce({ passed: false, url: 'https://pr-5.x', results: [{ command: 'e2e', success: false, output: 'nope', duration_ms: 1 }] });
+      await handler.handleEvent(cmd('preview', taskWithPR()));
+
+      expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ name: 'Foundry Preview Verification', conclusion: 'failure' }));
+      expect(lastReply()).toContain('Preview verification failed');
+      expect(lastReply()).toContain('`@foundry go <feedback>` on issue #42');
+      expect(claim.markFailed).not.toHaveBeenCalled();
+      expect(state.updateTaskStatus).not.toHaveBeenCalledWith('owner/repo', 42, 'failed');
+      expect(stateLabelTouched()).toBe(false);
+      expect(mockWorkerSpawn).not.toHaveBeenCalled();
+      expect(stalePRs.dispatchCommand).not.toHaveBeenCalled();
+    });
+
+    it('says so when the task has no open pull request yet', async () => {
+      await handler.handleEvent(cmd('preview', makeTask({ status: 'agent-running' })));
+      expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+      expect(lastReply()).toContain('no open pull request for #42');
+    });
+
+    it('says so when the repository has no preview section, or the argument is unknown', async () => {
+      handler = new EventHandler(makeConfig(), '/tmp/repo');
+      await handler.handleEvent(cmd('preview', taskWithPR()));
+      expect(lastReply()).toContain('needs a `preview` section');
+
+      handler = new EventHandler(previewConfig(), '/tmp/repo');
+      await handler.handleEvent(cmd('preview', taskWithPR(), 'now please'));
+      expect(lastReply()).toContain('`now please` is not something it understands');
+      expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+    });
+
+    it('says so when no URL is produced, and records nothing', async () => {
+      vi.mocked(previewMod.previewUpTarget).mockResolvedValueOnce(null);
+      await handler.handleEvent(cmd('preview', taskWithPR()));
+      expect(lastReply()).toContain('could not be deployed');
+      expect(state.updateTaskStatus).not.toHaveBeenCalled();
+    });
+
+    it('"off" tears the task\'s preview down and says how to bring it back', async () => {
+      const task = taskWithPR({ preview_url: 'https://pr-5.x', preview_expires_at: '2026-11-10T18:00:00.000Z' });
+      await handler.handleEvent(cmd('preview', task, 'off'));
+      expect(previewMod.previewDown).toHaveBeenCalledWith(expect.anything(), task, 'off');
+      expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'pr-open', { preview_url: undefined, preview_expires_at: undefined });
+      expect(lastReply()).toContain('torn down');
+      expect(lastReply()).toContain('`@foundry preview` brings it back');
+      expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+    });
+
+    it('"off" with nothing up says so; a failed down command is not reported as torn down', async () => {
+      await handler.handleEvent(cmd('preview', taskWithPR(), 'OFF'));
+      expect(previewMod.previewDown).not.toHaveBeenCalled();
+      expect(lastReply()).toContain('No preview is up for #42');
+
+      vi.mocked(previewMod.previewDown).mockResolvedValueOnce(false);
+      await handler.handleEvent(cmd('preview', taskWithPR({ preview_url: 'https://pr-5.x' }), 'off'));
+      expect(lastReply()).toContain('may still be running');
+      expect(state.updateTaskStatus).not.toHaveBeenCalled();
+    });
+
+    describe('typed on a pull request', () => {
+      const onPR = (n: number, message?: string): FoundryEvent => ({ type: 'command', issue: n, task: null, command: 'preview', message, commentId: 1, commentAuthor: 'alice', via: 'comment' });
+
+      it('a task\'s pull request resolves to the task through its branch and claim', async () => {
+        vi.mocked(taskRecovery.recoverTask).mockResolvedValueOnce(taskWithPR());
+        await handler.handleEvent(onPR(5));
+        expect(taskRecovery.recoverTask).toHaveBeenCalledWith(expect.anything(), '/tmp/repo', 42);
+        expect(previewMod.previewUpTarget).toHaveBeenCalledWith(expect.anything(), { pr_number: 5, branch: 'feature/42-fix-bug', sha: 'cafe1234cafe', issue: 42 });
+        // The answer goes where the command was typed.
+        expect(vi.mocked(github.addComment).mock.calls.at(-1)![1]).toBe(5);
+      });
+
+      it('a branch that only looks like a task\'s is not treated as one', async () => {
+        // Issue 42 has a task, but on another branch: this PR is not its PR.
+        vi.mocked(taskRecovery.recoverTask).mockResolvedValueOnce(taskWithPR({ branch: 'feature/42-the-real-one' }));
+        await handler.handleEvent(onPR(5));
+        expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+        expect(lastReply()).toContain('not a Foundry task\'s pull request');
+      });
+
+      it('a pull_request_bases pull request is previewed with no task', async () => {
+        handler = new EventHandler(previewConfig({ pull_request_bases: ['main'] }), '/tmp/repo');
+        vi.mocked(github.getPR).mockResolvedValue({ number: 40, open: true, head: 'integration', base: 'main', sha: 'deadbeef', head_repo: 'owner/repo' });
+        await handler.handleEvent(onPR(40));
+        expect(previewMod.previewUpTarget).toHaveBeenCalledWith(expect.anything(), { pr_number: 40, branch: 'integration', sha: 'deadbeef', issue: undefined });
+        expect(state.updateTaskStatus).not.toHaveBeenCalled();
+
+        await handler.handleEvent(onPR(40, 'off'));
+        expect(previewMod.previewDownTarget).toHaveBeenCalledWith(expect.anything(), { branch: 'integration', pr_number: 40, sha: 'deadbeef', preview_url: 'https://pr-40.x' }, 'off');
+      });
+
+      it('any other pull request is refused', async () => {
+        vi.mocked(github.getPR).mockResolvedValue({ number: 77, open: true, head: 'docs/readme', base: 'integration', sha: 's', head_repo: 'owner/repo' });
+        await handler.handleEvent(onPR(77));
+        expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+        expect(lastReply()).toContain('`integration` is not listed in `preview.pull_request_bases`');
+      });
+
+      it('a pull request from a fork is refused, even into a previewed base', async () => {
+        handler = new EventHandler(previewConfig({ pull_request_bases: ['main'] }), '/tmp/repo');
+        vi.mocked(github.getPR).mockResolvedValue({ number: 41, open: true, head: 'integration', base: 'main', sha: 's', head_repo: 'mallory/repo' });
+        await handler.handleEvent(onPR(41));
+        expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+        expect(taskRecovery.recoverTask).not.toHaveBeenCalled();
+        expect(lastReply()).toContain('the fork `mallory/repo`');
+      });
+
+      it('a closed pull request has nothing to preview', async () => {
+        vi.mocked(github.getPR).mockResolvedValue({ ...PR, open: false });
+        await handler.handleEvent(onPR(5));
+        expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+        expect(lastReply()).toContain('is closed');
+      });
+
+      it('a number that is neither a task nor a pull request says where the command goes', async () => {
+        vi.mocked(github.getPR).mockRejectedValue(new Error('Not Found'));
+        await handler.handleEvent(onPR(99));
+        expect(lastReply()).toContain('#99 is not a Foundry task with an open pull request, and not a pull request');
+      });
+    });
+  });
+
+  // ── preview.trigger: on_demand ──────────────────────────────────────
+
+  describe('preview.trigger: on_demand', () => {
+    const onDemand = (extra: object = {}): FoundryConfig => ({
+      ...makeConfig(),
+      verify_preview: ['e2e'],
+      preview: { mode: 'provider', up_command: 'deploy', trigger: 'on_demand', ...extra },
+    } as FoundryConfig);
+    const completed = (task: any) => handler.handleEvent({ type: 'agent_completed', task, outcome: {
+      type: 'completed', session_id: 's', final_message: 'done', ask_user_questions: null,
+      report: { status: 'done', summary: 'done' },
+    } });
+    const readyLabelSet = () => vi.mocked(github.transitionLabels).mock.calls.some(c => Array.isArray(c[3]) && c[3].includes('state:ready-for-human-review'));
+    const FUTURE = new Date(Date.now() + 3_600_000).toISOString();
+    const PAST = new Date(Date.now() - 3_600_000).toISOString();
+
+    beforeEach(() => {
+      handler = new EventHandler(onDemand(), '/tmp/repo');
+      vi.mocked(previewVerify.isConfigured).mockReturnValue(true);
+      vi.mocked(previewMod.previewUpTarget).mockResolvedValue({ url: 'https://pr-5.x', expiresAt: FUTURE });
+      vi.mocked(github.getComments).mockResolvedValue([]);
+    });
+
+    it('a finished task is ready for review on verify alone: nothing deploys, verify_preview gates nothing', async () => {
+      vi.mocked(state.getAllTasks).mockReturnValue([makeTask({ pr_url: 'u', pr_number: 5 })]);
+      await completed(makeTask({ pr_url: 'u', pr_number: 5 }));
+
+      expect(previewMod.previewUp).not.toHaveBeenCalled();
+      expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+      expect(previewVerify.verifyPreview).not.toHaveBeenCalled();
+      expect(claim.markFailed).not.toHaveBeenCalled();
+      expect(readyLabelSet()).toBe(true);
+      const last = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(last.message).toContain('Previews are on demand: comment `@foundry preview` on this issue');
+    });
+
+    it('a preview that is up follows the branch after an agent round, on the clock it already has', async () => {
+      const live = makeTask({ pr_url: 'u', pr_number: 5, preview_url: 'https://pr-5.x', preview_expires_at: FUTURE, worktree: '/w' });
+      vi.mocked(state.getAllTasks).mockReturnValue([live]);
+      vi.mocked(previewVerify.verifyPreview).mockResolvedValueOnce({ passed: false, url: 'https://pr-5.x', results: [{ command: 'e2e', success: false, output: 'nope', duration_ms: 1 }] });
+      await completed(makeTask({ pr_url: 'u', pr_number: 5 }));
+
+      expect(previewMod.previewUpTarget).toHaveBeenCalledWith(expect.anything(), { pr_number: 5, branch: live.branch, sha: 'abc123', issue: 42, expires_at: FUTURE });
+      // Verified in the task's own worktree (the branch is checked out there), reported, never gating.
+      expect(previewVerify.verifyPreview).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ url: 'https://pr-5.x', cwd: '/w' }));
+      expect(git.addWorktreeTracking).not.toHaveBeenCalled();
+      expect(github.createCheckRun).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ name: 'Foundry Preview Verification', conclusion: 'failure' }));
+      expect(claim.markFailed).not.toHaveBeenCalled();
+      expect(readyLabelSet()).toBe(true);
+    });
+
+    it('a preview past its expiry is not redeployed', async () => {
+      vi.mocked(state.getAllTasks).mockReturnValue([makeTask({ pr_url: 'u', pr_number: 5, preview_url: 'https://pr-5.x', preview_expires_at: PAST })]);
+      await completed(makeTask({ pr_url: 'u', pr_number: 5 }));
+      expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+      expect(readyLabelSet()).toBe(true);
+    });
+
+    it('a pull_request_bases pull request deploys nothing on open or push while no preview is up', async () => {
+      vi.mocked(previewMod.findPreviewOnPR).mockResolvedValueOnce(undefined);
+      await handler.handleEvent({ type: 'pr_preview', action: 'up', pr_number: 40, branch: 'integration', base: 'main', sha: 'deadbeef' });
+      expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+
+      vi.mocked(previewMod.findPreviewOnPR).mockResolvedValueOnce({ url: 'https://pr-40.x', expiresAt: PAST });
+      await handler.handleEvent({ type: 'pr_preview', action: 'up', pr_number: 40, branch: 'integration', base: 'main', sha: 'deadbeef' });
+      expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
+    });
+
+    it('a push redeploys a pull_request_bases preview that is up, keeping its expiry', async () => {
+      vi.mocked(previewMod.findPreviewOnPR).mockResolvedValueOnce({ url: 'https://pr-40.x', expiresAt: FUTURE });
+      await handler.handleEvent({ type: 'pr_preview', action: 'up', pr_number: 40, branch: 'integration', base: 'main', sha: 'deadbeef' });
+      expect(previewMod.previewUpTarget).toHaveBeenCalledWith(expect.anything(), { branch: 'integration', pr_number: 40, sha: 'deadbeef', expires_at: FUTURE });
+    });
+
+    it('with trigger auto (the default) the same config deploys and gates as before', async () => {
+      handler = new EventHandler(onDemand({ trigger: 'auto' }), '/tmp/repo');
+      vi.mocked(state.getAllTasks).mockReturnValue([makeTask({ pr_url: 'u', pr_number: 5, preview_url: 'https://pr-5.x', worktree: '/w' })]);
+      await completed(makeTask({ pr_url: 'u', pr_number: 5 }));
+      expect(previewMod.previewUp).toHaveBeenCalled();
+      expect(previewVerify.verifyPreview).toHaveBeenCalled();
+      const last = vi.mocked(statusComment.updateStatusComment).mock.calls.at(-1)![2];
+      expect(last.message).not.toContain('on demand');
     });
   });
 });

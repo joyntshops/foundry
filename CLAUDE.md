@@ -21,7 +21,9 @@ packages/foundry/src/
   lib/completion.ts          exited agent → AgentCompletedEvent
   lib/agent-report.ts        the typed agent report: schema, validation, file transport, launch env
   lib/agent-output.ts        outcome = facts (run error, commits) + the report's status; no prose matching
-  lib/preview.ts             preview up/down; url_template always wins over command output
+  lib/preview.ts             preview up/down; url_template always wins over command output; the PR comment carries the expiry
+  lib/preview-reaper.ts      schedule trigger: tear down previews past preview.ttl_hours
+  lib/run-command.ts         async shell runner for verify and preview commands; never block the event loop with execSync
   lib/preview-verify.ts      verify_preview: wait for the URL, run commands against it, gate ready-for-review
   lib/workers/subprocess.ts  runs the agent as a child of the job; the only Worker
   lib/stale-prs.ts           after a merge, find sibling PRs that now conflict and dispatch their agents (workflow_dispatch)
@@ -65,7 +67,7 @@ Those lines are exactly what CI runs; the broker has its own tests (fake JWKS, f
 - **Behavior goes in `EventHandler`.** `action.ts` is composition only.
 - **Never branch on prose.** Control flow reads the agent's typed report and facts Foundry can check, nothing else. No report, an invalid report, or a report that contradicts git fails closed. If a new decision needs information only the agent has, add a field to `AGENT_REPORT_SCHEMA`; do not match text.
 - **Issue text is hostile input.** Titles and bodies reach a shell. Use the `FOUNDRY_ISSUE_*` env vars; `{title}`/`{body}` are escaped for double quotes only.
-- **Three commands, nothing else starts work.** `@foundry go`, `@foundry restart`, `@foundry stop` are the only human actions (`lib/webhook.ts`). Labels are status (`state:*`, Foundry-owned) and settings (`mode:*`, `agent:*`); plain comments are context and reach the agent through the issue file (`lib/thread.ts`). Do not add a label trigger or a comment trigger; add to what `go` does. Commenters must have write access (`lib/authorize.ts`).
+- **Four commands, nothing else makes Foundry act.** `@foundry go`, `@foundry restart`, `@foundry stop` drive the agent; `@foundry preview` (and `preview off`) deploys or tears down a PR's preview, added by Walter's decision on 2026-11-10 for previews that cost money (`docs/foundry/maintainers/design-notes.md` has the reasoning). These are the only human actions (`lib/webhook.ts`). `preview` never changes a task's state and never launches the agent, and it is the only command accepted on a pull request; pull requests from forks are refused. Labels are status (`state:*`, Foundry-owned) and settings (`mode:*`, `agent:*`); plain comments are context and reach the agent through the issue file (`lib/thread.ts`). Do not add a label trigger or another comment trigger; add to what an existing command does. Commenters must have write access (`lib/authorize.ts`), with no way to widen that in config.
 - **Every non-success ending pushes the branch** (`preserveWork`), so `go` on a failed task has something to continue from.
 - **Branch names come from config.** `lib/branches.ts` (`integrationBranch`, `productionBranch`, `resolveBaseBranch`) is the only place that knows them. Never write `'integration'` or `'main'` in code: onboarding must not require renaming a branch that a repo's deploy tooling keys on. A missing integration branch is an error, never a fallback to production.
 - **Foundry is not the agent.** Backends are configured commands. Do not special-case Claude beyond parsing its transcript format.
@@ -74,8 +76,8 @@ Those lines are exactly what CI runs; the broker has its own tests (fake JWKS, f
 ## Known gaps, in priority order
 
 1. No verify-to-agent retry loop; a verification failure stops the task (the branch is pushed, so `@foundry go` resumes it by hand).
-2. Comments on PRs (commands or replies) resolve to the PR number, not the issue; the workflow template excludes them and `webhook.ts` ignores them.
-3. Not yet run live since the vocabulary change: `go` answering a question, `restart`, and the write-permission refusal. Run live on `cognitive-harmony-technologies/unity` (2026-10-26 to 28): `go` on a failed task, `go <feedback>` on an open PR (four rounds on one issue, PR updated in place), `stop` with no task, approval → rebase → merge → `state:done`, and the model switch by dispatching against a non-default branch. Run live under the public App on `joyntshops/foundry-demo` (2026-11-05, issue 62): broker `deny not_installed` → built-in token → PR creation refused by the org setting → `state:failed`; after the install, `go` resumed the branch, broker `allow`, PR opened as `joynt-foundry[bot]`, `pull_request` runs fired, and a `go <feedback>` round committed as the bot.
+2. Comments on PRs resolve to the PR number, not the issue. Only `@foundry preview` is accepted there (the handler resolves the PR to its task); `go`/`restart`/`stop` and plain replies on a PR are still ignored, and workflow files older than 0.1.62 drop every PR comment until one line of their `if:` is changed.
+3. Not yet run live: `@foundry preview` in any form (on demand, respawn after expiry, `off`, on a PR, the reaper). Not yet run live since the vocabulary change: `go` answering a question, `restart`, and the write-permission refusal. Run live on `cognitive-harmony-technologies/unity` (2026-10-26 to 28): `go` on a failed task, `go <feedback>` on an open PR (four rounds on one issue, PR updated in place), `stop` with no task, approval → rebase → merge → `state:done`, and the model switch by dispatching against a non-default branch. Run live under the public App on `joyntshops/foundry-demo` (2026-11-05, issue 62): broker `deny not_installed` → built-in token → PR creation refused by the org setting → `state:failed`; after the install, `go` resumed the branch, broker `allow`, PR opened as `joynt-foundry[bot]`, `pull_request` runs fired, and a `go <feedback>` round committed as the bot.
 
 ## Testing a change for real
 

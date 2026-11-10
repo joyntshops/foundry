@@ -23,10 +23,11 @@ describe('runVerifyStep', () => {
   });
 
   it('fails a step that outlives its timeout and says so in the output', async () => {
-    const r = await runVerifyStep('echo started; sleep 30', process.cwd(), {}, 200);
+    // Long enough that the shell has started and echoed even on a busy machine.
+    const r = await runVerifyStep('echo started; sleep 30', process.cwd(), {}, 1000);
     expect(r.success).toBe(false);
     expect(r.output).toContain('started');
-    expect(r.output).toContain('timed out after 0s');
+    expect(r.output).toContain('timed out after 1s');
   });
 });
 

@@ -2,8 +2,9 @@
 #
 # Every run is one GitHub event. Foundry reads the event, rebuilds task state
 # from the issue (labels + claim comment), performs the transition, and exits.
-# State lives on GitHub, not on any machine. Humans drive it with three issue
-# comments: `@foundry go`, `@foundry restart`, `@foundry stop`.
+# State lives on GitHub, not on any machine. Humans drive it with issue
+# comments: `@foundry go`, `@foundry restart`, `@foundry stop`, and
+# `@foundry preview` to deploy a pull request's preview on request.
 #
 # GitHub starts issue_comment, schedule, and workflow_dispatch runs from the
 # DEFAULT branch, so this file and .joynt-foundry.yml govern those runs only
@@ -40,11 +41,11 @@ on:
         required: true
         type: string
       command:
-        description: "Foundry command: go | restart | stop"
+        description: "Foundry command: go | restart | stop | preview"
         required: true
         type: string
       message:
-        description: Message for the agent
+        description: "Message for the agent; for the preview command, off tears the preview down"
         required: false
         type: string
         default: ""
@@ -64,15 +65,17 @@ permissions:
 
 jobs:
   foundry:
-    # Comments: only `@foundry` commands, only on issues (not PRs), only from
-    # people associated with the repo; the job then requires write permission
-    # before acting. Plain comments and labels never start a run; the agent
-    # reads them at its next launch. PR events: merges, and PRs into the
-    # production branch (previewed when preview.pull_request_bases lists it).
+    # Comments: only `@foundry` commands, only from people associated with the
+    # repo; the job then requires write permission before acting. On an issue,
+    # any command. On a pull request, `@foundry preview` only: the commands
+    # that drive the agent belong on the issue, and the job refuses to preview
+    # a pull request from a fork. Plain comments and labels never start a run;
+    # the agent reads them at its next launch. PR events: merges, and PRs into
+    # the production branch (previewed when preview.pull_request_bases lists it).
     if: >-
       (github.event_name == 'issue_comment' &&
         !endsWith(github.event.comment.user.login, '[bot]') &&
-        !github.event.issue.pull_request &&
+        (!github.event.issue.pull_request || startsWith(github.event.comment.body, '@foundry preview')) &&
         startsWith(github.event.comment.body, '@foundry') &&
         contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request' &&

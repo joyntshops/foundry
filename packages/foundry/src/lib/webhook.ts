@@ -4,9 +4,10 @@
  *
  * What starts work is deliberately small:
  *   - an `@foundry go|restart|stop` comment on an issue (not on a PR),
+ *   - an `@foundry preview [off]` comment on an issue or a pull request,
  *   - a review requesting changes or approving,
  *   - a merge,
- *   - a `workflow_dispatch` carrying one of the three commands.
+ *   - a `workflow_dispatch` carrying one of the commands.
  * Labels never start anything and plain comments never start anything.
  */
 import type { FoundryEvent, FoundryCommand } from './events.js';
@@ -60,7 +61,9 @@ function escapeRegExp(s: string): string {
 /**
  * Recognise a command at the very start of a comment. `go` takes a message
  * (same line or following lines); `restart` and `stop` are the first line on
- * their own. A mention anywhere else in a comment is just text.
+ * their own; `preview` is the first line, alone or followed by one argument
+ * (`off`), which is returned as the message for the handler to validate. A
+ * mention anywhere else in a comment is just text.
  */
 export function parseFoundryCommand(body: string, config: FoundryConfig): ParsedFoundryCommand | null {
   const t = config.comment_triggers;
@@ -73,6 +76,10 @@ export function parseFoundryCommand(body: string, config: FoundryConfig): Parsed
   }
   if (firstLine === t.restart) return { name: 'restart' };
   if (firstLine === t.stop) return { name: 'stop' };
+  if (t.preview) {
+    const m = new RegExp('^' + escapeRegExp(t.preview) + '(?:[ \\t]+(\\S.*))?$').exec(firstLine);
+    if (m) return { name: 'preview', message: m[1]?.trim() || undefined };
+  }
   return null;
 }
 
@@ -105,16 +112,18 @@ function mapIssueComment(
   const issue = payload.issue;
   if (!comment || !issue) return [];
 
-  // A comment on a pull request arrives as an issue_comment whose number is
-  // the PR's. It is not resolved to its issue yet, and must never be mistaken
-  // for the issue with the same number.
-  if (issue.pull_request) return [];
-
   const author: string = comment.user?.login ?? '';
   if (isBotLogin(author)) return [];
 
   const command = parseFoundryCommand(comment.body ?? '', config);
   if (!command) return [];
+
+  // A comment on a pull request arrives as an issue_comment whose number is
+  // the PR's. Only `preview` is accepted there (a preview belongs to a PR);
+  // the handler resolves the PR. The commands that drive the agent stay on
+  // the issue: a PR number must never be mistaken for the issue with the
+  // same number.
+  if (issue.pull_request && command.name !== 'preview') return [];
 
   const issueNumber: number = issue.number;
   const task = state.getAllTasks(config.repo).find(t => t.issue === issueNumber) ?? null;
@@ -149,7 +158,11 @@ function mapWorkflowDispatch(
   const name = String(inputs.command ?? '') as FoundryCommand;
   if (!(name in config.comment_triggers)) return [];
   const trigger = config.comment_triggers[name];
-  const body = inputs.message ? `${trigger}\n${inputs.message}` : trigger;
+  // `preview` takes its argument on the command line; the others take a
+  // message on the following lines.
+  const body = !inputs.message ? trigger
+    : name === 'preview' ? `${trigger} ${inputs.message}`
+    : `${trigger}\n${inputs.message}`;
   const command = parseFoundryCommand(body, config);
   if (!command) return [];
 

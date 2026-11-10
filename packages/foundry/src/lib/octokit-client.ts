@@ -12,7 +12,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { execFileSync } from 'node:child_process';
-import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts } from './github-client.js';
+import type { GitHubClient, PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts, PullRequestInfo } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
 
 const STATE_DIR = path.join(os.homedir(), '.joynt-foundry');
@@ -422,6 +422,21 @@ export class OctokitClient implements GitHubClient {
       pull_number: Number(pr),
     });
     return data.head.ref;
+  }
+
+  async getPR(repo: string, pr: number): Promise<PullRequestInfo> {
+    const ok = await this.octokit();
+    const { owner, repo: repoName } = splitRepo(repo);
+    const { data } = await ok.rest.pulls.get({ owner, repo: repoName, pull_number: pr });
+    return {
+      number: data.number,
+      open: data.state === 'open',
+      head: data.head.ref,
+      base: data.base.ref,
+      sha: data.head.sha,
+      // A deleted fork leaves head.repo null; that is not this repository.
+      head_repo: data.head.repo?.full_name ?? '',
+    };
   }
 
   async mergePR(repo: string, pr: string | number, method: 'merge' | 'rebase' | 'squash' = 'merge'): Promise<void> {

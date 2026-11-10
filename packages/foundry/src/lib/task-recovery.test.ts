@@ -149,6 +149,17 @@ describe('recoverTask', () => {
     expect(task!.preview_pr_number).toBeUndefined();
   });
 
+  it('reads the preview\'s expiry back from the PR comment', async () => {
+    mock.comments = [{ id: 1, body: CLAIM, user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:00:00Z' }] as any;
+    mock.commentsByNumber[9] = [
+      { id: 7, body: '<!-- foundry-preview -->\n**Preview Environment** — Live\n\nPreview URL: https://pr-9.example.test\nExpires: 2026-09-02 14:30 UTC.\n<!-- foundry-preview-expires: 2026-09-02T14:30:00.000Z -->\n', user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:30:00Z' },
+    ] as any;
+    mock.prStatus = { state: 'OPEN', url: 'https://github.com/o/r/pull/9' };
+    const task = await recoverTask(config, '/w', 42);
+    expect(task!.preview_url).toBe('https://pr-9.example.test');
+    expect(task!.preview_expires_at).toBe('2026-09-02T14:30:00.000Z');
+  });
+
   it('reads a live preview from the PR comment and remembers which PR carries it', async () => {
     mock.comments = [{ id: 1, body: CLAIM, user: { login: 'foundry[bot]' }, created_at: '2026-09-02T10:00:00Z' }] as any;
     mock.commentsByNumber[9] = [

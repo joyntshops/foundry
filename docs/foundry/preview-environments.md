@@ -1,6 +1,6 @@
 # Preview Environments
 
-Foundry is **not** a hosting provider. It orchestrates the preview lifecycle (deploy when the PR opens, redeploy on push, tear down on merge, post the URL on the PR) while a command or workflow you own does the deployment. When `.joynt-foundry.yml` has no `preview` section, none of this runs.
+Foundry is **not** a hosting provider. It orchestrates the preview lifecycle (deploy when the PR opens or [when someone asks](#on-demand-previews), redeploy on push, tear down on merge or after a set lifetime, post the URL on the PR) while a command or workflow you own does the deployment. When `.joynt-foundry.yml` has no `preview` section, none of this runs.
 
 ## Two modes
 
@@ -71,6 +71,63 @@ preview:
 
 With this, the promotion PR from `integration` into `main` is deployed when it opens, **redeployed on every push** to its branch (so the preview tracks `integration` while the PR is open), and torn down when it closes, merged or not. The URL is posted on the PR; no issue, claim, or agent is involved. The workflow must deliver `pull_request` events and its `if:` must admit them for the listed bases; the shipped template does for the production branch. GitHub does not run `pull_request` workflows for a PR with merge conflicts, so a conflicting promotion PR gets no preview until it is clean.
 
+## On-demand previews
+
+When a preview costs money while it is up (its own database, a container, a cloud lane), deploying one for every PR the moment it opens wastes most of them: nobody may look for hours. Set the trigger to `on_demand` and give previews a lifetime:
+
+```yaml
+preview:
+  mode: provider
+  up_command:   "gh workflow run preview-up.yml -f pr={pr_number} -f sha={sha}"
+  down_command: "gh workflow run preview-down.yml -f pr={pr_number}"
+  url_template: https://pr-{pr_number}.preview.example.com
+  trigger: on_demand      # default: auto
+  ttl_hours: 4            # optional, works with either trigger
+```
+
+What changes with `on_demand`:
+
+- **A PR opens with no preview.** The task reaches `state:ready-for-human-review` on `verify` alone, and its status comment says previews are on demand and names the command. An approval merges as usual; a preview nobody asked for blocks nothing.
+- **`@foundry preview`** on the task's issue deploys the PR's current head, waits for it to answer, runs `verify_preview`, and replies with the URL. The result is also on the PR: the preview comment (URL, commit, expiry), the verification output, and a `Foundry Preview Verification` check run on that commit. It needs an open PR; before one exists the reply says so.
+- **Asking again redeploys.** After an expiry it brings the preview back; while one is up it redeploys the current head and restarts the clock.
+- **A failed verification is reported, nothing more.** The task's state does not change and the agent is not started. Send it back yourself with `@foundry go <what to fix>`.
+- **While a preview is up, each agent round redeploys it**, so the tester sees the current head; its expiry stays where it was. While none is up, nothing is deployed.
+- **`@foundry preview off`** tears it down now. Merging or closing the PR tears it down too, as always.
+
+Only people with write access to the repository can use the command, exactly as for `go`, `restart` and `stop`; anyone else is ignored. With `trigger: auto` the command still works: it redeploys, or brings back a preview that `ttl_hours` removed.
+
+### Expiry
+
+With `ttl_hours` set, every deployed preview carries an expiry in its PR comment. The workflow's scheduled run tears down the ones that are past it with `down_command` and rewrites the comment to say the preview expired and how to bring it back. Two things follow from that design:
+
+- **The real lifetime is rounded up to the schedule.** The template's schedule is every six hours, so a four-hour preview can live for up to ten. If that matters, shorten the cron in `.github/workflows/foundry.yml`; a scheduled run with nothing to do takes about half a minute.
+- **A failed teardown is retried.** When `down_command` fails for an expired preview, its comment stays as it was and the next scheduled run tries again.
+
+### Asking from the pull request
+
+`@foundry preview` and `@foundry preview off` are also accepted as comments on the pull request itself: a task's own PR, or a PR into a branch listed in `pull_request_bases`. Any other pull request, and any pull request from a fork, is refused with a reply. The commands that drive the agent stay on the issue.
+
+A workflow file created by `foundry init` from 0.1.62 on allows this. An older one ignores every PR comment before Foundry runs; to opt in, replace this line of the `if:` filter in `.github/workflows/foundry.yml`
+
+```yaml
+        !github.event.issue.pull_request &&
+```
+
+with
+
+```yaml
+        (!github.event.issue.pull_request || startsWith(github.event.comment.body, '@foundry preview')) &&
+```
+
+Without that change everything else still works, including a preview for a pull request that has no issue: run the workflow by hand with the pull request's number.
+
+```bash
+gh workflow run foundry.yml -f issue=<PR number> -f command=preview
+gh workflow run foundry.yml -f issue=<PR number> -f command=preview -f message=off
+```
+
+In `on_demand` mode a `pull_request_bases` pull request gets no preview when it opens; a preview that was asked for and is still up is redeployed on each push.
+
 ## Verifying against the preview
 
 `verify` proves the branch builds; `verify_preview` proves the deployed thing works. Commands run after the preview is up, in the branch's worktree, with `FOUNDRY_PREVIEW_URL` set:
@@ -81,7 +138,7 @@ verify_preview:
   - 'npx playwright test --base-url "$FOUNDRY_PREVIEW_URL"'
 ```
 
-Fail-fast. For a task, the result gates `state:ready-for-human-review`: a failure fails the task and posts the output on the issue, exactly like a failed build. For a non-task PR, the result is posted on the PR and, when the token allows, as a check run on the head commit. This is where end-to-end tests belong once there is no shared test environment to run them in.
+Fail-fast. For a task, the result gates `state:ready-for-human-review`: a failure fails the task and posts the output on the issue, exactly like a failed build. For a non-task PR, and for any preview [asked for on demand](#on-demand-previews), the result is posted on the PR and, when the token allows, as a `Foundry Preview Verification` check run on the head commit; it gates nothing by itself. This is where end-to-end tests belong once there is no shared test environment to run them in.
 
 ## GitHub Deployment records
 

@@ -5,14 +5,14 @@
  * call-sites (`github.addLabel(...)`) keep working. Tests inject a mock
  * via `setClient()`.
  */
-import type { GitHubClient, CreatePROpts, PRReview, PRReviewComment, CreateCheckRunOpts, UpdateCheckRunOpts } from './github-client.js';
+import type { GitHubClient, CreatePROpts, PRReview, PRReviewComment, CreateCheckRunOpts, UpdateCheckRunOpts, PullRequestInfo } from './github-client.js';
 import type { GitHubIssue, GitHubComment } from '../types.js';
 import type { FoundryConfig } from '../types.js';
 import { GhCliClient } from './gh-cli-client.js';
 
 // Re-export types that consumers may need
 export type { PRReview, PRReviewComment, CreatePROpts, CreateCheckRunOpts, UpdateCheckRunOpts, CheckRunAnnotation, CheckRunOutput } from './github-client.js';
-export type { GitHubClient } from './github-client.js';
+export type { GitHubClient, PullRequestInfo } from './github-client.js';
 
 // ── Singleton ────────────────────────────────────────────────────────────
 
@@ -120,6 +120,10 @@ export function getPRStatus(repo: string, branch: string): Promise<{ state: stri
 
 export function getPRBranch(repo: string, pr: string | number): Promise<string> {
   return _client.getPRBranch(repo, pr);
+}
+
+export function getPR(repo: string, pr: number): Promise<PullRequestInfo> {
+  return _client.getPR(repo, pr);
 }
 
 export function mergePR(repo: string, pr: string | number, method?: 'merge' | 'rebase' | 'squash'): Promise<void> {

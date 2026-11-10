@@ -13,6 +13,31 @@ import type { FoundryConfig, TaskState } from '../types.js';
 import { slugify } from './git.js';
 
 const COMMENT_MARKER = '<!-- foundry-preview -->';
+/** Machine-readable expiry inside the preview comment; jobs are stateless, so the comment is the record. */
+const EXPIRES_RE = /<!-- foundry-preview-expires: (\S+) -->/;
+
+// ── Trigger and expiry ───────────────────────────────────────────────────
+
+/** `preview.trigger: on_demand`: nothing deploys until someone asks with the preview command. */
+export function isOnDemand(config: FoundryConfig): boolean {
+  return config.preview?.trigger === 'on_demand';
+}
+
+/** When a preview deployed now expires, from `preview.ttl_hours`. Undefined: it does not. */
+export function expiryFor(config: FoundryConfig, now: Date = new Date()): string | undefined {
+  const hours = config.preview?.ttl_hours;
+  if (typeof hours !== 'number' || !(hours > 0)) return undefined;
+  return new Date(now.getTime() + hours * 3_600_000).toISOString();
+}
+
+export function isExpired(expiresAt: string | undefined, now: Date = new Date()): boolean {
+  if (!expiresAt) return false;
+  const t = Date.parse(expiresAt);
+  return !Number.isNaN(t) && t <= now.getTime();
+}
+
+/** Why a preview is being taken down; decides what its comment says afterwards. */
+export type PreviewDownReason = 'closed' | 'off' | 'expired';
 
 // ── Template variable expansion ──────────────────────────────────────────
 
@@ -57,6 +82,12 @@ export interface PreviewTarget {
   issue?: number;
   preview_url?: string;
   deployment_id?: number;
+  /**
+   * Keep this expiry instead of starting a new `ttl_hours` clock. Set when a
+   * preview that is already up is redeployed for a new commit: only an
+   * explicit request extends a preview's life.
+   */
+  expires_at?: string;
 }
 
 function targetLabel(t: PreviewTarget): string {
@@ -67,23 +98,46 @@ function targetVars(config: FoundryConfig, t: PreviewTarget): TemplateVars {
   return { branch: t.branch, issue: t.issue, repo: config.repo, pr_number: t.pr_number, sha: t.sha };
 }
 
-/** The preview URL a PR's comment currently advertises, if Foundry posted one. */
-export function previewUrlFromComments(bodies: string[]): string | undefined {
+/** A live preview as its comment records it. */
+export interface PreviewRecord {
+  url: string;
+  /** ISO time; absent when the preview has no expiry. */
+  expiresAt?: string;
+}
+
+/**
+ * The live preview a set of comments records, if Foundry posted one. A
+ * torn-down or expired comment carries no `Preview URL:` line and yields
+ * nothing.
+ */
+export function previewRecordFromComments(bodies: string[]): PreviewRecord | undefined {
   for (const body of bodies) {
     if (!body.includes(COMMENT_MARKER)) continue;
     const m = body.match(/Preview URL:\s*(\S+)/);
-    if (m) return m[1];
+    if (!m) continue;
+    const e = body.match(EXPIRES_RE);
+    const expiresAt = e && !Number.isNaN(Date.parse(e[1])) ? e[1] : undefined;
+    return { url: m[1], ...(expiresAt ? { expiresAt } : {}) };
   }
   return undefined;
 }
 
-export async function findPreviewUrlOnPR(repo: string, prNumber: number): Promise<string | undefined> {
+/** The preview URL a PR's comment currently advertises, if Foundry posted one. */
+export function previewUrlFromComments(bodies: string[]): string | undefined {
+  return previewRecordFromComments(bodies)?.url;
+}
+
+export async function findPreviewOnPR(repo: string, prNumber: number): Promise<PreviewRecord | undefined> {
   try {
     const comments = await github.getComments(repo, prNumber);
-    return previewUrlFromComments(comments.map(c => c.body));
+    return previewRecordFromComments(comments.map(c => c.body));
   } catch {
     return undefined;
   }
+}
+
+export async function findPreviewUrlOnPR(repo: string, prNumber: number): Promise<string | undefined> {
+  return (await findPreviewOnPR(repo, prNumber))?.url;
 }
 
 function resolveHeadSha(worktree: string): string {
@@ -152,27 +206,57 @@ async function runProviderCommand(command: string, vars: TemplateVars, expectUrl
 
 // ── Comment upsert ───────────────────────────────────────────────────────
 
-function buildPreviewComment(url: string, state: 'active' | 'inactive'): string {
-  const status = state === 'active' ? 'Live' : 'Torn down';
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+export interface PreviewCommentOpts {
+  url: string;
+  state: 'active' | PreviewDownReason;
+  sha?: string;
+  expiresAt?: string;
+  /** How to get the preview back; shown with an expiry and after `off` or an expiry. */
+  hint?: string;
+}
 
-  return [
-    COMMENT_MARKER,
-    `**Preview Environment** — ${status}`,
-    '',
-    state === 'active' ? `Preview URL: ${url}` : `~~${url}~~ (inactive)`,
-    '',
-    `_Updated: ${timestamp}_`,
-  ].join('\n');
+function utc(d: Date): string {
+  return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
+export function buildPreviewComment(opts: PreviewCommentOpts): string {
+  const { url, state: commentState, sha, expiresAt, hint } = opts;
+  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  const lines: string[] = [COMMENT_MARKER];
+
+  if (commentState === 'active') {
+    lines.push('**Preview Environment** — Live', '', `Preview URL: ${url}`);
+    if (sha) lines.push(`Commit: \`${sha.slice(0, 7)}\``);
+    if (expiresAt) {
+      lines.push(`Expires: ${utc(new Date(expiresAt))}.${hint ? ` After that: ${hint}` : ''}`);
+      lines.push(`<!-- foundry-preview-expires: ${expiresAt} -->`);
+    }
+  } else if (commentState === 'expired') {
+    lines.push('**Preview Environment** — Expired', '', `~~${url}~~ (expired and torn down)${hint ? `. ${hint}` : ''}`);
+  } else if (commentState === 'off') {
+    lines.push('**Preview Environment** — Torn down', '', `~~${url}~~ (torn down on request)${hint ? `. ${hint}` : ''}`);
+  } else {
+    lines.push('**Preview Environment** — Torn down', '', `~~${url}~~ (inactive)`);
+  }
+
+  lines.push('', `_Updated: ${timestamp}_`);
+  return lines.join('\n');
+}
+
+/** How to ask for this target's preview again. */
+export function bringBackHint(config: FoundryConfig, target: PreviewTarget): string {
+  const cmd = config.comment_triggers.preview;
+  return target.issue !== undefined
+    ? `comment \`${cmd}\` on issue #${target.issue} to bring it back.`
+    : `run the Foundry workflow with \`issue=${target.pr_number ?? '<PR number>'}\` and \`command=preview\` to bring it back (or comment \`${cmd}\` on this pull request, if the workflow accepts pull request comments).`;
 }
 
 async function upsertPreviewComment(
   repo: string,
   prNumber: number,
-  url: string,
-  commentState: 'active' | 'inactive',
+  opts: PreviewCommentOpts,
 ): Promise<void> {
-  const body = buildPreviewComment(url, commentState);
+  const body = buildPreviewComment(opts);
 
   try {
     const comments = await github.getComments(repo, prNumber);
@@ -201,6 +285,7 @@ export async function previewUp(config: FoundryConfig, task: TaskState): Promise
   if (!result) return;
   state.updateTaskStatus(config.repo, task.issue, task.status, {
     preview_url: result.url,
+    preview_expires_at: result.expiresAt,
     ...(result.deploymentId !== undefined ? { deployment_id: result.deploymentId } : {}),
   });
 }
@@ -209,7 +294,7 @@ export async function previewUp(config: FoundryConfig, task: TaskState): Promise
 export async function previewUpTarget(
   config: FoundryConfig,
   target: PreviewTarget,
-): Promise<{ url: string; deploymentId?: number } | null> {
+): Promise<{ url: string; deploymentId?: number; expiresAt?: string } | null> {
   if (!config.preview) return null;
   const vars = targetVars(config, target);
   const label = targetLabel(target);
@@ -260,18 +345,26 @@ export async function previewUpTarget(
     }
   }
 
-  // Post/update PR comment
+  // Post/update PR comment. The expiry lives in it: the scheduled reconcile
+  // run reads it back to reap the preview.
+  const expiresAt = target.expires_at ?? expiryFor(config);
   if (config.preview.comment !== false && target.pr_number) {
-    await upsertPreviewComment(config.repo, target.pr_number, url, 'active');
+    await upsertPreviewComment(config.repo, target.pr_number, {
+      url,
+      state: 'active',
+      sha: target.sha || undefined,
+      expiresAt,
+      hint: expiresAt ? bringBackHint(config, target) : undefined,
+    });
   }
 
-  return { url, deploymentId };
+  return { url, deploymentId, expiresAt };
 }
 
-export async function previewDown(config: FoundryConfig, task: TaskState): Promise<void> {
-  if (!config.preview) return;
-  if (!task.preview_url) return;
-  await previewDownTarget(config, {
+export async function previewDown(config: FoundryConfig, task: TaskState, reason: PreviewDownReason = 'closed'): Promise<boolean> {
+  if (!config.preview) return true;
+  if (!task.preview_url) return true;
+  return previewDownTarget(config, {
     branch: task.branch,
     issue: task.issue,
     // After a merge the PR is closed and pr_number is gone; the preview
@@ -280,14 +373,20 @@ export async function previewDown(config: FoundryConfig, task: TaskState): Promi
     sha: resolveHeadSha(task.worktree),
     preview_url: task.preview_url,
     deployment_id: task.deployment_id,
-  });
+  }, reason);
 }
 
-/** Tear down a preview for any target. `preview_url` must be set. */
-export async function previewDownTarget(config: FoundryConfig, target: PreviewTarget): Promise<void> {
-  if (!config.preview || !target.preview_url) return;
+/**
+ * Tear down a preview for any target. `preview_url` must be set. Returns
+ * false when the provider's down command failed. An expired preview whose
+ * down command failed keeps its comment as it is, so the next reconcile run
+ * tries again instead of recording as gone something that is still running.
+ */
+export async function previewDownTarget(config: FoundryConfig, target: PreviewTarget, reason: PreviewDownReason = 'closed'): Promise<boolean> {
+  if (!config.preview || !target.preview_url) return true;
   const vars = targetVars(config, target);
   const label = targetLabel(target);
+  let downOk = true;
 
   // Run down command (provider mode only)
   if (config.preview.mode === 'provider' && config.preview.down_command) {
@@ -296,9 +395,11 @@ export async function previewDownTarget(config: FoundryConfig, target: PreviewTa
     const timeoutMs = providerCommandTimeoutMs(config);
     const r = await runCommand(expanded, { env, timeoutMs });
     if (!r.success) {
+      downOk = false;
       log.warn(`Preview down command failed for ${label} (${describeFailure(r, timeoutMs)}): ${r.stderr.trim().slice(-300)}`);
     }
   }
+  if (!downOk && reason === 'expired') return false;
 
   // Set deployment status to inactive
   if (config.github_deployments?.enabled && target.deployment_id) {
@@ -313,10 +414,15 @@ export async function previewDownTarget(config: FoundryConfig, target: PreviewTa
 
   // Update PR comment
   if (config.preview.comment !== false && target.pr_number) {
-    await upsertPreviewComment(config.repo, target.pr_number, target.preview_url, 'inactive');
+    await upsertPreviewComment(config.repo, target.pr_number, {
+      url: target.preview_url,
+      state: reason,
+      hint: reason === 'closed' ? undefined : bringBackHint(config, target),
+    });
   }
 
-  log.info(`Preview torn down for ${label}`);
+  log.info(`Preview torn down for ${label}${reason === 'closed' ? '' : ` (${reason})`}`);
+  return downOk;
 }
 
 export interface PreviewStatus {

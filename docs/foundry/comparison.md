@@ -7,7 +7,7 @@ Foundry runs the same way and bills the same way, and its `claude-code` preset i
 | | `claude-code-action` | Foundry |
 |---|---|---|
 | Unit of work | one mention, one job, one reply | a task with a lifecycle that spans many jobs: claimed, running, waiting, PR open, done |
-| What starts it | any `@claude` mention | three commands, authorized against repo permission; every other comment is context |
+| What starts it | any `@claude` mention | four commands, authorized against repo permission; every other comment is context |
 | Before a PR exists | whatever the agent chose to run; its push is the result | your verify commands must pass, enforced by Foundry; a failed run is posted on the issue and no PR opens |
 | Previews | none | per-branch preview up on PR, redeploy on push, down on merge; `verify_preview` runs against it |
 | Review | the agent can review | approve → rebase onto the integration branch → wait for checks → merge; siblings that now conflict get their agent back |

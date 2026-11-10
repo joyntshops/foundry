@@ -11,7 +11,7 @@
 import * as github from './github.js';
 import * as git from './git.js';
 import { parseClaimComment } from './claim.js';
-import { previewUrlFromComments } from './preview.js';
+import { previewRecordFromComments } from './preview.js';
 import type { FoundryConfig, TaskState, TaskStatus, GitHubIssue } from '../types.js';
 
 const CLAIM_MARKER = '<!-- foundry-claim-block -->';
@@ -118,13 +118,14 @@ export async function recoverTask(
     }
   } catch {}
 
-  let preview_url = previewUrlFromComments(comments.map(c => c.body));
-  if (!preview_url && preview_pr_number) {
+  let previewRecord = previewRecordFromComments(comments.map(c => c.body));
+  if (!previewRecord && preview_pr_number) {
     try {
       const prComments = await github.getComments(config.repo, preview_pr_number);
-      preview_url = previewUrlFromComments(prComments.map(c => c.body));
+      previewRecord = previewRecordFromComments(prComments.map(c => c.body));
     } catch {}
   }
+  const preview_url = previewRecord?.url;
   if (!preview_url) preview_pr_number = undefined;
 
   const now = new Date().toISOString();
@@ -145,6 +146,7 @@ export async function recoverTask(
     pr_url,
     pr_number,
     preview_url,
+    preview_expires_at: previewRecord?.expiresAt,
     preview_pr_number,
   };
 }

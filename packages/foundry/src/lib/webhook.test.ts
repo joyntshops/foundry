@@ -34,6 +34,7 @@ function makeConfig(overrides?: Partial<FoundryConfig>): FoundryConfig {
       go: '@foundry go',
       restart: '@foundry restart',
       stop: '@foundry stop',
+      preview: '@foundry preview',
     },
     branch_template: 'feature/{issue}-{slug}',
     worktree_base: '../wts',
@@ -128,10 +129,45 @@ describe('webhookToEvents', () => {
       expect(webhookToEvents('issue_comment', comment('@foundry go', { user: { login: 'foundry-bot[bot]' } }), config)).toEqual([]);
     });
 
-    it('ignores comments on pull requests (their number is the PR, not the issue)', () => {
+    it('ignores go, restart and stop on pull requests (their number is the PR, not the issue)', () => {
       mockGetAllTasks.mockReturnValue([makeTask()]);
-      const payload = { ...comment('@foundry go'), issue: { number: 42, pull_request: { url: 'x' } } };
-      expect(webhookToEvents('issue_comment', payload, config)).toEqual([]);
+      for (const body of ['@foundry go', '@foundry restart', '@foundry stop']) {
+        const payload = { ...comment(body), issue: { number: 42, pull_request: { url: 'x' } } };
+        expect(webhookToEvents('issue_comment', payload, config)).toEqual([]);
+      }
+    });
+
+    it('maps "@foundry preview" to a preview command, and "off" to its message', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      const up = webhookToEvents('issue_comment', comment('@foundry preview'), config);
+      expect(up).toEqual([expect.objectContaining({ type: 'command', issue: 42, command: 'preview', message: undefined, commentAuthor: 'alice', via: 'comment' })]);
+      expect((up[0] as any).task.issue).toBe(42);
+      expect((webhookToEvents('issue_comment', comment('@foundry preview off'), config)[0] as any).message).toBe('off');
+      // Whatever follows on later lines is context, not an argument.
+      expect((webhookToEvents('issue_comment', comment('@foundry preview\nthanks'), config)[0] as any).message).toBeUndefined();
+      // An argument it does not know still reaches the handler, which says so.
+      expect((webhookToEvents('issue_comment', comment('@foundry preview now please'), config)[0] as any).message).toBe('now please');
+    });
+
+    it('"preview" must be the whole word at the start', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      expect(webhookToEvents('issue_comment', comment('@foundry previews'), config)).toEqual([]);
+      expect(webhookToEvents('issue_comment', comment('please @foundry preview'), config)).toEqual([]);
+    });
+
+    it('accepts "@foundry preview" on a pull request, carrying the PR number and no task', () => {
+      // The issue with the same number as the PR must not be picked up as its task.
+      mockGetAllTasks.mockReturnValue([makeTask({ issue: 42 }), makeTask({ issue: 57, branch: 'feature/57-other' })]);
+      const payload = { ...comment('@foundry preview off'), issue: { number: 58, pull_request: { url: 'x' } } };
+      expect(webhookToEvents('issue_comment', payload, config)).toEqual([
+        expect.objectContaining({ type: 'command', issue: 58, task: null, command: 'preview', message: 'off', via: 'comment' }),
+      ]);
+    });
+
+    it('a custom preview trigger replaces the default', () => {
+      const cfg = makeConfig({ comment_triggers: { go: '/go', restart: '/restart', stop: '/stop', preview: '/preview' } });
+      expect((webhookToEvents('issue_comment', comment('/preview off'), cfg)[0] as any).command).toBe('preview');
+      expect(webhookToEvents('issue_comment', comment('@foundry preview'), cfg)).toEqual([]);
     });
   });
 
@@ -238,6 +274,14 @@ describe('webhookToEvents', () => {
         sender: { login: 'foundry-bot[bot]' },
       }, config);
       expect(events).toEqual([expect.objectContaining({ type: 'command', issue: 42, command: 'go', message: 'integration moved; rebase.', via: 'dispatch' })]);
+    });
+
+    it('carries the preview command, with "off" from the message input', () => {
+      mockGetAllTasks.mockReturnValue([makeTask()]);
+      expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '42', command: 'preview', message: '' } }, config))
+        .toEqual([expect.objectContaining({ type: 'command', issue: 42, command: 'preview', message: undefined, via: 'dispatch' })]);
+      expect(webhookToEvents('workflow_dispatch', { inputs: { issue: '58', command: 'preview', message: 'off' } }, config))
+        .toEqual([expect.objectContaining({ issue: 58, task: null, command: 'preview', message: 'off' })]);
     });
 
     it('ignores unknown commands; an unknown issue is a fresh start', () => {
