@@ -182,7 +182,7 @@ import * as state from './state.js';
 import * as claim from './claim.js';
 import * as verify from './verify.js';
 import * as taskRecovery from './task-recovery.js';
-import { EventHandler } from './event-handler.js';
+import { EventHandler, appendPRUpdate, buildPRBody } from './event-handler.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -402,6 +402,22 @@ describe('EventHandler', () => {
   });
 
   describe('pr_merged event', () => {
+    it('does nothing when the task is already done: the job that merged the PR completed it', async () => {
+      // pull_request.closed still arrives after Foundry's own merge when the
+      // merge was made with an App token. Running the lifecycle twice sent the
+      // agent to every conflicting sibling PR twice.
+      await handler.handleEvent({ type: 'pr_merged', task: makeTask({ status: 'done' }), base: 'integration', pr_number: 143 });
+      expect(stalePRs.handleStalePRs).not.toHaveBeenCalled();
+      expect(github.closeIssue).not.toHaveBeenCalled();
+      expect(previewMod.previewDown).not.toHaveBeenCalled();
+      expect(state.removeTask).not.toHaveBeenCalled();
+    });
+
+    it('names the merged PR in the stale check even though the recovered task no longer carries it', async () => {
+      await handler.handleEvent({ type: 'pr_merged', task: makeTask({ status: 'pr-open', pr_number: undefined }), base: 'integration', pr_number: 143 });
+      expect(stalePRs.handleStalePRs).toHaveBeenCalledWith(expect.anything(), 'integration', 143);
+    });
+
     it('marks the task as done and cleans up resources', async () => {
       const task = makeTask({ pr_url: 'https://github.com/owner/repo/pull/5' });
 
@@ -494,19 +510,94 @@ describe('EventHandler', () => {
       expect(github.createPR).toHaveBeenCalledWith('owner/repo', expect.objectContaining({ title: 'Fix bug (issue #42)' }));
     });
 
-    it('rewrites the PR description from the latest report when the PR already exists', async () => {
-      vi.mocked(verify.runVerifyPipeline).mockReturnValue({ passed: true, results: [] });
-      await handler.handleEvent({ type: 'agent_completed', task: makeTask({ pr_url: 'https://github.com/owner/repo/pull/5', pr_number: 5 }), outcome: {
+    describe('an existing PR keeps its description', () => {
+      const ORIGINAL = [
+        'Closes #42', '', '## Summary', '', 'Stood up the lane substrate.', '',
+        '## Steps for the reviewer', '', '1. `aws sso login`', '2. `make lane-up`', '',
+        '---', 'Opened by Foundry (command). Request changes on this PR, or comment `@foundry go <feedback>` on the issue, to send the agent back to work.',
+      ].join('\n');
+      const round = (task: TaskState, summary: string, assumptions?: string[]) => handler.handleEvent({ type: 'agent_completed', task, outcome: {
         type: 'completed', session_id: 's', final_message: 'Done', ask_user_questions: null,
-        report: { status: 'done', summary: 'Second round: fixed the throttle.', assumptions: ['Kept the 30 s window for page opens.'] },
+        report: { status: 'done', summary, ...(assumptions ? { assumptions } : {}) },
       } });
-      expect(github.createPR).not.toHaveBeenCalled();
-      const [repo, pr, body] = vi.mocked(github.updatePRBody).mock.calls[0];
-      expect(repo).toBe('owner/repo');
-      expect(pr).toBe(5);
-      expect(body).toContain('Closes #42');
-      expect(body).toContain('Second round: fixed the throttle.');
-      expect(body).toContain('- Kept the 30 s window for page opens.');
+      const withPR = (o: Partial<TaskState> = {}) => makeTask({ pr_url: 'https://github.com/owner/repo/pull/5', pr_number: 5, ...o });
+
+      beforeEach(() => {
+        vi.mocked(verify.runVerifyPipeline).mockReturnValue({ passed: true, results: [] });
+        vi.mocked(github.getPR).mockReset().mockResolvedValue({ number: 5, open: true, head: 'feature/42-fix-bug', base: 'integration', sha: 'old', head_repo: 'owner/repo', body: ORIGINAL });
+      });
+
+      it('a later round adds its report above the footer and removes nothing', async () => {
+        await round(withPR(), 'Second round: fixed the throttle.', ['Kept the 30 s window for page opens.']);
+        expect(github.createPR).not.toHaveBeenCalled();
+        const [repo, pr, body] = vi.mocked(github.updatePRBody).mock.calls[0];
+        expect(repo).toBe('owner/repo');
+        expect(pr).toBe(5);
+        // Everything that was there is still there, in order.
+        expect(body).toContain('Stood up the lane substrate.');
+        expect(body).toContain('1. `aws sso login`\n2. `make lane-up`');
+        expect(body).toMatch(/### Update, \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\n\nSecond round: fixed the throttle\./);
+        expect(body).toContain('- Kept the 30 s window for page opens.');
+        expect(body.indexOf('make lane-up')).toBeLessThan(body.indexOf('### Update'));
+        expect(body.indexOf('### Update')).toBeLessThan(body.indexOf('Opened by Foundry'));
+        expect(body.endsWith('to send the agent back to work.')).toBe(true);
+      });
+
+      it('a round that ends on the commit it started from leaves the description alone', async () => {
+        // git.headSha is 'abc123' at completion; the relaunch recorded the same.
+        await round(withPR({ round_start_sha: 'abc123' }), 'There was nothing to rebase, so I made no commits.');
+        expect(github.getPR).not.toHaveBeenCalled();
+        expect(github.updatePRBody).not.toHaveBeenCalled();
+      });
+
+      it('a round that moved the head (a rebase) is noted, not substituted', async () => {
+        await round(withPR({ round_start_sha: 'before-rebase' }), 'Rebased onto test; resolved one conflict in infra.ts.');
+        const body = vi.mocked(github.updatePRBody).mock.calls[0][2];
+        expect(body).toContain('## Steps for the reviewer');
+        expect(body).toContain('Rebased onto test; resolved one conflict in infra.ts.');
+      });
+
+      it('a description that cannot be read is left as it is', async () => {
+        vi.mocked(github.getPR).mockRejectedValueOnce(new Error('502'));
+        await round(withPR(), 'Second round.');
+        expect(github.updatePRBody).not.toHaveBeenCalled();
+      });
+
+      it('relaunching records where the branch stood', async () => {
+        await handler.handleEvent(cmd('go', withPR({ status: 'pr-open' }), 'tighten the copy'));
+        expect(state.updateTaskStatus).toHaveBeenCalledWith('owner/repo', 42, 'agent-running', expect.objectContaining({ round_start_sha: 'abc123' }));
+      });
+    });
+
+    describe('appendPRUpdate', () => {
+      const NOW = new Date('2026-11-10T23:01:44Z');
+      const outcome = (summary: string, assumptions?: string[]): AgentOutcome => ({
+        type: 'completed', session_id: 's', final_message: '', ask_user_questions: null,
+        report: { status: 'done', summary, ...(assumptions ? { assumptions } : {}) },
+      });
+
+      it('inserts above the footer marker of a description Foundry wrote', () => {
+        const first = buildPRBody(makeTask(), outcome('First round.'));
+        const second = appendPRUpdate(first, makeTask(), outcome('Second round.'), NOW);
+        expect(second).toContain('First round.');
+        expect(second).toContain('### Update, 2026-11-10 23:01 UTC\n\nSecond round.');
+        expect(second.indexOf('Second round.')).toBeLessThan(second.indexOf('<!-- foundry-pr-footer -->'));
+        // A third round goes after the second, still above the footer.
+        const third = appendPRUpdate(second, makeTask(), outcome('Third round.'), new Date('2026-11-11T08:00:00Z'));
+        expect(third.indexOf('Second round.')).toBeLessThan(third.indexOf('Third round.'));
+        expect(third.indexOf('Third round.')).toBeLessThan(third.indexOf('<!-- foundry-pr-footer -->'));
+        expect(third.match(/Opened by Foundry/g)).toHaveLength(1);
+      });
+
+      it('appends at the end of a description with no Foundry footer (rewritten by a person)', () => {
+        const out = appendPRUpdate('My own description.\n\nWith two paragraphs.\n', makeTask(), outcome('Round note.'), NOW);
+        expect(out.startsWith('My own description.\n\nWith two paragraphs.\n\n### Update, 2026-11-10 23:01 UTC\n\nRound note.')).toBe(true);
+      });
+
+      it('returns the description untouched when there is no report, and builds one when it is empty', () => {
+        expect(appendPRUpdate('Keep me.', makeTask(), undefined, NOW)).toBe('Keep me.');
+        expect(appendPRUpdate('  \n', makeTask(), outcome('Only round.'), NOW)).toContain('Closes #42');
+      });
     });
   });
 
@@ -765,7 +856,7 @@ describe('EventHandler', () => {
   // ── @foundry preview ────────────────────────────────────────────────
 
   describe('@foundry preview', () => {
-    const PR = { number: 5, open: true, head: 'feature/42-fix-bug', base: 'integration', sha: 'cafe1234cafe', head_repo: 'owner/repo' };
+    const PR = { number: 5, open: true, head: 'feature/42-fix-bug', base: 'integration', sha: 'cafe1234cafe', head_repo: 'owner/repo', body: '' };
     const previewConfig = (extra: object = {}): FoundryConfig => ({
       ...makeConfig(),
       preview: { mode: 'provider', up_command: 'deploy', down_command: 'destroy', ...extra },
@@ -910,7 +1001,7 @@ describe('EventHandler', () => {
 
       it('a pull_request_bases pull request is previewed with no task', async () => {
         handler = new EventHandler(previewConfig({ pull_request_bases: ['main'] }), '/tmp/repo');
-        vi.mocked(github.getPR).mockResolvedValue({ number: 40, open: true, head: 'integration', base: 'main', sha: 'deadbeef', head_repo: 'owner/repo' });
+        vi.mocked(github.getPR).mockResolvedValue({ number: 40, open: true, head: 'integration', base: 'main', sha: 'deadbeef', head_repo: 'owner/repo', body: '' });
         await handler.handleEvent(onPR(40));
         expect(previewMod.previewUpTarget).toHaveBeenCalledWith(expect.anything(), { pr_number: 40, branch: 'integration', sha: 'deadbeef', issue: undefined });
         expect(state.updateTaskStatus).not.toHaveBeenCalled();
@@ -920,7 +1011,7 @@ describe('EventHandler', () => {
       });
 
       it('any other pull request is refused', async () => {
-        vi.mocked(github.getPR).mockResolvedValue({ number: 77, open: true, head: 'docs/readme', base: 'integration', sha: 's', head_repo: 'owner/repo' });
+        vi.mocked(github.getPR).mockResolvedValue({ number: 77, open: true, head: 'docs/readme', base: 'integration', sha: 's', head_repo: 'owner/repo', body: '' });
         await handler.handleEvent(onPR(77));
         expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
         expect(lastReply()).toContain('`integration` is not listed in `preview.pull_request_bases`');
@@ -928,7 +1019,7 @@ describe('EventHandler', () => {
 
       it('a pull request from a fork is refused, even into a previewed base', async () => {
         handler = new EventHandler(previewConfig({ pull_request_bases: ['main'] }), '/tmp/repo');
-        vi.mocked(github.getPR).mockResolvedValue({ number: 41, open: true, head: 'integration', base: 'main', sha: 's', head_repo: 'mallory/repo' });
+        vi.mocked(github.getPR).mockResolvedValue({ number: 41, open: true, head: 'integration', base: 'main', sha: 's', head_repo: 'mallory/repo', body: '' });
         await handler.handleEvent(onPR(41));
         expect(previewMod.previewUpTarget).not.toHaveBeenCalled();
         expect(taskRecovery.recoverTask).not.toHaveBeenCalled();

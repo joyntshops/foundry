@@ -190,6 +190,7 @@ describe('webhookToEvents', () => {
       const events = webhookToEvents('pull_request', {
         action: 'closed',
         pull_request: {
+          number: 143,
           merged: true,
           head: { ref: 'feature/42-fix-bug' },
         },
@@ -199,6 +200,8 @@ describe('webhookToEvents', () => {
       expect(events[0].type).toBe('pr_merged');
       if (events[0].type === 'pr_merged') {
         expect(events[0].task.issue).toBe(42);
+        // The recovered task has no pr_number once its PR is closed; the payload does.
+        expect(events[0].pr_number).toBe(143);
       }
     });
 

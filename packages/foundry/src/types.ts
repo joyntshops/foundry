@@ -179,6 +179,12 @@ export interface TaskState {
   last_run?: { cost_usd?: number; turns?: number; duration_ms?: number };
   /** The issue body at claim time; written to FOUNDRY_ISSUE_FILE on every launch. */
   issue_body?: string;
+  /**
+   * The branch head when the agent was relaunched in this job. A round that
+   * ends on the same commit added nothing, and the PR description is left
+   * alone. In-job only: launch and completion are one job.
+   */
+  round_start_sha?: string;
   preview_url?: string;
   /** ISO time after which the preview is reaped (preview.ttl_hours); read back from the preview comment. */
   preview_expires_at?: string;

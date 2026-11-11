@@ -113,6 +113,14 @@ From 0.1.61 the steps run without blocking, the first call after one is retried 
 
 Foundry tears a task's preview down when it completes the task: in the approval run when it merges the PR itself, otherwise in the `pull_request.closed` run. Before 0.1.58 the second path could not find the preview, because the merged PR was no longer the task's PR and the preview comment lives on it; the preview stayed up and its comment stayed *Live*. From 0.1.58 the closed run reads the comment on the merged PR, and `foundry preview down <issue>` does the same from any checkout. On an older version, run the repository's down command by hand for the PR number (for a GitHub Pages setup, dispatch its preview-down workflow).
 
+## The PR description was replaced by a short note after the agent was sent back
+
+Before 0.1.64 every round rewrote the description of an existing PR from that round's report, so a rebase round's two-line summary replaced the first round's full account. The earlier text is not lost: open the description's **edited** menu on GitHub and pick the revision to restore. From 0.1.64 the description is kept and each round that adds commits appends a dated update.
+
+## The agent was sent to resolve the same conflict twice
+
+Before 0.1.64, when Foundry merged a PR on approval while running as a GitHub App, both the approval job and the `pull_request.closed` job it caused checked the other open PRs, so each conflicting one got two notes and two agent runs a minute apart; the second note read "PR #? merged". The second run found nothing to do. From 0.1.64 the closed job sees the task is already done and stops.
+
 ## A PR went stale after another one merged
 
 Foundry handles this: after any merge into `integration`, it checks the other open Foundry PRs and, for each that now conflicts, posts a note on the issue and dispatches the agent with a rebase instruction. If the note says Foundry *could not* start the agent, the workflow is missing the `workflow_dispatch` trigger or `actions: write`; add them from the template, then reply with the quoted instruction. Requesting changes on the conflicting PR does nothing, because GitHub runs no workflow for a PR with conflicts.

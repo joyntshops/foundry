@@ -436,6 +436,7 @@ export class OctokitClient implements GitHubClient {
       sha: data.head.sha,
       // A deleted fork leaves head.repo null; that is not this repository.
       head_repo: data.head.repo?.full_name ?? '',
+      body: data.body ?? '',
     };
   }
 

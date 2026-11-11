@@ -39,7 +39,7 @@ describe('reapExpiredPreviews', () => {
     // Issue 7 is a Foundry task on this branch, so the way back is its issue.
     mock.issue = { number: 7, title: 'x', body: '', labels: [], html_url: '', state: 'open' };
     mock.commentsByNumber[7] = [{ id: 1, body: CLAIM, user: { login: 'foundry[bot]' }, created_at: '2026-11-10T07:00:00Z' } as GitHubComment];
-    mock.prs[9] = { number: 9, open: true, head: 'feature/7-x', base: 'integration', sha: 'cafe1234', head_repo: 'o/r' };
+    mock.prs[9] = { number: 9, open: true, head: 'feature/7-x', base: 'integration', sha: 'cafe1234', head_repo: 'o/r', body: '' };
 
     const reaped = await reapExpiredPreviews(config(), '/w', NOW);
 
