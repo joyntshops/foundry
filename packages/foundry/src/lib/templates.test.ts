@@ -8,6 +8,14 @@ describe('shipped templates', () => {
   it('finds the templates directory from src and dist alike', () => {
     expect(fs.existsSync(path.join(templatesDir(), 'foundry.yml'))).toBe(true);
     expect(fs.existsSync(path.join(templatesDir(), 'vercel-preview-url.sh'))).toBe(true);
+    expect(fs.existsSync(path.join(templatesDir(), 'skills', 'foundry', 'SKILL.md'))).toBe(true);
+  });
+
+  it('the skill teaches the control vocabulary and defers repo facts to docs/foundry.md', () => {
+    const skill = readTemplate(path.join('skills', 'foundry', 'SKILL.md'));
+    for (const cmd of ['@foundry go', '@foundry restart', '@foundry stop']) expect(skill).toContain(cmd);
+    expect(skill).toContain('docs/foundry.md');
+    expect(skill).toContain('writing-a-task.md');
   });
 
   it('the workflow template is valid YAML with every trigger Foundry needs', () => {

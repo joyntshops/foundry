@@ -52,7 +52,7 @@ Foundry is the orchestration layer, not the agent. It runs Claude Code, aider, o
 
 ## Quick start
 
-1. **Scaffold.** From a clone, run `npx @joynt/foundry init`. It writes `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, and an issue template, and creates the `state:*` and `mode:*` labels. Set `branches:` to the branches you already deploy from; nothing is renamed.
+1. **Scaffold.** From a clone, run `npx @joynt/foundry init`. It writes `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, an issue template, and a Claude Code skill (`.claude/skills/foundry/SKILL.md`), and creates the `state:*` and `mode:*` labels. Set `branches:` to the branches you already deploy from; nothing is renamed.
 2. **Identity.** Add `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` and [install the Foundry App](https://github.com/apps/joynt-foundry/installations/new) on the repository. That is the whole identity setup: no App of your own, no key. (An organization that must not depend on an outside endpoint runs `foundry setup-bot` instead; [Onboarding](docs/foundry/onboarding.md#3-identity) has both.)
 3. **Push** to the default branch. Foundry listens from there.
 4. **Go.** Open an issue, comment `@foundry go`, watch Actions → Foundry.

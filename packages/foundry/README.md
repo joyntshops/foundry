@@ -26,7 +26,7 @@ It needs Node 18 or later, git, and `gh` authenticated with `gh auth login`.
 npx @joynt/foundry init
 ```
 
-1. **Scaffold.** From a clone, `init` writes `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, and an issue template, and creates the `state:*` and `mode:*` labels. Set `branches:` to the branches you already deploy from; nothing is renamed.
+1. **Scaffold.** From a clone, `init` writes `.joynt-foundry.yml`, `.github/workflows/foundry.yml`, an issue template, and a Claude Code skill (`.claude/skills/foundry/SKILL.md`), and creates the `state:*` and `mode:*` labels. Set `branches:` to the branches you already deploy from; nothing is renamed.
 2. **Identity.** Add `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` and [install the Foundry App](https://github.com/apps/joynt-foundry/installations/new) on the repository. No App of your own, no key; an organization that must not depend on an outside endpoint runs `npx @joynt/foundry setup-bot` instead.
 3. **Push** to the default branch. Foundry listens from there.
 4. **Go.** Open an issue, comment `@foundry go`, and watch Actions → Foundry.

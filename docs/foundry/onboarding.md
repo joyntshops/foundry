@@ -9,13 +9,14 @@ cd your-repo
 npx @joynt/foundry init
 ```
 
-This writes three files and creates the labels:
+This writes four files and creates the labels:
 
 | File | What it is |
 |---|---|
 | `.joynt-foundry.yml` | Foundry's configuration. Project type is detected (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`) and `verify` is filled in. |
 | `.github/workflows/foundry.yml` | The workflow, from [the shipped template](../../packages/foundry/templates/foundry.yml), with your production branch in its PR filter. Existing files are never overwritten. |
 | `.github/ISSUE_TEMPLATE/foundry-task.md` | The issue template that gives the agent a developer-quality brief. |
+| `.claude/skills/foundry/SKILL.md` | A [Claude Code skill](../../packages/foundry/templates/skills/foundry/SKILL.md) that teaches a local Claude Code session to work through Foundry: write issues instead of changing code, draft the `@foundry` commands, review and approve the PRs. It reads repository-specific facts from `docs/foundry.md`, which you write. Delete it if you do not use Claude Code. |
 
 Labels: `state:*` (Foundry's status display, set only by Foundry) and `mode:*` (settings a human puts on an issue). `--clean-labels` also removes labels that are not Foundry's. To do all of this by hand instead, copy [example.joynt-foundry.yml](../../example.joynt-foundry.yml) and the workflow template, and create the labels listed in [Workflows](workflows.md#labels-are-status-and-settings-never-commands).
 
@@ -91,7 +92,7 @@ With neither the App installed nor the secrets set, the workflow still runs with
 
 ## 4. Push, prove, go
 
-Commit the three files and get them onto the **default branch**. GitHub starts `issue_comment`, `schedule`, and `workflow_dispatch` workflows from the default branch's copy of the file, and the job checks that branch out, so `.joynt-foundry.yml` is read from there too. On a repo that promotes `test` to `main`, Foundry is inert until the files reach `main`; merging them to `test` first loses nothing.
+Commit the files and get them onto the **default branch**. GitHub starts `issue_comment`, `schedule`, and `workflow_dispatch` workflows from the default branch's copy of the file, and the job checks that branch out, so `.joynt-foundry.yml` is read from there too. On a repo that promotes `test` to `main`, Foundry is inert until the files reach `main`; merging them to `test` first loses nothing.
 
 Before spending agent time, prove the wiring with a no-op. This works from any branch that has the files:
 
