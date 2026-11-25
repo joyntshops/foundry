@@ -2,6 +2,8 @@
 
 A Foundry task is a GitHub Issue. What the agent produces depends almost entirely on what the issue says, so this page covers what the agent sees, what a good brief contains, and the levers a human has before and during a run.
 
+A Claude Code session in a repository set up by `foundry init` has a skill (`.claude/skills/foundry/SKILL.md`) that applies this page when it writes issues for Foundry.
+
 ## What the agent sees
 
 At every launch Foundry gives the agent:

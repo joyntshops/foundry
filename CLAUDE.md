@@ -34,7 +34,8 @@ packages/foundry/src/
   lib/stores/file-store.ts   per-job cache of task state under ~/.joynt-foundry/
   backends/                  agent backends; `command` is the only type, fully generic
   lib/templates.ts           reads packages/foundry/templates/ (shipped with the package; `init` writes them into a repo)
-packages/foundry/templates/  foundry.yml (the workflow, single source; docs link it) and vercel-preview-url.sh
+packages/foundry/templates/  foundry.yml (the workflow, single source; docs link it), vercel-preview-url.sh, and
+                             skills/foundry/SKILL.md (the Claude Code skill `init` installs; no repo-specific facts in it)
 packages/broker/             the token broker behind the public Foundry App (AWS Lambda); core.ts is the
                              exchange, github.ts the App client, lambda.ts the adapter; template.yml and
                              README.md are Walter's deploy/rotation/kill-switch runbook. Walter deploys it.

@@ -172,6 +172,7 @@ export async function runInit(opts: { skipLabels?: boolean; cleanLabels?: boolea
   }
 
   writeIssueTemplate();
+  writeSkill();
   writeWorkflow(loadConfigSafe()?.branches?.production ?? 'main');
 
   // Auto-commit on empty repo so we have a HEAD for branch creation
@@ -310,4 +311,23 @@ function writeWorkflow(production: string): void {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, renderWorkflow(readTemplate('foundry.yml'), { production }), 'utf-8');
   log.success('Created .github/workflows/foundry.yml');
+}
+
+/** Where `init` installs the Claude Code skill, relative to the repo root. */
+export const SKILL_PATH = path.join('.claude', 'skills', 'foundry', 'SKILL.md');
+
+/**
+ * Install the Claude Code skill that teaches a session to work through Foundry
+ * (write issues, draft commands, review PRs). Never overwrites: a repo that has
+ * edited its copy keeps it.
+ */
+export function writeSkill(root: string = process.cwd()): void {
+  const file = path.join(root, SKILL_PATH);
+  if (fs.existsSync(file)) {
+    log.info(`${SKILL_PATH} already exists; left as is.`);
+    return;
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, readTemplate(path.join('skills', 'foundry', 'SKILL.md')), 'utf-8');
+  log.success(`Created ${SKILL_PATH}`);
 }
